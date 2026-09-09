@@ -1,0 +1,33 @@
+# Agentic workflow artifacts — working documents, never committed.
+# Mirrors the convention in the fly-controller repo.
+docs/superpowers/
+
+# Flutter / Dart
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# Android
+android/.gradle/
+android/local.properties
+android/app/debug/
+android/app/profile/
+android/app/release/
+*.jks
+key.properties
+
+# iOS
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+ios/Flutter/ephemeral/
+*.xcuserstate
+ios/Runner.xcworkspace/xcuserdata/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
