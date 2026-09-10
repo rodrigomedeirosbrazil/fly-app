@@ -4,6 +4,8 @@ import 'dart:io' show Platform;
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import 'android_host.dart';
+
 /// What the UI needs to know about the radio, without knowing about the radio.
 enum LinkStatus { idle, scanning, connecting, connected, disconnected, unauthorized }
 
@@ -28,6 +30,11 @@ class FlyControllerLink {
   /// 23, which caps a notification at 20 bytes and would truncate every frame.
   /// iOS negotiates 185 on its own and rejects this call.
   static const int desiredMtu = 247;
+
+  FlyControllerLink({AndroidHost? host}) : _host = host ?? const AndroidHost();
+
+  /// Only touched on Android. iOS never calls the channel.
+  final AndroidHost _host;
 
   final _statusController = StreamController<LinkStatus>.broadcast();
   final _payloadController = StreamController<List<int>>.broadcast();
@@ -60,6 +67,10 @@ class FlyControllerLink {
   /// Opens the OS settings page for this app. The only route back from a
   /// permanently refused Android permission.
   Future<void> openSettings() => openAppSettings();
+
+  /// The only route back from a location service switched off on API <= 30.
+  /// [openSettings] reaches the app's own page, which cannot toggle it.
+  Future<void> openLocationSettings() => _host.openLocationSettings();
 
   /// Scans for the controller and stays connected until [disconnect].
   ///
