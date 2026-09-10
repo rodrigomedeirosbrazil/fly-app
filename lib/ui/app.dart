@@ -20,7 +20,6 @@ class _FlyAppState extends State<FlyApp> {
     super.initState();
     // The pilot is not going to tap the screen mid-flight to keep it awake.
     WakelockPlus.enable();
-    _repo.start();
   }
 
   @override
@@ -63,6 +62,10 @@ class _FlyAppState extends State<FlyApp> {
             return ConnectionScreen(
               status: _repo.status,
               rejectedFrames: _repo.rejectedFrames,
+              // Deferring the connection to a tap also gives Android's
+              // permission dialog a reason the pilot has already seen.
+              onConnect: () => _repo.start(),
+              onCancel: () => _repo.stop(),
             );
           }
           return FlightScreen(frame: frame, stale: _repo.isStale);
