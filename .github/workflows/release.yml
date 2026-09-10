@@ -1,0 +1,164 @@
+# Builds the signed Android APK for a release tag and publishes it.
+#
+# iOS is deliberately absent. The app is signed with a free personal Apple ID,
+# which issues no distribution certificate, so a headless build cannot be
+# signed at all — and the resulting install would expire after 7 days anyway.
+# iOS ships from the Mac over a cable. See CLAUDE.md.
+name: release
+
+on:
+  push:
+    # Tags are AAAA-MM-DD.N — 2026-09-10.1. The pattern is strict on purpose:
+    # a mistyped tag must not start a build that produces a wrong versionCode.
+    tags:
+      - '2[0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].[0-9]*'
+
+permissions:
+  contents: write   # required to create the GitHub Release
+
+env:
+  FLUTTER_VERSION: '3.47.3'
+  # SHA-256 of the release signing certificate (CN=Aerovolt, O=Medeirostec).
+  # The release build falls back to DEBUG keys when key.properties is missing,
+  # silently and successfully — so a mistyped or empty secret would otherwise
+  # publish an APK that no pilot can install over the copy they already have.
+  # This fingerprint is what turns that silent fallback into a failed job.
+  SIGNING_CERT_SHA256: 'a06f34a6c39d6394c7e04c611c6d63874cafc89672ca0818764f37a7dd34768b'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # --- version ------------------------------------------------------
+      # versionName is the tag verbatim. versionCode must be a monotonically
+      # increasing integer, so the tag is flattened to YYYYMMDDNN. That stays
+      # under Android's 2_100_000_000 ceiling until the year 2100 and allows
+      # 99 releases in one day, which is why N is capped below.
+      - name: Derive version from tag
+        id: version
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          DATE="${TAG%.*}"
+          N="${TAG##*.}"
+          if [ "$N" -gt 99 ]; then
+            echo "::error::N=$N exceeds 99; versionCode would stop increasing monotonically."
+            exit 1
+          fi
+          CODE="$(echo "$DATE" | tr -d '-')$(printf '%02d' "$N")"
+          echo "name=$TAG"  >> "$GITHUB_OUTPUT"
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "versionName=$TAG  versionCode=$CODE"
+
+      # --- toolchain ----------------------------------------------------
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # compileSdk is 37 with compileSdkMinor 0. Google publishes that platform
+      # only as `platforms;android-37.0`; the runner's preinstalled SDK does not
+      # carry it, and a bare android-37 makes AGP fail on a healthy SDK.
+      - uses: android-actions/setup-android@v3
+      - name: Install Android platform 37.0
+        run: sdkmanager --install "platforms;android-37.0" "build-tools;36.0.0"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          # Pinned, not `stable`: an upstream Flutter release must never change
+          # what a re-run of an old tag produces.
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      # --- gates --------------------------------------------------------
+      # Seconds, and the parser suite is where correctness lives. A tag that
+      # fails these must not become an APK in someone's hands.
+      - run: flutter analyze
+      - run: flutter test
+
+      # --- signing ------------------------------------------------------
+      - name: Restore the release keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for v in KEYSTORE_BASE64 STORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [ -z "${!v}" ]; then
+              echo "::error::secret $v is empty — refusing to build a debug-signed release."
+              exit 1
+            fi
+          done
+          KS="${RUNNER_TEMP}/aerovolt-upload.jks"
+          echo "$KEYSTORE_BASE64" | base64 -d > "$KS"
+          # android/key.properties is gitignored and read by app/build.gradle.kts
+          # exactly as it is on the developer's machine; no Gradle change needed.
+          cat > android/key.properties <<EOF
+          storeFile=$KS
+          storePassword=$STORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASSWORD
+          EOF
+
+      # --- build --------------------------------------------------------
+      # One universal APK, not --split-per-abi. These go to pilots by hand, and
+      # three files is three chances to install the wrong one.
+      - name: Build release APK
+        run: |
+          flutter build apk --release \
+            --build-name='${{ steps.version.outputs.name }}' \
+            --build-number='${{ steps.version.outputs.code }}'
+
+      - name: Verify the APK is signed with the release key
+        run: |
+          set -euo pipefail
+          APKSIGNER="$(find "$ANDROID_SDK_ROOT/build-tools" -name apksigner | sort -V | tail -1)"
+          ACTUAL="$("$APKSIGNER" verify --print-certs \
+            build/app/outputs/flutter-apk/app-release.apk \
+            | grep -i 'SHA-256 digest' | head -1 | awk '{print $NF}')"
+          echo "certificate: $ACTUAL"
+          if [ "$ACTUAL" != "$SIGNING_CERT_SHA256" ]; then
+            echo "::error::APK is NOT signed with the release key (expected $SIGNING_CERT_SHA256)."
+            exit 1
+          fi
+
+      - name: Check the version reached the manifest
+        run: |
+          set -euo pipefail
+          AAPT="$(find "$ANDROID_SDK_ROOT/build-tools" -name aapt2 | sort -V | tail -1)"
+          "$AAPT" dump badging build/app/outputs/flutter-apk/app-release.apk | head -1
+
+      # --- publish ------------------------------------------------------
+      - name: Stage the artifact
+        id: artifact
+        run: |
+          set -euo pipefail
+          OUT="aerovolt-${{ steps.version.outputs.name }}.apk"
+          cp build/app/outputs/flutter-apk/app-release.apk "$OUT"
+          echo "sha256=$(sha256sum "$OUT" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "path=$OUT" >> "$GITHUB_OUTPUT"
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.artifact.outputs.path }}
+          name: ${{ steps.version.outputs.name }}
+          body: |
+            APK Android assinado, para instalar direto no aparelho.
+            Não expira — diferente da build de iOS.
+
+            Instalação por cima de uma versão anterior:
+
+                adb install -r ${{ steps.artifact.outputs.path }}
+
+            | | |
+            |---|---|
+            | versionName | `${{ steps.version.outputs.name }}` |
+            | versionCode | `${{ steps.version.outputs.code }}` |
+            | SHA-256 | `${{ steps.artifact.outputs.sha256 }}` |
