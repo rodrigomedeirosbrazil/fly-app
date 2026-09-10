@@ -66,6 +66,7 @@ class _FlyAppState extends State<FlyApp> {
               // permission dialog a reason the pilot has already seen.
               onConnect: () => _repo.start(),
               onCancel: () => _repo.stop(),
+              onOpenSettings: () => _repo.openSettings(),
             );
           }
           return FlightScreen(frame: frame, stale: _repo.isStale);

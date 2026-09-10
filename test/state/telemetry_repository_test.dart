@@ -20,8 +20,12 @@ class FakeLink extends FlyControllerLink {
   @override
   Stream<List<int>> get payloads => _payloads.stream;
 
+  /// Set before calling start() to simulate the pilot refusing the Android
+  /// runtime permission.
+  bool deniesPermissions = false;
+
   @override
-  Future<bool> ensurePermissions() async => true;
+  Future<bool> ensurePermissions() async => !deniesPermissions;
 
   @override
   Future<void> connect() async => _status.add(LinkStatus.connected);
@@ -91,5 +95,25 @@ void main() {
 
     expect(repo.frame, isNull);
     expect(repo.isStale, isFalse);
+  });
+
+  test('a refused permission is reported, not swallowed', () async {
+    link.deniesPermissions = true;
+
+    await repo.start();
+
+    expect(repo.status, LinkStatus.unauthorized);
+  });
+
+  test('granting it afterwards clears the refusal', () async {
+    link.deniesPermissions = true;
+    await repo.start();
+    expect(repo.status, LinkStatus.unauthorized);
+
+    link.deniesPermissions = false;
+    await repo.start();
+    await pumpEventQueue();
+
+    expect(repo.status, LinkStatus.connected);
   });
 }

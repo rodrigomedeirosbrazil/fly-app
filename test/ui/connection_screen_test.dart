@@ -8,6 +8,7 @@ Widget wrap(
   int rejectedFrames = 0,
   VoidCallback? onConnect,
   VoidCallback? onCancel,
+  VoidCallback? onOpenSettings,
 }) =>
     MaterialApp(
       home: ConnectionScreen(
@@ -15,6 +16,7 @@ Widget wrap(
         rejectedFrames: rejectedFrames,
         onConnect: onConnect ?? () {},
         onCancel: onCancel ?? () {},
+        onOpenSettings: onOpenSettings ?? () {},
       ),
     );
 
@@ -89,6 +91,32 @@ void main() {
     });
   });
 
+  group('a refused permission', () {
+    // Android can refuse permanently, in which case asking again does
+    // nothing and the only way out of the app is Settings.
+    testWidgets('says what happened and offers Settings', (tester) async {
+      await tester.pumpWidget(wrap(LinkStatus.unauthorized));
+
+      expect(find.text('Permissão de Bluetooth negada'), findsOneWidget);
+      expect(find.text('Abrir Ajustes'), findsOneWidget);
+      // Not a connection attempt: no spinner, and retrying is still offered.
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(find.text('Conectar'), findsOneWidget);
+    });
+
+    testWidgets('the Settings button is wired', (tester) async {
+      var opened = 0;
+      await tester.pumpWidget(
+        wrap(LinkStatus.unauthorized, onOpenSettings: () => opened++),
+      );
+
+      await tester.tap(find.text('Abrir Ajustes'));
+      await tester.pump();
+
+      expect(opened, 1);
+    });
+  });
+
   group('layout holds at real device sizes', () {
     // A widget test fails on RenderFlex overflow, so pumping at each size is
     // the assertion. Same four sizes as flight_screen_test.dart. Both modes
@@ -99,7 +127,11 @@ void main() {
       Size(852, 393),
       Size(1280, 800),
     ]) {
-      for (final status in const [LinkStatus.idle, LinkStatus.scanning]) {
+      for (final status in const [
+        LinkStatus.idle,
+        LinkStatus.scanning,
+        LinkStatus.unauthorized,
+      ]) {
         testWidgets('${size.width.toInt()}x${size.height.toInt()} ${status.name}',
             (tester) async {
           tester.view.physicalSize = size;

@@ -5,7 +5,7 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 /// What the UI needs to know about the radio, without knowing about the radio.
-enum LinkStatus { idle, scanning, connecting, connected, disconnected }
+enum LinkStatus { idle, scanning, connecting, connected, disconnected, unauthorized }
 
 /// Owns the BLE conversation with the controller.
 ///
@@ -51,8 +51,18 @@ class FlyControllerLink {
     return results.values.every((s) => s.isGranted);
   }
 
+  /// Opens the OS settings page for this app. The only route back from a
+  /// permanently refused Android permission.
+  Future<void> openSettings() => openAppSettings();
+
   /// Scans for the controller and stays connected until [disconnect].
+  ///
+  /// Reentrant calls are ignored. Between the tap and the first status there
+  /// is a whole await — on Android, a permission dialog — during which the
+  /// button is still live, and two overlapping attempts would race for
+  /// [_device] and leak whichever lost.
   Future<void> connect() async {
+    if (_wantConnection) return;
     _wantConnection = true;
     _attempt = 0;
     await _attemptConnection();
@@ -60,6 +70,13 @@ class FlyControllerLink {
 
   Future<void> disconnect() async {
     _wantConnection = false;
+    // A scan started by an attempt that is still in flight keeps the radio
+    // busy for the rest of its 10 s timeout otherwise.
+    try {
+      await FlutterBluePlus.stopScan();
+    } catch (_) {
+      // Not scanning. Nothing to stop.
+    }
     await _teardown();
     _statusController.add(LinkStatus.idle);
   }
@@ -86,10 +103,25 @@ class FlyControllerLink {
         await device.requestMtu(desiredMtu);
       }
 
+      // connect() can outlive a cancel: the OS-level connection completes
+      // even though the pilot already tapped Cancelar. Without this the
+      // method goes on to subscribe and emit `connected` after the screen
+      // has returned to rest, leaving a live subscription the app does not
+      // know about.
+      if (!_wantConnection) {
+        await _teardown();
+        return;
+      }
+
       final characteristic = await _findTxCharacteristic(device);
       if (characteristic == null) {
         await _teardown();
         return _scheduleRetry();
+      }
+
+      if (!_wantConnection) {
+        await _teardown();
+        return;
       }
 
       await characteristic.setNotifyValue(true);

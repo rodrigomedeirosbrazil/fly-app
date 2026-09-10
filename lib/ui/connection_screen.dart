@@ -20,6 +20,7 @@ class ConnectionScreen extends StatelessWidget {
     required this.rejectedFrames,
     required this.onConnect,
     required this.onCancel,
+    required this.onOpenSettings,
   });
 
   final LinkStatus status;
@@ -31,9 +32,15 @@ class ConnectionScreen extends StatelessWidget {
   final VoidCallback onConnect;
   final VoidCallback onCancel;
 
+  /// Opens the OS settings page for the app. Android can refuse the Bluetooth
+  /// permission permanently, and then this is the only way back.
+  final VoidCallback onOpenSettings;
+
   /// [FlyControllerLink.connect] retries forever with a backoff, so there is
-  /// no failure state to render — everything that is not idle is "trying".
-  bool get _trying => status != LinkStatus.idle;
+  /// no failure state to render. A refused permission is the exception: it is
+  /// not an attempt, so it keeps the Conectar button.
+  bool get _trying =>
+      status != LinkStatus.idle && status != LinkStatus.unauthorized;
 
   @override
   Widget build(BuildContext context) {
@@ -45,6 +52,7 @@ class ConnectionScreen extends StatelessWidget {
       LinkStatus.connecting => 'Conectando…',
       LinkStatus.connected => 'Aguardando telemetria…',
       LinkStatus.disconnected => 'Conexão perdida. Tentando de novo…',
+      LinkStatus.unauthorized => 'Permissão de Bluetooth negada',
     };
 
     return Scaffold(
@@ -81,10 +89,17 @@ class ConnectionScreen extends StatelessWidget {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: theme.textTheme.bodyMedium?.copyWith(
-                                color: theme.colorScheme.onSurfaceVariant,
+                                color: status == LinkStatus.unauthorized
+                                    ? theme.colorScheme.error
+                                    : theme.colorScheme.onSurfaceVariant,
                               ),
                             ),
                     ),
+                    if (status == LinkStatus.unauthorized)
+                      TextButton(
+                        onPressed: onOpenSettings,
+                        child: const Text('Abrir Ajustes'),
+                      ),
                     if (rejectedFrames > 0) ...[
                       const SizedBox(height: 12),
                       Text(
