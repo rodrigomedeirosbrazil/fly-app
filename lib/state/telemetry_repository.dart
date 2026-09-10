@@ -59,7 +59,15 @@ class TelemetryRepository extends ChangeNotifier {
   void _onStatus(LinkStatus s) {
     _status = s;
     if (s == LinkStatus.disconnected || s == LinkStatus.idle) {
+      // A half-received line cannot be completed across a reconnection.
       _assembler.reset();
+    }
+    if (s == LinkStatus.idle) {
+      // Only an explicit stop() forgets the last frame. A drop must keep it:
+      // isStale is defined by _last surviving, and it is what stops the app
+      // from replacing the instrument panel with the connection screen while
+      // the pilot is in the air. Nothing stale reaches the UI regardless —
+      // frameAt already withholds anything older than staleAfter.
       _health.reset();
     }
     notifyListeners();
