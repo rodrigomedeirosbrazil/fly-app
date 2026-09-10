@@ -4,6 +4,8 @@ import 'package:fly_app/protocol/xctod_frame.dart';
 import 'package:fly_app/ui/flight_screen.dart';
 import 'package:fly_app/ui/widgets/dial.dart';
 
+import 'navigator_utils.dart';
+
 XctodFrame frame({
   double? voltage = 50.4,
   int? motorTempC = 61,
@@ -250,6 +252,52 @@ void main() {
       // The band stack never changes shape, so the handle exists even with no
       // data behind it.
       expect(find.byTooltip('Mais dados'), findsOneWidget);
+    });
+  });
+
+  group('the Android back button', () {
+    // There is no iOS counterpart, and the overlay is a Stack child rather
+    // than a route — deliberately, so its readings keep updating — so there
+    // is nothing for back to pop and it popped the app instead.
+    testWidgets('closes the overlay instead of leaving', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
+
+      await tester.tap(find.byTooltip('Mais dados'));
+      await tester.pumpAndSettle();
+      // 4200 is the rpm, which only the overlay shows.
+      expect(find.text('4200'), findsOneWidget);
+
+      await simulateSystemBack();
+      await tester.pumpAndSettle();
+
+      expect(find.text('4200'), findsNothing);
+      // Still mounted: back closed the overlay, it did not pop the screen.
+      expect(find.byType(FlightScreen), findsOneWidget);
+    });
+
+    testWidgets('does nothing with the overlay closed', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
+
+      await simulateSystemBack();
+      await tester.pumpAndSettle();
+
+      // Leaving mid-flight is home or the app switcher, deliberately.
+      expect(find.byType(FlightScreen), findsOneWidget);
+      expect(find.byTooltip('Mais dados'), findsOneWidget);
+    });
+
+    testWidgets('a second back with the overlay already closed still holds',
+        (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
+
+      await tester.tap(find.byTooltip('Mais dados'));
+      await tester.pumpAndSettle();
+      await simulateSystemBack();
+      await tester.pumpAndSettle();
+      await simulateSystemBack();
+      await tester.pumpAndSettle();
+
+      expect(find.byType(FlightScreen), findsOneWidget);
     });
   });
 

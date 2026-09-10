@@ -39,35 +39,46 @@ class _FlightScreenState extends State<FlightScreen> {
   Widget build(BuildContext context) {
     final f = widget.frame;
 
-    return Scaffold(
-      body: SafeArea(
-        child: Stack(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
-              child: Column(
-                children: [
-                  _StatusRow(frame: f, stale: widget.stale),
-                  const SizedBox(height: 8),
-                  Expanded(child: _BatteryCard(frame: f)),
-                  const SizedBox(height: 8),
-                  _InstrumentRow(frame: f),
-                  const SizedBox(height: 8),
-                  _ThrottleCard(frame: f),
-                  const SizedBox(height: 8),
-                  _DrawerBar(onTap: () => setState(() => _drawerOpen = true)),
-                ],
+    // Back is the one input Android has and iOS does not. The overlay below
+    // is a Stack child rather than a route, so there is nothing for back to
+    // pop and unguarded it pops the app — one stray tap closing the
+    // instrument panel in flight. canPop stays false with the overlay closed
+    // too: leaving mid-flight is home or the app switcher, deliberately.
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (_drawerOpen) setState(() => _drawerOpen = false);
+      },
+      child: Scaffold(
+        body: SafeArea(
+          child: Stack(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
+                child: Column(
+                  children: [
+                    _StatusRow(frame: f, stale: widget.stale),
+                    const SizedBox(height: 8),
+                    Expanded(child: _BatteryCard(frame: f)),
+                    const SizedBox(height: 8),
+                    _InstrumentRow(frame: f),
+                    const SizedBox(height: 8),
+                    _ThrottleCard(frame: f),
+                    const SizedBox(height: 8),
+                    _DrawerBar(onTap: () => setState(() => _drawerOpen = true)),
+                  ],
+                ),
               ),
-            ),
-            // In the tree, not a pushed route. A modal route builds once from
-            // the frame captured when it opened and never sees another, so the
-            // readings behind it silently freeze at 1 Hz.
-            if (_drawerOpen)
-              _SecondaryData(
-                frame: f,
-                onClose: () => setState(() => _drawerOpen = false),
-              ),
-          ],
+              // In the tree, not a pushed route. A modal route builds once
+              // from the frame captured when it opened and never sees
+              // another, so the readings behind it silently freeze at 1 Hz.
+              if (_drawerOpen)
+                _SecondaryData(
+                  frame: f,
+                  onClose: () => setState(() => _drawerOpen = false),
+                ),
+            ],
+          ),
         ),
       ),
     );
