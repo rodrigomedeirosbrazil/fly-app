@@ -93,3 +93,14 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+# Regenerate with: dart run flutter_launcher_icons
+# Masters come from tool/generate_icon_masters.py — edit those, not the output.
+flutter_launcher_icons:
+  ios: true
+  image_path: "tool/icons/icon_ios.png"
+  remove_alpha_ios: true
+  android: true
+  image_path_android: "tool/icons/icon_ios.png"
+  adaptive_icon_background: "#0D1117"
+  adaptive_icon_foreground: "tool/icons/icon_android_foreground.png"
