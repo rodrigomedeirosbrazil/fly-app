@@ -26,7 +26,8 @@ So it is a ladder.
 ### Phase 1 — read-only flight instrument · **done**
 
 Consumes the `$XCTOD` sentence the controller already broadcasts for XCTrack.
-**Zero firmware changes.** Shipped and running on an iPhone 14 Pro.
+**Zero firmware changes.** Shipped and running on an iPhone 14 Pro. Android
+builds as a signed APK from the same source; not yet run on a phone.
 
 The cheapest rung that answers the two questions gating every later one: does
 the radio hold up with a phone connected, and is the app worth building a
@@ -67,7 +68,8 @@ what makes the flash arithmetic work overall: phase 4 returns more than phases
 |---|---|
 | **Flutter**, not React Native | `flutter_blue_plus` moves payloads as binary `Uint8List` over the platform channel; `react-native-ble-plx` marshals them as base64 strings across the JS bridge, which is a real cost for the ~3,600 chunked writes a 1.8 MB BLE OTA needs in phase 3. `CustomPainter` also maps onto the SVG dials the web panel already had. |
 | **Separate repo** | Independent CI, versioning and toolchain, following the `fly-throttle` precedent. Accepted cost: the `$XCTOD` contract exists twice. |
-| **Sideload**, no App Store | Android APK direct; iOS built locally with a free Apple ID. No $99/yr account until someone other than the author is flying with it. |
+| **Sideload**, no App Store | Android APK direct; iOS built locally with a free Apple ID. No $99/yr account until someone other than the author is flying with it. An APK expires never, unlike the 7-day iOS build, so Android is the cheaper side to hand to someone. |
+| **Google Play deferred**, and it is not free to re-enter | The 2012 developer account was **closed on 2024-03-14 for inactivity**; the US$ 25 fee is not refundable and publishing needs a new account. A new *personal* account must run a closed test with 12 testers for 14 days before production. An *organization* account skips that but needs a legal entity — and declares a for-profit, which is the FlutterBluePlus Section 3 trigger at Starter (US$ 2,999) instead of Inventor (US$ 999). None of it is required for sideloading. |
 | **No firmware change in phase 1** | Maximum information per unit of risk. |
 | **Design for XCTrack coexistence**, decide later | Whether the app runs alongside XCTrack or replaces it is undecided; phase 1 leaves `Xctod` untouched so both stay possible. |
 
@@ -78,11 +80,19 @@ at the same time, and untested with the ESP-NOW remote throttle also active —
 that last one is the worst case for the single antenna. If XCTrack can be
 retired, `Xctod` goes with it and phase 2's flash problem shrinks.
 
-**Does MTU negotiation work on Android?** Untested — there is no Android SDK on
-the dev machine yet, and iOS negotiates 185 on its own so the iPhone proves
-nothing here. This is the specific failure phase 1 was built to measure and it
-has not been measured. The discarded-frame counter on the connection screen is
-the instrument for it.
+**Does MTU negotiation work on Android?** Still unmeasured, but no longer
+blocked. The Android SDK is installed, `flutter doctor` is clean and a signed
+APK builds; what is missing is a phone with USB debugging enabled. iOS
+negotiates 185 on its own, so the iPhone proves nothing here. The
+discarded-frame counter on the connection screen remains the instrument: a
+non-zero count with no telemetry is an MTU that never grew past 23 and is
+truncating every ~90-byte sentence.
+
+**Does the app work on Android 7–11 at all?** The permission path for API ≤ 30
+is covered by a table test and by nothing else. The intended test device is a
+Galaxy A12 (SM-A125M), which shipped on Android 10 and updates to 12 — at API
+29 or 30 it exercises that branch on real hardware, at 31 it does not and the
+branch stays unit-tested only. Its actual level has not been read yet.
 
 **Does phase 2 extend the NUS service or add a second one?**
 

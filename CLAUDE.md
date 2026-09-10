@@ -13,11 +13,25 @@ fly-controller, and only listens.
 **Framework:** Flutter 3.47.3 (stable) · **Dart SDK:** ^3.13.3
 
 ```bash
-flutter test                  # 60 tests, no hardware needed
+flutter test                  # 119 tests, no hardware needed
 flutter analyze               # must be clean
 flutter build ios --release   # needs Xcode
-flutter build apk --release   # needs the Android SDK (not installed yet)
+flutter build apk --release   # signed APK, ~45 MB (all three ABIs)
+flutter build apk --debug     # validates the Android config with no device
 ```
+
+`flutter build apk --debug` is worth knowing: it is the cheapest way to
+exercise the manifest merger and the Kotlin compile, and it needs no phone.
+`flutter analyze` and `flutter test` touch none of that.
+
+Handing the APK to another pilot:
+
+```bash
+adb install -r build/app/outputs/flutter-apk/app-release.apk
+```
+
+Unlike the iOS build, **an Android APK does not expire.** Whoever receives it
+keeps a working copy indefinitely.
 
 Installing on a connected iPhone:
 
@@ -84,14 +98,16 @@ fly-controller and fly-throttle.
 lib/
 ├── protocol/   xctod_frame.dart · xctod_parser.dart · line_assembler.dart
 ├── state/      link_health.dart · telemetry_repository.dart
-├── ble/        fly_controller_link.dart
+│               ble_permission_policy.dart
+├── ble/        fly_controller_link.dart · android_host.dart
 └── ui/         app.dart · connection_screen.dart · flight_screen.dart
                 widgets/dial.dart
 ```
 
 The layering is the point, and it is worth preserving:
 
-- **`protocol/`** and **`state/link_health.dart`** import nothing from
+- **`protocol/`**, **`state/link_health.dart`** and
+  **`state/ble_permission_policy.dart`** import nothing from
   `package:flutter`. They are the Dart analogue of the firmware's host-testable
   headers (`ThrottleSignalLogic.h`, `PowerAlertLogic.h`): pure decision logic,
   fully tested in milliseconds with no device attached. Do not break this.
@@ -222,9 +238,15 @@ The parser suite is the real safety net: a corpus of real sentences plus
 truncated lines, wrong field counts, an empty field in every position, every
 disarm code, both motor-temp sources. It needs no hardware and runs instantly.
 
+`test/state/ble_permission_policy_test.dart` is the Android counterpart: the
+API ≤ 30 permission branch cannot be reached on a modern test phone, so the
+table is the only thing that exercises it. `test/ble/android_host_test.dart`
+mocks the platform channel, so even the seam is covered without a device.
+
 What tests cannot cover, and must be checked on a device: MTU negotiation on
-Android, and coexistence with XCTrack connected at the same time. Both are open
-— see [docs/ROADMAP.md](docs/ROADMAP.md).
+Android, coexistence with XCTrack connected at the same time, and the
+permission dialogs actually appearing. All are open — see
+[docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Conventions
 
@@ -235,10 +257,69 @@ Android, and coexistence with XCTrack connected at the same time. Both are open
 - `docs/superpowers/` (specs and plans) is gitignored working material. Durable
   reasoning belongs in this file, in `docs/ROADMAP.md`, or in a commit message.
 
+## Android
+
+`minSdk` is **24**, and it is a floor rather than a preference. Flutter 3.47
+(`gradle_utils.dart`), `permission_handler_android` and
+`shared_preferences_android` each declare 24, so 23 fails the manifest merger
+and `flutter install` refuses the device outright. The cost is Android 6
+hardware — a Galaxy S5 tops out at API 23, one level short, and there is no
+cheap way around it.
+
+`compileSdk` is **37 with `compileSdkMinor = 0`**, pinned for every module in
+`android/build.gradle.kts`. `permission_handler_android` needs API 37
+(`VERSION_CODES.CINNAMON_BUN`, `ACCESS_LOCAL_NETWORK`), but Google publishes
+that platform only as `platforms;android-37.0`, and a bare `compileSdk = 37`
+makes AGP look for the hash `android-37` and fail on a healthy SDK. The block
+must sit **above** `evaluationDependsOn(":app")`, which forces subproject
+evaluation — an `afterEvaluate` registered after it throws.
+
+### A BLE scan below API 31 is a location capability
+
+`ACCESS_FINE_LOCATION` is declared with `maxSdkVersion="30"` and requested at
+runtime only there, because `neverForLocation` on `BLUETOOTH_SCAN` replaces it
+from 31. **Both halves fail silently if you get them wrong**, in opposite
+directions:
+
+- Ask for too little on API ≤ 30 and `permission_handler` reports
+  `bluetoothScan` as *granted* — below 31 it maps to no runtime permission at
+  all and only checks the manifest — so no dialog appears and `startScan`
+  returns an empty list forever.
+- Ask for location on API 31+, where the capped permission has been stripped
+  by the OS, and an empty name list comes back as `DENIED`, so the app claims
+  a refusal that never happened.
+
+That is why `lib/state/ble_permission_policy.dart` is pure and table-tested at
+24/26/28/29/30/31/33/36: the API ≤ 30 branch is the one the available test
+device does not run, so the table is the only thing keeping it correct. The
+runtime API level comes from a two-method channel in `MainActivity.kt` —
+`device_info_plus` would be a fifth dependency, on every platform, to read one
+integer.
+
+`bluetoothOff` and `locationOff` are link statuses for the same reason: each
+needs something different from the pilot, and all three otherwise look
+identical from outside — a scan that finds nothing.
+
+### Back does not leave the flight screen
+
+It closes the secondary-data overlay, which is a `Stack` child rather than a
+route and therefore has no route for back to pop; unguarded, back popped the
+app. `canPop` stays false with the overlay closed too — leaving mid-flight is
+home or the app switcher, deliberately.
+
+### Signing
+
+Release builds are signed from a gitignored `android/key.properties` pointing
+at a keystore outside the repo, falling back to debug keys when it is absent
+so a fresh clone still builds. **The key is what lets an APK install over the
+copy a pilot already has**; a different key means uninstall first, and the
+stored pack/per-cell preference goes with it. Losing it means every user
+reinstalls. Generated in Play upload-key form in case that is ever needed.
+
 ## iOS
 
 Signed with a **free personal Apple ID** (team `KP44BA9VNZ`, bundle
-`com.rodrigomedeiros.flyApp`), so:
+`br.com.medeirostec.aerovolt`), so:
 
 - **Builds expire after 7 days** and must be reinstalled.
 - The device needs **Developer Mode** (Settings → Privacy & Security). The menu
@@ -256,9 +337,19 @@ Wireless installs work, but pairing requires one USB connection first
 
 `flutter_blue_plus` 2.3.12 requires a `license` argument on `connect()`. It is
 set to `License.nonprofit`, which covers personal, nonprofit and educational
-use. **Commercial distribution requires `License.commercial`, a paid licence.**
+use. **Commercial use requires `License.commercial`, a paid licence.**
 If this app is ever sold, bundled with a controller sold for profit, or shipped
 by a company, that has to be dealt with first.
+
+The licence (FlutterBluePlus License v1.5, in the package's `LICENSE`) turns on
+**for-profit use and nothing else** — it says nothing about distribution or how
+many people receive the app, so handing free APKs to other pilots stays inside
+the free tier. Section 3 covers "commercial use by individuals" too, at
+US$ 999 one-time for the Inventor tier on the payment portal; note that tier is
+absent from the licence text, which lists only Starter (US$ 2,999) upward.
+Section 1.4 also permits a **build-time** telemetry ping carrying the package
+name, app name and version — nothing from end users, and it does not reach the
+shipped app.
 
 ## What is deliberately absent
 
