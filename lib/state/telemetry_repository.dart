@@ -65,6 +65,8 @@ class TelemetryRepository extends ChangeNotifier {
 
   Future<void> openSettings() => _link.openSettings();
 
+  Future<void> openLocationSettings() => _link.openLocationSettings();
+
   void _onStatus(LinkStatus s) {
     _status = s;
     if (s == LinkStatus.disconnected || s == LinkStatus.idle) {

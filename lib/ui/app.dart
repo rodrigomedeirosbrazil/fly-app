@@ -67,6 +67,7 @@ class _FlyAppState extends State<FlyApp> {
               onConnect: () => _repo.start(),
               onCancel: () => _repo.stop(),
               onOpenSettings: () => _repo.openSettings(),
+              onOpenLocationSettings: () => _repo.openLocationSettings(),
             );
           }
           return FlightScreen(frame: frame, stale: _repo.isStale);

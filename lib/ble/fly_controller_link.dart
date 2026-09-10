@@ -7,7 +7,19 @@ import 'package:permission_handler/permission_handler.dart';
 import 'android_host.dart';
 
 /// What the UI needs to know about the radio, without knowing about the radio.
-enum LinkStatus { idle, scanning, connecting, connected, disconnected, unauthorized }
+///
+/// The last three are preconditions the pilot has to fix rather than attempts
+/// in progress: they keep the Conectar button and never show a spinner.
+enum LinkStatus {
+  idle,
+  scanning,
+  connecting,
+  connected,
+  disconnected,
+  unauthorized,
+  bluetoothOff,
+  locationOff,
+}
 
 /// Owns the BLE conversation with the controller.
 ///

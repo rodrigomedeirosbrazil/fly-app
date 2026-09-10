@@ -21,6 +21,7 @@ class ConnectionScreen extends StatelessWidget {
     required this.onConnect,
     required this.onCancel,
     required this.onOpenSettings,
+    required this.onOpenLocationSettings,
   });
 
   final LinkStatus status;
@@ -36,11 +37,20 @@ class ConnectionScreen extends StatelessWidget {
   /// permission permanently, and then this is the only way back.
   final VoidCallback onOpenSettings;
 
+  /// Opens the system location settings. On API <= 30 a BLE scan needs the
+  /// location service on, and the app's own settings page cannot switch it.
+  final VoidCallback onOpenLocationSettings;
+
   /// [FlyControllerLink.connect] retries forever with a backoff, so there is
-  /// no failure state to render. A refused permission is the exception: it is
-  /// not an attempt, so it keeps the Conectar button.
-  bool get _trying =>
-      status != LinkStatus.idle && status != LinkStatus.unauthorized;
+  /// no failure state to render. The preconditions are the exception: none of
+  /// them is an attempt, so they keep the Conectar button.
+  bool get _trying => status != LinkStatus.idle && !_blocked;
+
+  /// Something the pilot has to fix before a scan can return anything.
+  bool get _blocked =>
+      status == LinkStatus.unauthorized ||
+      status == LinkStatus.bluetoothOff ||
+      status == LinkStatus.locationOff;
 
   @override
   Widget build(BuildContext context) {
@@ -53,6 +63,8 @@ class ConnectionScreen extends StatelessWidget {
       LinkStatus.connected => 'Aguardando telemetria…',
       LinkStatus.disconnected => 'Conexão perdida. Tentando de novo…',
       LinkStatus.unauthorized => 'Permissão de Bluetooth negada',
+      LinkStatus.bluetoothOff => 'Bluetooth desligado',
+      LinkStatus.locationOff => 'Localização desligada',
     };
 
     return Scaffold(
@@ -89,16 +101,24 @@ class ConnectionScreen extends StatelessWidget {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: theme.textTheme.bodyMedium?.copyWith(
-                                color: status == LinkStatus.unauthorized
+                                color: _blocked
                                     ? theme.colorScheme.error
                                     : theme.colorScheme.onSurfaceVariant,
                               ),
                             ),
                     ),
+                    // Bluetooth off gets no button: the pilot flips the
+                    // adapter from the shade, and the app's own settings page
+                    // cannot toggle it either.
                     if (status == LinkStatus.unauthorized)
                       TextButton(
                         onPressed: onOpenSettings,
                         child: const Text('Abrir Ajustes'),
+                      ),
+                    if (status == LinkStatus.locationOff)
+                      TextButton(
+                        onPressed: onOpenLocationSettings,
+                        child: const Text('Abrir Localização'),
                       ),
                     if (rejectedFrames > 0) ...[
                       const SizedBox(height: 12),

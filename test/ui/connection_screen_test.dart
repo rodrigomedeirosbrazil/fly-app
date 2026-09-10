@@ -9,6 +9,7 @@ Widget wrap(
   VoidCallback? onConnect,
   VoidCallback? onCancel,
   VoidCallback? onOpenSettings,
+  VoidCallback? onOpenLocationSettings,
 }) =>
     MaterialApp(
       home: ConnectionScreen(
@@ -17,6 +18,7 @@ Widget wrap(
         onConnect: onConnect ?? () {},
         onCancel: onCancel ?? () {},
         onOpenSettings: onOpenSettings ?? () {},
+        onOpenLocationSettings: onOpenLocationSettings ?? () {},
       ),
     );
 
@@ -117,6 +119,56 @@ void main() {
     });
   });
 
+  group('a precondition the pilot has to fix', () {
+    // Neither of these was a state before. A disabled adapter meant a mute
+    // retry loop on iOS, and below API 31 permission_handler reported
+    // "denied" for a Bluetooth that was merely off.
+    testWidgets('Bluetooth off says so and still offers Conectar',
+        (tester) async {
+      await tester.pumpWidget(wrap(LinkStatus.bluetoothOff));
+
+      expect(find.text('Bluetooth desligado'), findsOneWidget);
+      // Not an attempt: no spinner, and the door stays open.
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(find.text('Conectar'), findsOneWidget);
+      expect(find.text('Cancelar'), findsNothing);
+    });
+
+    testWidgets('location off offers the system location settings',
+        (tester) async {
+      var opened = 0;
+      await tester.pumpWidget(
+        wrap(LinkStatus.locationOff, onOpenLocationSettings: () => opened++),
+      );
+
+      expect(find.text('Localização desligada'), findsOneWidget);
+      expect(find.text('Conectar'), findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+
+      await tester.tap(find.text('Abrir Localização'));
+      await tester.pump();
+
+      expect(opened, 1);
+    });
+
+    testWidgets('neither offers the app-settings button', (tester) async {
+      // The app's own settings page cannot toggle either one, so offering it
+      // would send the pilot somewhere useless.
+      await tester.pumpWidget(wrap(LinkStatus.bluetoothOff));
+      expect(find.text('Abrir Ajustes'), findsNothing);
+
+      await tester.pumpWidget(wrap(LinkStatus.locationOff));
+      expect(find.text('Abrir Ajustes'), findsNothing);
+    });
+
+    testWidgets('Bluetooth off offers no button at all', (tester) async {
+      // The pilot flips the adapter from the shade; a second route would be
+      // noise on a screen that reserves exactly one action slot.
+      await tester.pumpWidget(wrap(LinkStatus.bluetoothOff));
+      expect(find.byType(TextButton), findsNothing);
+    });
+  });
+
   group('layout holds at real device sizes', () {
     // A widget test fails on RenderFlex overflow, so pumping at each size is
     // the assertion. Same four sizes as flight_screen_test.dart. Both modes
@@ -131,6 +183,8 @@ void main() {
         LinkStatus.idle,
         LinkStatus.scanning,
         LinkStatus.unauthorized,
+        LinkStatus.bluetoothOff,
+        LinkStatus.locationOff,
       ]) {
         testWidgets('${size.width.toInt()}x${size.height.toInt()} ${status.name}',
             (tester) async {
