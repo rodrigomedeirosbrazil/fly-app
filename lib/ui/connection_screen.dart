@@ -1,14 +1,25 @@
 import 'package:flutter/material.dart';
 
 import '../ble/fly_controller_link.dart';
+import 'widgets/aerovolt_logo.dart';
 
-/// Shown until the first frame arrives. Deliberately plain: this screen is what
-/// the pilot sees on the ground, not in the air.
+/// Shown until the first frame arrives — and, deliberately, never again.
+///
+/// Once telemetry has been seen, a dropped link is the flight screen's stale
+/// state, not a trip back to here: replacing the instrument panel with a logo
+/// is the last thing a pilot in the air needs. See
+/// [TelemetryRepository] for the half of that rule which lives in state.
+///
+/// Two modes share one layout. At rest the button starts the radio; while
+/// trying it cancels. Neither the logo nor the button moves between them —
+/// only the label changes and the status line fills in.
 class ConnectionScreen extends StatelessWidget {
   const ConnectionScreen({
     super.key,
     required this.status,
     required this.rejectedFrames,
+    required this.onConnect,
+    required this.onCancel,
   });
 
   final LinkStatus status;
@@ -17,12 +28,19 @@ class ConnectionScreen extends StatelessWidget {
   /// the signature of an MTU that never grew past 23 bytes.
   final int rejectedFrames;
 
+  final VoidCallback onConnect;
+  final VoidCallback onCancel;
+
+  /// [FlyControllerLink.connect] retries forever with a backoff, so there is
+  /// no failure state to render — everything that is not idle is "trying".
+  bool get _trying => status != LinkStatus.idle;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
     final message = switch (status) {
-      LinkStatus.idle => 'Desconectado',
+      LinkStatus.idle => null,
       LinkStatus.scanning => 'Procurando o controlador…',
       LinkStatus.connecting => 'Conectando…',
       LinkStatus.connected => 'Aguardando telemetria…',
@@ -30,24 +48,77 @@ class ConnectionScreen extends StatelessWidget {
     };
 
     return Scaffold(
-      body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const CircularProgressIndicator(),
-            const SizedBox(height: 24),
-            Text(message, style: theme.textTheme.titleMedium),
-            if (rejectedFrames > 0) ...[
-              const SizedBox(height: 16),
-              Text(
-                '$rejectedFrames quadros descartados',
-                style: theme.textTheme.bodySmall
-                    ?.copyWith(color: theme.colorScheme.error),
+      body: SafeArea(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            // Proportional, never a point constant — the rule the dials
+            // follow. Clamped so the lockup neither vanishes on a 320 pt
+            // phone nor bloats across a tablet.
+            final logoWidth =
+                (constraints.maxWidth * 0.62).clamp(150.0, 380.0);
+
+            return Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 16,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    AerovoltLogo(width: logoWidth),
+                    const SizedBox(height: 40),
+                    _button(),
+                    const SizedBox(height: 16),
+                    // The line is reserved whether or not there is a message,
+                    // so the button does not jump when one appears.
+                    SizedBox(
+                      height: 20,
+                      child: message == null
+                          ? null
+                          : Text(
+                              message,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                    ),
+                    if (rejectedFrames > 0) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        '$rejectedFrames quadros descartados',
+                        maxLines: 1,
+                        style: theme.textTheme.bodySmall
+                            ?.copyWith(color: theme.colorScheme.error),
+                      ),
+                    ],
+                  ],
+                ),
               ),
-            ],
-          ],
+            );
+          },
         ),
       ),
+    );
+  }
+
+  Widget _button() {
+    if (!_trying) {
+      return FilledButton(
+        onPressed: onConnect,
+        child: const Text('Conectar'),
+      );
+    }
+    return OutlinedButton.icon(
+      onPressed: onCancel,
+      icon: const SizedBox(
+        width: 16,
+        height: 16,
+        child: CircularProgressIndicator(strokeWidth: 2),
+      ),
+      label: const Text('Cancelar'),
     );
   }
 }
