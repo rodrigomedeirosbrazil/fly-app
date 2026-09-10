@@ -49,7 +49,7 @@ void main() {
     await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
 
     expect(find.text('87'), findsOneWidget); // SoC
-    expect(find.text('ARMED'), findsOneWidget);
+    expect(find.text('ARMADO'), findsOneWidget);
     expect(find.text('CAN'), findsOneWidget); // motor temp source badge
   });
 
@@ -60,8 +60,16 @@ void main() {
       stale: false,
     )));
 
-    expect(find.text('0'), findsNothing);
-    expect(find.text('–'), findsWidgets);
+    // Scoped to the motor dial: '0' is legitimately on screen as the battery
+    // dial's scale end, so a bare find.text('0') would prove nothing.
+    final motorDial = find.ancestor(
+      of: find.text('MOTOR'),
+      matching: find.byType(Dial),
+    );
+    expect(find.descendant(of: motorDial, matching: find.text('–')),
+        findsOneWidget);
+    expect(find.descendant(of: motorDial, matching: find.text('0')),
+        findsNothing);
     expect(find.text('CAN'), findsNothing);
   });
 
@@ -101,16 +109,16 @@ void main() {
   testWidgets('the voltage cell toggles to per-cell on tap', (tester) async {
     await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
 
-    expect(find.text('50.4'), findsOneWidget);
+    expect(find.text('50.40'), findsOneWidget);
     expect(find.text('V'), findsOneWidget);
 
-    await tester.tap(find.text('50.4'));
+    await tester.tap(find.text('50.40'));
     await tester.pumpAndSettle();
 
     // cellMinMv is 3712, so the BMS minimum cell wins over an estimate.
     expect(find.text('3.71'), findsOneWidget);
     expect(find.text('V/cél'), findsOneWidget);
-    expect(find.text('50.4'), findsNothing);
+    expect(find.text('50.40'), findsNothing);
   });
 
   testWidgets('per-cell falls back to an estimate marked with a tilde',
@@ -120,7 +128,7 @@ void main() {
       stale: false,
     )));
 
-    await tester.tap(find.text('50.4'));
+    await tester.tap(find.text('50.40'));
     await tester.pumpAndSettle();
 
     // 50.4 V over a hardcoded 14 cells.
@@ -141,9 +149,10 @@ void main() {
     testWidgets('only the two temperatures get dials', (tester) async {
       await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
 
-      // Power has no maximum, so a circular gauge would have to invent a full
-      // scale. It is a number.
-      expect(find.byType(Dial), findsNWidgets(2));
+      // Battery, motor and ESC. Power has no maximum, so a circular gauge
+      // would have to invent a full scale -- it is a number, and the dial
+      // count is the same whether power is present or not.
+      expect(find.byType(Dial), findsNWidgets(3));
       expect(find.text('1.5'), findsOneWidget);
       expect(find.text('kW'), findsOneWidget);
     });
@@ -155,7 +164,7 @@ void main() {
       )));
 
       expect(find.text('kW'), findsNothing);
-      expect(find.byType(Dial), findsNWidgets(2));
+      expect(find.byType(Dial), findsNWidgets(3));
     });
   });
 
@@ -208,8 +217,31 @@ void main() {
       await tester.tap(find.byTooltip('Mais dados'));
       await tester.pumpAndSettle();
 
-      expect(find.text('0'), findsNothing);
+      // Each unavailable row reads as a dash. Checked row by row: a bare
+      // find.text('0') would collide with the battery dial's scale end.
+      for (final label in const ['RPM', 'Temp. máx. BMS', 'Células mín / máx']) {
+        final row = find.ancestor(of: find.text(label), matching: find.byType(Row));
+        expect(find.descendant(of: row.first, matching: find.text('–')),
+            findsOneWidget,
+            reason: '$label should read as a dash');
+      }
       expect(find.text('0 °C'), findsNothing);
+    });
+
+    testWidgets('the drawer keeps updating while it is open', (tester) async {
+      // A modal route builds once from the frame captured when it was pushed
+      // and never sees another. The drawer has to live in the tree that the
+      // 1 Hz frames rebuild, or it silently freezes.
+      await tester.pumpWidget(wrap(FlightScreen(frame: frame(rpm: 4200), stale: false)));
+      await tester.tap(find.byTooltip('Mais dados'));
+      await tester.pumpAndSettle();
+      expect(find.text('4200'), findsOneWidget);
+
+      await tester.pumpWidget(wrap(FlightScreen(frame: frame(rpm: 5100), stale: false)));
+      await tester.pumpAndSettle();
+
+      expect(find.text('5100'), findsOneWidget);
+      expect(find.text('4200'), findsNothing);
     });
 
     testWidgets('the handle is present with no frame at all', (tester) async {

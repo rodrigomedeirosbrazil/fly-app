@@ -36,9 +36,22 @@ class _FlyAppState extends State<FlyApp> {
       title: 'Fly Controller',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF3DDC84),
-          brightness: Brightness.dark,
+        // Spelled out rather than derived from a seed. ColorScheme.fromSeed
+        // tints every surface toward the seed hue, which turned the panel's
+        // background green; the web telemetry page it mirrors is neutral, so
+        // the only colour on screen is the data.
+        colorScheme: const ColorScheme.dark(
+          primary: Color(0xFF3FB950), // gauge fill, live indicator
+          secondary: Color(0xFF3B82F6), // throttle
+          error: Color(0xFFF85149), // armed, faults, limiting
+          surface: Color(0xFF0D1117), // page
+          surfaceContainer: Color(0xFF161B22), // cards
+          surfaceContainerHigh: Color(0xFF1C222B), // overlay
+          surfaceContainerHighest: Color(0xFF272D38), // gauge track
+          onSurface: Color(0xFFE6EDF3),
+          onSurfaceVariant: Color(0xFF8B949E), // labels and units
+          outline: Color(0xFF6E7681), // idle chips
+          outlineVariant: Color(0xFF272D38), // dividers
         ),
         useMaterial3: true,
       ),

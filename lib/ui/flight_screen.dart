@@ -4,17 +4,23 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../protocol/xctod_frame.dart';
 import 'widgets/dial.dart';
 
-/// The instrument. Purely presentational — it takes a frame and draws it, which
-/// is what makes it testable without a radio.
+/// Number of series cells. The firmware has no support for other pack sizes, so
+/// this is deliberately a constant and not a setting — the same choice the web
+/// telemetry page made. An estimate derived from it is marked with a tilde.
+const int _seriesCells = 14;
+
+/// The instrument.
 ///
-/// The band stack is fixed: status, hero, instruments, throttle, drawer handle.
-/// Nothing is added or removed at runtime, so an alert can never shift a number
-/// the pilot is in the middle of reading.
+/// Card stack, fixed order: status, battery, instruments, throttle, drawer bar.
+/// Nothing is added to or removed from that stack at runtime, so an alert can
+/// never shift a number the pilot is in the middle of reading — a fault shows
+/// as a chip in space the status row already reserves.
 ///
-/// The hero band absorbs the leftover height and its numbers grow into it; the
-/// instrument row takes only what its dials need. The reverse left a void in
-/// the middle of the panel with the primary readings stranded at 64 pt.
-class FlightScreen extends StatelessWidget {
+/// Two things the web panel has are absent here and cannot be added from this
+/// data: the flight clock and the red reduction band on the thermal dials.
+/// Neither `sessionSec` nor the thermal thresholds travel over the $XCTOD
+/// stream. They arrive with phase 2.
+class FlightScreen extends StatefulWidget {
   const FlightScreen({super.key, required this.frame, required this.stale});
 
   final XctodFrame? frame;
@@ -23,47 +29,73 @@ class FlightScreen extends StatelessWidget {
   final bool stale;
 
   @override
+  State<FlightScreen> createState() => _FlightScreenState();
+}
+
+class _FlightScreenState extends State<FlightScreen> {
+  bool _drawerOpen = false;
+
+  @override
   Widget build(BuildContext context) {
-    final f = frame;
+    final f = widget.frame;
 
     return Scaffold(
       body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            // The fixed bands are proportional to the viewport, not constant.
-            // Held constant they add up to more than a small phone has and the
-            // panel overflows by a few pixels -- which clips a reading rather
-            // than shrinking it. Compressing continuously is what keeps every
-            // band on screen from a 320x480 phone up to a tablet.
-            final h = constraints.maxHeight;
-            final pad = (h * 0.02).clamp(6.0, 12.0);
-            final gap = (h * 0.015).clamp(4.0, 12.0);
-            final instruments = (h * 0.24).clamp(92.0, 150.0);
-
-            return Padding(
-              padding: EdgeInsets.all(pad),
+        child: Stack(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
               child: Column(
                 children: [
-                  _StatusBand(frame: f, stale: stale),
-                  SizedBox(height: gap),
-                  Expanded(child: _HeroBand(frame: f)),
-                  SizedBox(height: gap),
-                  _InstrumentBand(frame: f, height: instruments),
-                  SizedBox(height: gap),
-                  _ThrottleBand(frame: f),
-                  _DrawerHandle(frame: f),
+                  _StatusRow(frame: f, stale: widget.stale),
+                  const SizedBox(height: 8),
+                  Expanded(child: _BatteryCard(frame: f)),
+                  const SizedBox(height: 8),
+                  _InstrumentRow(frame: f),
+                  const SizedBox(height: 8),
+                  _ThrottleCard(frame: f),
+                  const SizedBox(height: 8),
+                  _DrawerBar(onTap: () => setState(() => _drawerOpen = true)),
                 ],
               ),
-            );
-          },
+            ),
+            // In the tree, not a pushed route. A modal route builds once from
+            // the frame captured when it opened and never sees another, so the
+            // readings behind it silently freeze at 1 Hz.
+            if (_drawerOpen)
+              _SecondaryData(
+                frame: f,
+                onClose: () => setState(() => _drawerOpen = false),
+              ),
+          ],
         ),
       ),
     );
   }
 }
 
-class _StatusBand extends StatelessWidget {
-  const _StatusBand({required this.frame, required this.stale});
+/// Rounded surface every band sits on.
+class _Card extends StatelessWidget {
+  const _Card({required this.child, this.padding = const EdgeInsets.all(10)});
+
+  final Widget child;
+  final EdgeInsets padding;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: padding,
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainer,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: child,
+    );
+  }
+}
+
+class _StatusRow extends StatelessWidget {
+  const _StatusRow({required this.frame, required this.stale});
 
   final XctodFrame? frame;
   final bool stale;
@@ -78,52 +110,40 @@ class _StatusBand extends StatelessWidget {
 
     if (f == null) {
       text = stale ? 'SEM SINAL' : 'AGUARDANDO';
-      color = stale ? theme.colorScheme.error : theme.colorScheme.surfaceContainerHighest;
+      color = stale ? theme.colorScheme.error : theme.colorScheme.outline;
     } else if (f.disarmCode != null) {
       text = f.disarmCode!;
       color = theme.colorScheme.error;
     } else if (f.isArmed) {
-      text = 'ARMED';
-      color = theme.colorScheme.primary;
+      text = 'ARMADO';
+      color = theme.colorScheme.error;
     } else {
-      text = 'DISARMED';
-      color = theme.colorScheme.surfaceContainerHighest;
+      text = 'DESARMADO';
+      color = theme.colorScheme.outline;
     }
 
-    // Fixed height: the chip changes colour and text, never the layout.
+    // Fixed height: the chips change colour and text, never the layout.
     return SizedBox(
-      height: 40,
+      height: 30,
       child: Row(
         children: [
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            width: 10,
+            height: 10,
             decoration: BoxDecoration(
-              color: color,
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: Text(
-              text,
-              style: const TextStyle(
-                fontWeight: FontWeight.w700,
-                letterSpacing: 1.5,
-              ),
+              shape: BoxShape.circle,
+              color: (f != null && !stale)
+                  ? theme.colorScheme.primary
+                  : theme.colorScheme.outline,
             ),
           ),
+          const SizedBox(width: 10),
+          _Chip(text: text, color: color),
           const Spacer(),
           if (f != null && f.isLimited)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: theme.colorScheme.errorContainer,
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Text(
-                'DISPONÍVEL ${f.powerPct} %',
-                style: const TextStyle(
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.0,
-                ),
-              ),
+            _Chip(
+              text: 'DISPONÍVEL ${f.powerPct} %',
+              color: theme.colorScheme.error,
             ),
         ],
       ),
@@ -131,21 +151,46 @@ class _StatusBand extends StatelessWidget {
   }
 }
 
-/// Number of series cells. The firmware has no support for other pack sizes, so
-/// this is deliberately a constant and not a setting — the same choice the web
-/// telemetry page made. An estimate derived from it is marked with a tilde.
-const int _seriesCells = 14;
+class _Chip extends StatelessWidget {
+  const _Chip({required this.text, required this.color});
 
-class _HeroBand extends StatefulWidget {
-  const _HeroBand({required this.frame});
+  final String text;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          color: color,
+          fontSize: 13,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 1.2,
+        ),
+      ),
+    );
+  }
+}
+
+/// The dominant card: state of charge as a large dial, with pack voltage and
+/// current beneath it. Those two are secondary to the gauge and sized to say so
+/// — three numbers at equal weight read as one number.
+class _BatteryCard extends StatefulWidget {
+  const _BatteryCard({required this.frame});
 
   final XctodFrame? frame;
 
   @override
-  State<_HeroBand> createState() => _HeroBandState();
+  State<_BatteryCard> createState() => _BatteryCardState();
 }
 
-class _HeroBandState extends State<_HeroBand> {
+class _BatteryCardState extends State<_BatteryCard> {
   static const String _prefKey = 'voltMode';
 
   bool _perCell = false;
@@ -162,7 +207,7 @@ class _HeroBandState extends State<_HeroBand> {
       final saved = prefs.getBool(_prefKey);
       if (saved != null && mounted) setState(() => _perCell = saved);
     } catch (_) {
-      // Storage can be unavailable (blocked site data, restricted profile).
+      // Storage can be unavailable (restricted profile, blocked site data).
       // The default view is correct without it; never let this kill the screen.
     }
   }
@@ -177,8 +222,9 @@ class _HeroBandState extends State<_HeroBand> {
     }
   }
 
-  /// Per-cell prefers the BMS minimum cell — a measured number. Falling back to
-  /// pack voltage over [_seriesCells] is an estimate, and says so with a tilde.
+  /// Per-cell prefers the BMS minimum cell — a measurement. Falling back to
+  /// pack voltage over [_seriesCells] is a mean dressed up as a minimum, and
+  /// says so with a tilde.
   ({String text, String unit})? _perCellReading(XctodFrame f) {
     final min = f.cellMinMv;
     if (min != null) {
@@ -191,172 +237,211 @@ class _HeroBandState extends State<_HeroBand> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final f = widget.frame;
 
     String? voltageText;
-    String voltageUnit = 'V';
-
+    var voltageUnit = 'V';
     if (f != null) {
       if (_perCell) {
         final reading = _perCellReading(f);
         voltageText = reading?.text;
         voltageUnit = reading?.unit ?? 'V/cél';
       } else {
-        voltageText = f.voltage?.toStringAsFixed(1);
+        voltageText = f.voltage?.toStringAsFixed(2);
       }
     }
 
-    // Current is a primary load indicator and was arriving in every frame
-    // unused. When it is unavailable the cell collapses and the remaining two
-    // grow, rather than printing a zero amp draw.
-    final showCurrent = f?.currentA != null;
-
-    return Row(
-      children: [
-        Expanded(
-          child: _HeroCell(
-            label: 'BATERIA',
-            value: f?.socCoulomb.toString(),
-            unit: '%',
-          ),
-        ),
-        Expanded(
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: f == null ? null : _toggle,
-            child: _HeroCell(
-              label: 'TENSÃO',
-              value: voltageText,
-              unit: voltageUnit,
-            ),
-          ),
-        ),
-        if (showCurrent)
+    return _Card(
+      child: Column(
+        children: [
           Expanded(
-            child: _HeroCell(
-              label: 'CORRENTE',
-              value: f!.currentA.toString(),
-              unit: 'A',
+            child: Dial(
+              value: f?.socCoulomb.toDouble(),
+              max: 100,
+              unit: '%',
+              label: 'BATERIA',
+              showScale: true,
             ),
           ),
-      ],
-    );
-  }
-}
-
-class _HeroCell extends StatelessWidget {
-  const _HeroCell({required this.label, required this.value, required this.unit});
-
-  final String label;
-  final String? value;
-  final String unit;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        FittedBox(
-          child: Text(
-            label,
-            style: TextStyle(
-              letterSpacing: 1.5,
-              color: theme.colorScheme.onSurfaceVariant,
+          const SizedBox(height: 6),
+          Divider(height: 1, color: theme.colorScheme.outlineVariant),
+          const SizedBox(height: 6),
+          IntrinsicHeight(
+            child: Row(
+              children: [
+                Expanded(
+                  child: _Reading(
+                    // The arrows mark the cell as switchable, as the web panel
+                    // does; the unit changes with the mode so a per-cell 3.71
+                    // can never be read as a flat pack.
+                    label: 'TENSÃO ⇆',
+                    value: voltageText,
+                    unit: voltageUnit,
+                    onTap: f == null ? null : _toggle,
+                  ),
+                ),
+                // No current sensing (XAG) drops the cell entirely and lets the
+                // voltage centre, rather than reserving space for a dash.
+                if (f?.currentA != null) ...[
+                  VerticalDivider(
+                      width: 1, color: theme.colorScheme.outlineVariant),
+                  Expanded(
+                    child: _Reading(
+                      label: 'CORRENTE',
+                      value: f!.currentA.toString(),
+                      unit: 'A',
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
-        ),
-        // Expanded, not a fixed size: the number scales into whatever the band
-        // has. A flight instrument should spend spare pixels on the digits.
-        Expanded(
-          child: FittedBox(
-            child: Text(
-              value ?? '–',
-              style: const TextStyle(
-                fontSize: 64,
-                fontWeight: FontWeight.w600,
-                fontFeatures: [FontFeature.tabularFigures()],
-              ),
-            ),
-          ),
-        ),
-        if (value != null)
-          FittedBox(
-            child: Text(unit,
-                style: TextStyle(color: theme.colorScheme.onSurfaceVariant)),
-          ),
-      ],
-    );
-  }
-}
-
-class _InstrumentBand extends StatelessWidget {
-  const _InstrumentBand({required this.frame, required this.height});
-
-  final XctodFrame? frame;
-
-  /// Set by the band stack from the viewport, not a constant. See FlightScreen.
-  final double height;
-
-  @override
-  Widget build(BuildContext context) {
-    final f = frame;
-
-    // No reduction band on these dials: the thermal thresholds are
-    // user-configurable in the controller's NVS and do not travel over BLE.
-    // Drawing the factory 80/100 °C would be showing a number that may not be
-    // this pilot's. The full scales below are display ranges only.
-    //
-    // Only the two temperatures get dials. Power has no maximum, so a circular
-    // gauge would have to invent a full scale -- and a needle at 80% of an
-    // invented scale reads as a real limit. It is a number.
-    return SizedBox(
-      height: height,
-      child: Row(
-      children: [
-        Expanded(
-          child: Dial(
-            label: 'MOTOR',
-            value: f?.motorTempC?.toDouble(),
-            max: 140,
-            unit: '°C',
-            badge: switch (f?.motorTempSource) {
-              MotorTempSource.can => 'CAN',
-              MotorTempSource.ntc => 'NTC',
-              _ => null,
-            },
-          ),
-        ),
-        Expanded(
-          child: Dial(
-            label: 'ESC',
-            value: f?.escTempC?.toDouble(),
-            max: 140,
-            unit: '°C',
-          ),
-        ),
-        if (f?.powerKw != null)
-          Expanded(
-            child: _Readout(
-              label: 'POTÊNCIA',
-              value: f!.powerKw!.toStringAsFixed(1),
-              unit: 'kW',
-            ),
-          ),
-      ],
+        ],
       ),
     );
   }
 }
 
-/// A labelled number with no gauge behind it. For quantities that have no full
-/// scale.
+/// Label above, number and small adjacent unit below. A null value is a dash
+/// with no unit — the controller said it has no reading, and a zero would read
+/// as a measurement.
+class _Reading extends StatelessWidget {
+  const _Reading({
+    required this.label,
+    required this.value,
+    required this.unit,
+    this.onTap,
+  });
+
+  final String label;
+  final String? value;
+  final String unit;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            label,
+            maxLines: 1,
+            softWrap: false,
+            style: TextStyle(
+              fontSize: 11,
+              letterSpacing: 1.5,
+              fontWeight: FontWeight.w600,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 2),
+          FittedBox(
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
+              children: [
+                Text(
+                  value ?? '–',
+                  maxLines: 1,
+                  softWrap: false,
+                  style: const TextStyle(
+                    fontSize: 30,
+                    fontWeight: FontWeight.w700,
+                    height: 1.0,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
+                if (value != null) ...[
+                  const SizedBox(width: 3),
+                  Text(
+                    unit,
+                    maxLines: 1,
+                    softWrap: false,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Power, then the two temperatures.
 ///
-/// Sized in proportion to the box, with the same ratios as [Dial], so the
-/// readout and the dials beside it share one typographic scale. A fixed point
-/// size looks fine on the phone it was written on and wraps on a narrower one:
-/// at 320 pt across three columns a 38 pt "1.5" broke into two lines and blew
-/// the band by 20 px.
+/// Only the temperatures get dials. Power has no maximum, so a circular gauge
+/// would have to invent a full scale — and a needle at 80% of an invented scale
+/// reads as a real limit.
+class _InstrumentRow extends StatelessWidget {
+  const _InstrumentRow({required this.frame});
+
+  final XctodFrame? frame;
+
+  @override
+  Widget build(BuildContext context) {
+    final f = frame;
+
+    return SizedBox(
+      height: 118,
+      child: Row(
+        children: [
+          if (f?.powerKw != null)
+            Expanded(
+              child: _Card(
+                child: _Readout(
+                  label: 'POTÊNCIA',
+                  value: f!.powerKw!.toStringAsFixed(1),
+                  unit: 'kW',
+                ),
+              ),
+            ),
+          if (f?.powerKw != null) const SizedBox(width: 8),
+          Expanded(
+            child: _Card(
+              child: Dial(
+                value: f?.motorTempC?.toDouble(),
+                max: 140,
+                unit: '°C',
+                caption: 'MOTOR',
+                badge: switch (f?.motorTempSource) {
+                  MotorTempSource.can => 'CAN',
+                  MotorTempSource.ntc => 'NTC',
+                  _ => null,
+                },
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: _Card(
+              child: Dial(
+                value: f?.escTempC?.toDouble(),
+                max: 140,
+                unit: '°C',
+                caption: 'ESC',
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A labelled number with no gauge behind it, for quantities with no full
+/// scale. Sized like the dials beside it: a fixed point size looks right on the
+/// phone it was written on and wraps on a narrower one.
 class _Readout extends StatelessWidget {
   const _Readout({required this.label, required this.value, required this.unit});
 
@@ -367,57 +452,40 @@ class _Readout extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final muted = TextStyle(
+      fontSize: 11,
+      letterSpacing: 1.5,
+      fontWeight: FontWeight.w600,
+      color: theme.colorScheme.onSurfaceVariant,
+    );
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final side = constraints.biggest.shortestSide;
-        return Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.fade,
-              softWrap: false,
-              style: TextStyle(
-                fontSize: side * 0.10,
-                letterSpacing: 1.2,
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-            Flexible(
-              child: FittedBox(
-                child: Text(
-                  value,
-                  maxLines: 1,
-                  softWrap: false,
-                  style: TextStyle(
-                    fontSize: side * 0.30,
-                    fontWeight: FontWeight.w600,
-                    height: 1.1,
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                  ),
-                ),
-              ),
-            ),
-            Text(
-              unit,
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Text(label, maxLines: 1, softWrap: false, style: muted),
+        Flexible(
+          child: FittedBox(
+            child: Text(
+              value,
               maxLines: 1,
               softWrap: false,
-              style: TextStyle(
-                fontSize: side * 0.10,
-                color: theme.colorScheme.onSurfaceVariant,
+              style: const TextStyle(
+                fontSize: 34,
+                fontWeight: FontWeight.w700,
+                height: 1.2,
+                fontFeatures: [FontFeature.tabularFigures()],
               ),
             ),
-          ],
-        );
-      },
+          ),
+        ),
+        Text(unit, maxLines: 1, softWrap: false, style: muted),
+      ],
     );
   }
 }
 
-class _ThrottleBand extends StatelessWidget {
-  const _ThrottleBand({required this.frame});
+class _ThrottleCard extends StatelessWidget {
+  const _ThrottleCard({required this.frame});
 
   final XctodFrame? frame;
 
@@ -427,24 +495,40 @@ class _ThrottleBand extends StatelessWidget {
     final f = frame;
     final pct = f?.throttlePct ?? 0;
 
-    return SizedBox(
-      height: 48,
+    return _Card(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'ACELERADOR  ${f == null ? '–' : '$pct %'}',
-            style: TextStyle(
-              letterSpacing: 1.2,
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'ACELERADOR',
+                style: TextStyle(
+                  fontSize: 11,
+                  letterSpacing: 1.5,
+                  fontWeight: FontWeight.w600,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              Text(
+                f == null ? '–' : '$pct %',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                  color: theme.colorScheme.secondary,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 6),
           ClipRRect(
-            borderRadius: BorderRadius.circular(4),
+            borderRadius: BorderRadius.circular(5),
             child: LinearProgressIndicator(
               value: pct / 100,
-              minHeight: 18,
+              minHeight: 10,
+              color: theme.colorScheme.secondary,
               backgroundColor: theme.colorScheme.surfaceContainerHighest,
             ),
           ),
@@ -454,33 +538,49 @@ class _ThrottleBand extends StatelessWidget {
   }
 }
 
-/// Bottom band: opens the secondary readings.
-///
-/// Six fields arrive in every frame that the panel deliberately does not show
-/// -- RPM, state of charge from voltage, the raw throttle ADC value, the BMS
-/// maximum temperature and the cell extremes. They were being parsed and
-/// thrown away. They belong somewhere reachable, but not on the panel: an
-/// overlay is what keeps the BMS connecting or dropping from re-laying out the
-/// numbers the pilot is reading.
-class _DrawerHandle extends StatelessWidget {
-  const _DrawerHandle({required this.frame});
+/// Bottom bar: names what is behind it rather than being a bare chevron.
+class _DrawerBar extends StatelessWidget {
+  const _DrawerBar({required this.onTap});
 
-  final XctodFrame? frame;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    // Fixed height, present even with no frame behind it -- the band stack
-    // never changes shape.
-    return SizedBox(
-      height: 36,
-      child: Center(
-        child: IconButton(
-          tooltip: 'Mais dados',
-          icon: const Icon(Icons.keyboard_arrow_up),
-          onPressed: () => showModalBottomSheet(
-            context: context,
-            showDragHandle: true,
-            builder: (_) => _SecondaryData(frame: frame),
+    final theme = Theme.of(context);
+    return Tooltip(
+      message: 'Mais dados',
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: _Card(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            children: [
+              const Icon(Icons.keyboard_arrow_up, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                'MAIS DADOS',
+                style: TextStyle(
+                  fontSize: 12,
+                  letterSpacing: 1.5,
+                  fontWeight: FontWeight.w700,
+                  color: theme.colorScheme.onSurface,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'RPM · BMS · CÉLULAS · LEITURAS',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11,
+                    letterSpacing: 1.0,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -488,13 +588,18 @@ class _DrawerHandle extends StatelessWidget {
   }
 }
 
+/// The readings the panel deliberately does not show.
+///
+/// Six fields arrive in every frame that the panel has no room for. They are
+/// reachable but overlaid, so the BMS connecting or dropping cannot re-lay out
+/// the numbers the pilot is reading.
 class _SecondaryData extends StatelessWidget {
-  const _SecondaryData({required this.frame});
+  const _SecondaryData({required this.frame, required this.onClose});
 
   final XctodFrame? frame;
+  final VoidCallback onClose;
 
-  /// An unavailable reading is a dash. Same rule as the panel: the controller
-  /// said it has no value, and a zero would read as a measurement.
+  /// An unavailable reading is a dash. Same rule as the panel.
   static String _or(Object? value, String suffix) =>
       value == null ? '–' : '$value$suffix';
 
@@ -512,6 +617,7 @@ class _SecondaryData extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final f = frame;
 
     final rows = <(String, String)>[
@@ -523,35 +629,63 @@ class _SecondaryData extends StatelessWidget {
       ('Origem temp. motor', _source),
     ];
 
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final (label, value) in rows)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      label,
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
+    return Positioned.fill(
+      child: GestureDetector(
+        onTap: onClose,
+        child: ColoredBox(
+          color: Colors.black54,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              GestureDetector(
+                onTap: () {},
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHigh,
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(18),
                     ),
-                    Text(
-                      value,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Tooltip(
+                        message: 'Fechar',
+                        child: IconButton(
+                          icon: const Icon(Icons.keyboard_arrow_down),
+                          onPressed: onClose,
+                        ),
                       ),
-                    ),
-                  ],
+                      for (final (label, value) in rows)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 7),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                label,
+                                style: TextStyle(
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                              Text(
+                                value,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontFeatures: [FontFeature.tabularFigures()],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
               ),
-          ],
+            ],
+          ),
         ),
       ),
     );
