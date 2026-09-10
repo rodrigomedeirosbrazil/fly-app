@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fly_app/protocol/xctod_frame.dart';
 import 'package:fly_app/ui/flight_screen.dart';
+import 'package:fly_app/ui/widgets/dial.dart';
 
 XctodFrame frame({
   double? voltage = 50.4,
@@ -9,6 +10,10 @@ XctodFrame frame({
   MotorTempSource source = MotorTempSource.can,
   int? escTempC = 54,
   int? currentA = 30,
+  int? rpm = 4200,
+  int socVoltage = 91,
+  int? bmsMaxTempC = 38,
+  int? cellMaxMv = 3745,
   double? powerKw = 1.5,
   ArmState armState = ArmState.armed,
   String? disarmCode,
@@ -17,7 +22,7 @@ XctodFrame frame({
 }) =>
     XctodFrame(
       socCoulomb: 87,
-      socVoltage: 91,
+      socVoltage: socVoltage,
       voltage: voltage,
       powerKw: powerKw,
       throttlePct: 42,
@@ -25,14 +30,14 @@ XctodFrame frame({
       powerPct: powerPct,
       motorTempC: motorTempC,
       motorTempSource: source,
-      rpm: 4200,
+      rpm: rpm,
       currentA: currentA,
       escTempC: escTempC,
       armState: armState,
       disarmCode: disarmCode,
-      bmsMaxTempC: 38,
+      bmsMaxTempC: bmsMaxTempC,
       cellMinMv: cellMinMv,
-      cellMaxMv: 3745,
+      cellMaxMv: cellMaxMv,
       receivedAt: DateTime.utc(2026, 9, 9),
     );
 
@@ -130,5 +135,113 @@ void main() {
     )));
 
     expect(find.text('–'), findsWidgets);
+  });
+
+  group('power is a readout, not a gauge', () {
+    testWidgets('only the two temperatures get dials', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
+
+      // Power has no maximum, so a circular gauge would have to invent a full
+      // scale. It is a number.
+      expect(find.byType(Dial), findsNWidgets(2));
+      expect(find.text('1.5'), findsOneWidget);
+      expect(find.text('kW'), findsOneWidget);
+    });
+
+    testWidgets('no power reading drops the readout entirely', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(powerKw: null),
+        stale: false,
+      )));
+
+      expect(find.text('kW'), findsNothing);
+      expect(find.byType(Dial), findsNWidgets(2));
+    });
+  });
+
+  group('current in the hero band', () {
+    testWidgets('current is a primary reading', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
+
+      expect(find.text('30'), findsOneWidget);
+      expect(find.text('A'), findsOneWidget);
+    });
+
+    testWidgets('no current collapses the cell instead of printing zero',
+        (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(currentA: null),
+        stale: false,
+      )));
+
+      expect(find.text('A'), findsNothing);
+      expect(find.text('CORRENTE'), findsNothing);
+    });
+  });
+
+  group('secondary data drawer', () {
+    testWidgets('the readings the panel does not show are reachable',
+        (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
+
+      // Not on the panel.
+      expect(find.text('4200'), findsNothing);
+
+      await tester.tap(find.byTooltip('Mais dados'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('4200'), findsOneWidget); // rpm
+      expect(find.text('91 %'), findsOneWidget); // soc from voltage
+      expect(find.text('1234'), findsOneWidget); // raw throttle
+      expect(find.text('38 °C'), findsOneWidget); // bms max temp
+      expect(find.text('3712 / 3745 mV'), findsOneWidget); // cell min / max
+      expect(find.text('CAN'), findsWidgets); // motor temp source
+    });
+
+    testWidgets('unavailable secondary readings show a dash, not a zero',
+        (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(rpm: null, bmsMaxTempC: null, cellMinMv: null, cellMaxMv: null),
+        stale: false,
+      )));
+
+      await tester.tap(find.byTooltip('Mais dados'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('0'), findsNothing);
+      expect(find.text('0 °C'), findsNothing);
+    });
+
+    testWidgets('the handle is present with no frame at all', (tester) async {
+      await tester.pumpWidget(wrap(const FlightScreen(frame: null, stale: true)));
+
+      // The band stack never changes shape, so the handle exists even with no
+      // data behind it.
+      expect(find.byTooltip('Mais dados'), findsOneWidget);
+    });
+  });
+
+  group('layout holds at real device sizes', () {
+    // A widget test fails on RenderFlex overflow, so pumping at each size and
+    // settling is the assertion. 393x852 is the iPhone 14 Pro this was first
+    // run on; the others are the small-phone and landscape cases where a fixed
+    // band height is most likely to run out of room.
+    for (final size in const [
+      Size(393, 852),
+      Size(320, 480),
+      Size(852, 393),
+      Size(1280, 800),
+    ]) {
+      testWidgets('${size.width.toInt()}x${size.height.toInt()}', (tester) async {
+        tester.view.physicalSize = size;
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+
+        await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
+        await tester.pumpAndSettle();
+
+        expect(tester.takeException(), isNull);
+      });
+    }
   });
 }
