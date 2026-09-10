@@ -41,7 +41,8 @@ class FlyControllerLink {
 
   /// The `$XCTOD` line runs to roughly 90 bytes. Android's default ATT MTU is
   /// 23, which caps a notification at 20 bytes and would truncate every frame.
-  /// iOS negotiates 185 on its own and rejects this call.
+  /// Passed to [BluetoothDevice.connect], which negotiates it once and leaves
+  /// iOS alone. Measured granted on a Galaxy A12 against this controller.
   static const int desiredMtu = 247;
 
   /// How long one scan attempt looks before giving up and backing off. The
@@ -170,15 +171,16 @@ class FlyControllerLink {
 
       _statusController.add(LinkStatus.connecting);
       _device = device;
+      // The mtu argument is what lifts Android's default ATT MTU of 23, which
+      // caps a notification at 20 bytes and would truncate every ~90-byte
+      // sentence. flutter_blue_plus performs the exchange as part of connect()
+      // and skips it on iOS, where CoreBluetooth owns the value and negotiates
+      // 185 by itself — so this needs no platform branch.
       await device.connect(
         timeout: const Duration(seconds: 15),
         license: License.nonprofit,
+        mtu: desiredMtu,
       );
-
-      // Android only: iOS throws for requestMtu because CoreBluetooth owns it.
-      if (Platform.isAndroid) {
-        await device.requestMtu(desiredMtu);
-      }
 
       // connect() can outlive a cancel: the OS-level connection completes
       // even though the pilot already tapped Cancelar. Without this the
