@@ -44,6 +44,11 @@ class FlyControllerLink {
   /// iOS negotiates 185 on its own and rejects this call.
   static const int desiredMtu = 247;
 
+  /// How long one scan attempt looks before giving up and backing off. The
+  /// pilot may be walking towards a controller that is still powered off, so
+  /// an empty window is expected rather than exceptional.
+  static const Duration scanWindow = Duration(seconds: 10);
+
   FlyControllerLink({AndroidHost? host}) : _host = host ?? const AndroidHost();
 
   /// Only touched on Android. iOS never calls the channel.
@@ -215,27 +220,55 @@ class FlyControllerLink {
   }
 
   Future<BluetoothDevice?> _scanForController(int generation) async {
+    final result = Completer<BluetoothDevice?>();
+    void finish(BluetoothDevice? device) {
+      if (!result.isCompleted) result.complete(device);
+    }
+
+    // onScanResults, not scanResults: the latter re-emits the previous scan's
+    // last value to every new listener, so a fresh attempt would match a
+    // controller that has since been switched off and then burn an attempt
+    // connecting to it.
+    final resultsSub = FlutterBluePlus.onScanResults.listen(
+      (results) {
+        // A cancelled attempt must not wake up inside the next one's results
+        // and race it for _device. The generation is the way out.
+        if (generation != _generation) return finish(null);
+        for (final r in results) {
+          // Two different names: platformName is what the OS has cached for
+          // the device, advName is what the advertisement carries. Android
+          // leaves the first empty for a device it has never bonded with, so
+          // matching on it alone is not enough.
+          if (r.device.platformName == deviceName ||
+              r.advertisementData.advName == deviceName) {
+            return finish(r.device);
+          }
+        }
+      },
+      onError: (_) => finish(null),
+    );
+
     await FlutterBluePlus.startScan(
       withServices: [serviceUuid],
       withNames: [deviceName],
-      timeout: const Duration(seconds: 10),
+      timeout: scanWindow,
     );
 
-    BluetoothDevice? found;
-    await for (final results in FlutterBluePlus.scanResults) {
-      // scanResults is static and never closes, so a cancelled attempt would
-      // sit here forever and then wake on the *next* attempt's results — two
-      // live attempts racing for _device. The generation is the way out.
-      if (generation != _generation) break;
-      for (final r in results) {
-        if (r.device.platformName == deviceName) {
-          found = r.device;
-          break;
-        }
-      }
-      if (found != null) break;
-    }
+    // The scan *ending* is what finishes an unsuccessful attempt, and it has
+    // to be watched explicitly. FlutterBluePlus.scanResults is process-wide
+    // and is never closed — stopScan cancels its subscriptions without
+    // emitting anything — so waiting on results alone hangs forever once the
+    // window expires: no retry, no error, the pilot left on "Procurando o
+    // controlador…" indefinitely. That is measured behaviour, not a
+    // precaution. Subscribed after startScan because isScanning re-emits its
+    // current value, which is false until the scan is actually running.
+    unawaited(FlutterBluePlus.isScanning
+        .where((scanning) => !scanning)
+        .first
+        .then((_) => finish(null)));
 
+    final found = await result.future;
+    await resultsSub.cancel();
     await FlutterBluePlus.stopScan();
     return found;
   }
