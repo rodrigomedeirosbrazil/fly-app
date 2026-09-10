@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_background">#0D1117</color>
+    <!-- ColorScheme.dark surface from lib/ui/app.dart, spelled out here for
+         the same reason it is spelled out there: the window is painted before
+         any Dart runs, and ?android:colorBackground is white on a device in
+         light mode. -->
+    <color name="launch_background">#0D1117</color>
 </resources>
