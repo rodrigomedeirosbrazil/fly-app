@@ -41,6 +41,12 @@ class FlyControllerLink {
   bool _wantConnection = false;
   int _attempt = 0;
 
+  /// Invalidates in-flight attempts. `_wantConnection` alone cannot: it flips
+  /// back to true on the next connect(), which lets an attempt abandoned by a
+  /// cancel sail through its own guards. Every attempt carries the generation
+  /// it was born in and dies when that stops being current.
+  int _generation = 0;
+
   /// Asks for the Android 12+ runtime permissions. A no-op on iOS.
   Future<bool> ensurePermissions() async {
     if (!Platform.isAndroid) return true;
@@ -65,11 +71,15 @@ class FlyControllerLink {
     if (_wantConnection) return;
     _wantConnection = true;
     _attempt = 0;
-    await _attemptConnection();
+    await _attemptConnection(++_generation);
   }
 
   Future<void> disconnect() async {
     _wantConnection = false;
+    // Orphan whatever is still in flight. FlutterBluePlus.scanResults is a
+    // process-wide stream that never closes, so stopScan() does not wake the
+    // scan loop out of its await — only a stale generation does.
+    _generation++;
     // A scan started by an attempt that is still in flight keeps the radio
     // busy for the rest of its 10 s timeout otherwise.
     try {
@@ -81,15 +91,17 @@ class FlyControllerLink {
     _statusController.add(LinkStatus.idle);
   }
 
-  Future<void> _attemptConnection() async {
-    if (!_wantConnection) return;
+  Future<void> _attemptConnection(int generation) async {
+    bool abandoned() => !_wantConnection || generation != _generation;
+
+    if (abandoned()) return;
 
     try {
       _statusController.add(LinkStatus.scanning);
 
-      final device = await _scanForController();
-      if (device == null) return _scheduleRetry();
-      if (!_wantConnection) return;
+      final device = await _scanForController(generation);
+      if (abandoned()) return;
+      if (device == null) return _scheduleRetry(generation);
 
       _statusController.add(LinkStatus.connecting);
       _device = device;
@@ -108,7 +120,7 @@ class FlyControllerLink {
       // method goes on to subscribe and emit `connected` after the screen
       // has returned to rest, leaving a live subscription the app does not
       // know about.
-      if (!_wantConnection) {
+      if (abandoned()) {
         await _teardown();
         return;
       }
@@ -116,10 +128,10 @@ class FlyControllerLink {
       final characteristic = await _findTxCharacteristic(device);
       if (characteristic == null) {
         await _teardown();
-        return _scheduleRetry();
+        return _scheduleRetry(generation);
       }
 
-      if (!_wantConnection) {
+      if (abandoned()) {
         await _teardown();
         return;
       }
@@ -130,7 +142,7 @@ class FlyControllerLink {
       _connectionSub = device.connectionState.listen((state) {
         if (state == BluetoothConnectionState.disconnected) {
           _statusController.add(LinkStatus.disconnected);
-          _teardown().then((_) => _scheduleRetry());
+          _teardown().then((_) => _scheduleRetry(generation));
         }
       });
 
@@ -138,11 +150,11 @@ class FlyControllerLink {
       _statusController.add(LinkStatus.connected);
     } catch (_) {
       await _teardown();
-      _scheduleRetry();
+      _scheduleRetry(generation);
     }
   }
 
-  Future<BluetoothDevice?> _scanForController() async {
+  Future<BluetoothDevice?> _scanForController(int generation) async {
     await FlutterBluePlus.startScan(
       withServices: [serviceUuid],
       withNames: [deviceName],
@@ -151,6 +163,10 @@ class FlyControllerLink {
 
     BluetoothDevice? found;
     await for (final results in FlutterBluePlus.scanResults) {
+      // scanResults is static and never closes, so a cancelled attempt would
+      // sit here forever and then wake on the *next* attempt's results — two
+      // live attempts racing for _device. The generation is the way out.
+      if (generation != _generation) break;
       for (final r in results) {
         if (r.device.platformName == deviceName) {
           found = r.device;
@@ -178,13 +194,13 @@ class FlyControllerLink {
 
   /// Backoff caps at 8 s: the pilot may be walking back to a controller that is
   /// still powered off, and a tight retry loop would drain the phone.
-  void _scheduleRetry() {
-    if (!_wantConnection) return;
+  void _scheduleRetry(int generation) {
+    if (!_wantConnection || generation != _generation) return;
     _attempt++;
     final delay = Duration(
       seconds: [1, 2, 4, 8][_attempt.clamp(1, 4) - 1],
     );
-    Timer(delay, _attemptConnection);
+    Timer(delay, () => _attemptConnection(generation));
   }
 
   Future<void> _teardown() async {
@@ -202,6 +218,7 @@ class FlyControllerLink {
 
   Future<void> dispose() async {
     _wantConnection = false;
+    _generation++;
     await _teardown();
     await _statusController.close();
     await _payloadController.close();

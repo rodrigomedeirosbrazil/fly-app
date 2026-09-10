@@ -44,6 +44,12 @@ class LinkHealth {
   /// between "signal lost" and "never connected".
   bool isStale(DateTime now) => _last != null && frameAt(now) == null;
 
-  /// Drops the current frame. Call on disconnect.
+  /// Drops the current frame.
+  ///
+  /// Call when the pilot has explicitly stopped — never on a dropped
+  /// link. Surviving a drop is what makes [isStale] mean 'signal lost'
+  /// rather than 'never connected', and what keeps the app from
+  /// replacing the instrument panel with the connection screen in
+  /// flight.
   void reset() => _last = null;
 }
