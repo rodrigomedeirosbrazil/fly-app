@@ -50,11 +50,13 @@ class TelemetryRepository extends ChangeNotifier {
   int get rejectedFrames => _health.rejectedCount;
 
   Future<void> start() async {
-    if (!await _link.ensurePermissions()) {
+    final blocked = await _link.blockingCondition();
+    if (blocked != null) {
       // Reported rather than swallowed: a silent no-op button is
-      // indistinguishable from a broken one, and Android can refuse
-      // permanently, in which case asking again will never show a dialog.
-      _status = LinkStatus.unauthorized;
+      // indistinguishable from a broken one, and Android can refuse a
+      // permission permanently, in which case asking again will never show a
+      // dialog.
+      _status = blocked;
       notifyListeners();
       return;
     }

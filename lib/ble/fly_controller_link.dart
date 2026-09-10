@@ -4,6 +4,7 @@ import 'dart:io' show Platform;
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../state/ble_permission_policy.dart';
 import 'android_host.dart';
 
 /// What the UI needs to know about the radio, without knowing about the radio.
@@ -66,14 +67,50 @@ class FlyControllerLink {
   /// it was born in and dies when that stops being current.
   int _generation = 0;
 
-  /// Asks for the Android 12+ runtime permissions. A no-op on iOS.
-  Future<bool> ensurePermissions() async {
-    if (!Platform.isAndroid) return true;
-    final results = await [
-      Permission.bluetoothScan,
-      Permission.bluetoothConnect,
-    ].request();
-    return results.values.every((s) => s.isGranted);
+  /// Why a connection cannot be attempted yet, or null when it can.
+  ///
+  /// Returns a [LinkStatus] rather than a bool because the three ways this
+  /// fails need three different things from the pilot, and every one of them
+  /// otherwise looks identical from the outside: a scan that finds nothing.
+  Future<LinkStatus?> blockingCondition() async {
+    if (Platform.isAndroid) {
+      final required = requirementsForAndroid(await _host.sdkInt());
+
+      if (required.needsBluetoothRuntimePermissions) {
+        final results = await [
+          Permission.bluetoothScan,
+          Permission.bluetoothConnect,
+        ].request();
+        if (!results.values.every((s) => s.isGranted)) {
+          return LinkStatus.unauthorized;
+        }
+      }
+
+      if (required.needsLocationPermission) {
+        // Below API 31 a BLE scan is a location capability. Without this,
+        // permission_handler reports bluetoothScan as granted — there it maps
+        // to no runtime permission at all — and startScan returns an empty
+        // list forever, raising nothing.
+        if (!(await Permission.locationWhenInUse.request()).isGranted) {
+          return LinkStatus.unauthorized;
+        }
+      }
+
+      if (required.needsLocationServiceOn &&
+          await Permission.location.serviceStatus != ServiceStatus.enabled) {
+        // Holding the permission is not enough, and the failure is the same
+        // empty scan.
+        return LinkStatus.locationOff;
+      }
+    }
+
+    // Checked last, deliberately: on API 31+ the permissions requested above
+    // are what make the adapter readable in the first place.
+    if (await FlutterBluePlus.adapterState.first != BluetoothAdapterState.on) {
+      return LinkStatus.bluetoothOff;
+    }
+
+    return null;
   }
 
   /// Opens the OS settings page for this app. The only route back from a

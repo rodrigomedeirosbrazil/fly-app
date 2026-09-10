@@ -20,15 +20,20 @@ class FakeLink extends FlyControllerLink {
   @override
   Stream<List<int>> get payloads => _payloads.stream;
 
-  /// Set before calling start() to simulate the pilot refusing the Android
-  /// runtime permission.
-  bool deniesPermissions = false;
+  /// Set before calling start() to simulate a precondition the pilot has to
+  /// fix: a refused permission, Bluetooth off, or location off.
+  LinkStatus? blocking;
 
   @override
-  Future<bool> ensurePermissions() async => !deniesPermissions;
+  Future<LinkStatus?> blockingCondition() async => blocking;
+
+  int connectCalls = 0;
 
   @override
-  Future<void> connect() async => _status.add(LinkStatus.connected);
+  Future<void> connect() async {
+    connectCalls++;
+    _status.add(LinkStatus.connected);
+  }
 
   @override
   Future<void> disconnect() async => _status.add(LinkStatus.idle);
@@ -97,23 +102,47 @@ void main() {
     expect(repo.isStale, isFalse);
   });
 
-  test('a refused permission is reported, not swallowed', () async {
-    link.deniesPermissions = true;
+  test('a blocked precondition is reported, not swallowed', () async {
+    link.blocking = LinkStatus.unauthorized;
 
     await repo.start();
 
     expect(repo.status, LinkStatus.unauthorized);
+    // A silent no-op button is indistinguishable from a broken one, and the
+    // radio must not be started behind a refusal either.
+    expect(link.connectCalls, 0);
   });
 
-  test('granting it afterwards clears the refusal', () async {
-    link.deniesPermissions = true;
+  test('clearing it afterwards lets the connection through', () async {
+    link.blocking = LinkStatus.unauthorized;
     await repo.start();
     expect(repo.status, LinkStatus.unauthorized);
 
-    link.deniesPermissions = false;
+    link.blocking = null;
     await repo.start();
     await pumpEventQueue();
 
     expect(repo.status, LinkStatus.connected);
   });
+
+  for (final blocked in const [
+    LinkStatus.unauthorized,
+    LinkStatus.bluetoothOff,
+    LinkStatus.locationOff,
+  ]) {
+    test('$blocked does not forget the last frame', () async {
+      await receiveOneFrame();
+      expect(repo.frame, isNotNull);
+
+      link.emit(blocked);
+      await pumpEventQueue();
+
+      // Only an explicit stop() forgets the frame. Otherwise Bluetooth
+      // switched off mid-flight would satisfy FlyApp's
+      // `frame == null && !isStale` and swap the instrument panel for the
+      // logo — the worst possible moment to change what is on screen.
+      expect(repo.frame, isNotNull);
+      expect(repo.status, blocked);
+    });
+  }
 }
