@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.rodrigomedeiros.fly_app"
+    namespace = "br.com.medeirostec.aerovolt"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -15,16 +15,18 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.rodrigomedeiros.fly_app"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = 23
+        // Reverse DNS of medeirostec.com.br. Set before any Play upload
+        // exists, because the first upload freezes it permanently.
+        applicationId = "br.com.medeirostec.aerovolt"
+        // A floor, not a preference. Three independent sources require 24:
+        // Flutter 3.47 itself (gradle_utils.dart minSdkVersionInt = 24, and
+        // flutter install refuses anything older), permission_handler_android
+        // 14.1.0, and shared_preferences_android 2.4.28.
+        // flutter_blue_plus_android needs only 21 — BLE is not the
+        // constraint. This rules out Android 6 hardware: a Galaxy S5 tops
+        // out at API 23, one level short.
+        minSdk = 24
         targetSdk = flutter.targetSdkVersion
-        // Uses the version code from pubspec.yaml. When using split APKs, 1000 * ABI_VERSION
-        // is added automatically by Flutter. (https://developer.android.com/studio/build/configure-apk-splits#configure-APK-versions)
-        // You can force using the value of versionCode by specifying the `-P force-version-code-ignoring-abi=true`
-        // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }

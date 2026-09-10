@@ -1,4 +1,4 @@
-package com.rodrigomedeiros.fly_app
+package br.com.medeirostec.aerovolt
 
 import io.flutter.embedding.android.FlutterActivity
 
