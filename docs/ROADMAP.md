@@ -80,19 +80,22 @@ at the same time, and untested with the ESP-NOW remote throttle also active —
 that last one is the worst case for the single antenna. If XCTrack can be
 retired, `Xctod` goes with it and phase 2's flash problem shrinks.
 
-**Does MTU negotiation work on Android?** Still unmeasured, but no longer
-blocked. The Android SDK is installed, `flutter doctor` is clean and a signed
-APK builds; what is missing is a phone with USB debugging enabled. iOS
-negotiates 185 on its own, so the iPhone proves nothing here. The
-discarded-frame counter on the connection screen remains the instrument: a
-non-zero count with no telemetry is an MTU that never grew past 23 and is
-truncating every ~90-byte sentence.
+**Does MTU negotiation work on Android?** **Yes — answered 2026-09-10.**
+Measured on a Galaxy A12 (SM-A125M, Android 12, API 31) against the
+controller: `onConfigureMTU mtu=247 status=0`, the panel renders live
+telemetry, and the discarded-frame counter stays at zero. This was the
+specific failure phase 1 was built to measure, and it does not occur.
 
-**Does the app work on Android 7–11 at all?** The permission path for API ≤ 30
-is covered by a table test and by nothing else. The intended test device is a
-Galaxy A12 (SM-A125M), which shipped on Android 10 and updates to 12 — at API
-29 or 30 it exercises that branch on real hardware, at 31 it does not and the
-branch stays unit-tested only. Its actual level has not been read yet.
+Getting there cost one real bug, which is the more useful finding: the app
+could not connect on Android at all until `_scanForController` stopped
+awaiting a stream `flutter_blue_plus` never closes. An empty 10-second scan
+window left it hung with no retry — see `CLAUDE.md`.
+
+**Does the app work on Android 7–11 at all?** Unknown, and it will stay that
+way with the hardware on hand. The Galaxy A12 turned out to be on **API 31**,
+so it takes the modern permission path and never executes the API ≤ 30 branch.
+That branch is covered by a table test and by nothing else. Confirming it
+needs an Android 7–11 device.
 
 **Does phase 2 extend the NUS service or add a second one?**
 

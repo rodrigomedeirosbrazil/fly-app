@@ -165,13 +165,41 @@ still powered off, which is exactly what the 8 s backoff cap was written for.
 
 ### MTU
 
-`requestMtu(247)` runs on **Android only**. Android's default ATT MTU is 23,
-which caps a notification at 20 bytes and would truncate every ~90-byte
-sentence; iOS negotiates 185 on its own and CoreBluetooth rejects the call.
+The MTU is requested **as an argument to `connect()`**, not separately.
+`flutter_blue_plus` negotiates it during connection and skips the exchange on
+iOS, where CoreBluetooth owns the value and settles on 185 by itself, so there
+is no platform branch to write. Calling `requestMtu` afterwards is not just
+redundant — the plugin's own default is 512, so a later call at 247 *lowers*
+what was already granted. Measured, in that order, on a Galaxy A12.
+
+Android's default ATT MTU is 23, which caps a notification at 20 bytes and
+would truncate every ~90-byte sentence. **Verified on Android 12: 247 granted,
+`status=0`, panel live, zero rejected frames.**
 
 Frames that fail the 16-field count are counted and the total is shown on the
 connection screen. Non-zero there with no telemetry is the signature of an MTU
 that never grew — which is why it is surfaced rather than silenced.
+
+### A scan that finds nothing has to end itself
+
+`FlutterBluePlus.scanResults` is process-wide and **never closes**: `stopScan`
+cancels the plugin's internal subscriptions and emits nothing, and the scan
+timeout is only `Timer(timeout, stopScan)`. So a loop that awaits results
+alone hangs forever the moment a window expires — no retry, no error, the
+pilot left on "Procurando o controlador…" until the app is force-stopped.
+That shipped, and it is what made the app look broken on Android while the
+iPhone connected: not a platform difference, a state the iPhone happened not
+to step in.
+
+`_scanForController` therefore watches `isScanning` going false as the end of
+an unsuccessful attempt, subscribed *after* `startScan` because it re-emits
+its current value. It also uses `onScanResults` rather than `scanResults`,
+because the latter replays the previous scan's last value to a new listener —
+enough to "find" a controller that has since been switched off.
+
+Names are matched against `platformName` **or** `advName`. The first is the
+name the OS has cached (`BluetoothDevice.getName()` on Android, empty for a
+device never bonded with); the second is the one in the advertisement.
 
 ### Nothing enters or leaves the card stack
 
