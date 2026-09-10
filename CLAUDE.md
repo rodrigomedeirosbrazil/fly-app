@@ -42,6 +42,8 @@ here — neither has a Bluetooth radio.
 | `permission_handler` | 13.0.2 | Android 12+ runtime BLUETOOTH_SCAN / CONNECT |
 | `wakelock_plus` | 1.8.0 | Screen stays on in flight |
 | `shared_preferences` | 2.5.5 | Remembers the pack/per-cell voltage mode |
+| `flutter_svg` | 2.3.0 | Renders the tintable Aerovolt logo |
+| `flutter_launcher_icons` | 0.14.4 | **Dev only.** Generates the icon sets |
 
 Plugins resolve through **Swift Package Manager**, not CocoaPods — Flutter 3.47
 migrated. There is no Podfile.
@@ -123,6 +125,28 @@ failure being designed against, the same reasoning as the firmware's
 Rejected lines are counted and do **not** refresh the clock: a stream of
 garbage must age out exactly like silence.
 
+### The connection screen is a door, not a fallback
+
+The pilot taps **Conectar**; the radio does not start itself. Once the first
+frame has arrived the app never shows that screen again — a dropped link is
+the flight screen's stale state, because swapping the instrument panel for a
+logo mid-flight is the worst possible moment to change what is on screen.
+
+That rule is enforced by an *absence*: `TelemetryRepository._onStatus` resets
+`LinkHealth` only on `idle`, never on `disconnected`. With the last frame
+surviving a drop, `isStale` stays true and `FlyApp`'s `frame == null &&
+!isStale` stops being satisfied on its own. There is no "has flown" flag, and
+there must not be one.
+
+Putting `_health.reset()` back on the `disconnected` branch looks like fixing
+a leak and is the bug. `test/state/telemetry_repository_test.dart` exists to
+catch that.
+
+The button becomes **Cancelar** while trying, because `connect()` retries
+forever with a backoff and there is no failure state to fall into. Giving up
+automatically was rejected: the pilot may be walking to a controller that is
+still powered off, which is exactly what the 8 s backoff cap was written for.
+
 ### MTU
 
 `requestMtu(247)` runs on **Android only**. Android's default ATT MTU is 23,
@@ -164,6 +188,28 @@ widget test fails on `RenderFlex overflowed`, so the pump *is* the assertion.
 the background green. The palette in `ui/app.dart` is explicit and neutral, so
 the only colour on screen is the data: green for the gauge, blue for throttle,
 red for armed and faults.
+
+### The logo is derived, not drawn
+
+`assets/logo/aerovolt.svg` and `aerovolt_mark.svg` are **generated** by
+`tool/generate_logo_assets.py` from `aerovolt_traced.svg`. Edit the script,
+never the output.
+
+The trace is a full-canvas black plate with the logo knocked out of it, so it
+paints a black rectangle wherever it is placed. The script wraps its paths in
+a `<mask>` and paints a `<rect>` through it, which inverts the polarity while
+keeping the nonzero winding and the antialiasing intact. Deleting the plate
+and switching to `fill-rule="evenodd"` looks equivalent and silently drops
+shapes — it was tried.
+
+Because a single `fill` carries the colour, one file serves any tint:
+`AerovoltLogo` drives it from `colorScheme.onSurface`, and there is no
+light/dark pair to keep in sync. The `viewBox` is normalised to the ink, so a
+width means the width you see.
+
+The icon masters in `tool/icons/` come from `tool/generate_icon_masters.py`,
+which rasterises the mark with headless Chrome — there is no `cairosvg` or
+`rsvg-convert` on this machine.
 
 ## Testing
 
