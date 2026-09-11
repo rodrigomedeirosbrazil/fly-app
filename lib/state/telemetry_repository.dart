@@ -118,10 +118,7 @@ class TelemetryRepository extends ChangeNotifier {
     switch (payload.source) {
       case TelemetrySource.xctod:
         for (final line in _assembler.add(payload.bytes)) {
-          if (_health.onFrame(
-            XctodParser.parse(line, receivedAt: now),
-            now,
-          )) {
+          if (_health.onFrame(XctodParser.parse(line, receivedAt: now))) {
             _anyFrameRendered = true;
           }
         }
@@ -131,7 +128,7 @@ class TelemetryRepository extends ChangeNotifier {
           payload.bytes,
           receivedAt: now,
         );
-        final decoded = _health.onFrame(frame, now);
+        final decoded = _health.onFrame(frame);
 
         if (shouldFallBackOnFrame(
           decoded: decoded,

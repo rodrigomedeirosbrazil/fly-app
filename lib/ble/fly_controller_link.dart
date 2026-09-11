@@ -92,6 +92,11 @@ class FlyControllerLink {
 
   BluetoothDevice? _device;
   StreamSubscription<List<int>>? _valueSub;
+
+  /// The characteristic currently notifying, so a fallback can quieten it.
+  /// Dropping only the Dart subscription leaves the controller pushing 56-byte
+  /// frames at 1 Hz to nobody for the rest of the flight.
+  BluetoothCharacteristic? _notifying;
   StreamSubscription<BluetoothConnectionState>? _connectionSub;
   bool _wantConnection = false;
   int _attempt = 0;
@@ -234,6 +239,7 @@ class FlyControllerLink {
 
       final (source, characteristic) = selected;
       await characteristic.setNotifyValue(true);
+      _notifying = characteristic;
       _valueSub = characteristic.onValueReceived
           .listen((bytes) => _payloadController.add(TelemetryPayload(source, bytes)));
 
@@ -371,28 +377,63 @@ class FlyControllerLink {
     final device = _device;
     if (device == null) return;
 
-    await _valueSub?.cancel();
-    _valueSub = null;
-    _info = null;
+    // Guarded like every other in-flight operation in this class: a
+    // disconnect racing the fallback must not leave a subscription attached
+    // across a teardown.
+    final generation = _generation;
 
-    for (final s in await device.discoverServices()) {
-      if (s.uuid != serviceUuid) continue;
-      for (final c in s.characteristics) {
-        if (c.uuid != txCharacteristicUuid) continue;
-        await c.setNotifyValue(true);
-        _valueSub = c.onValueReceived.listen(
-          (bytes) => _payloadController.add(
-            TelemetryPayload(TelemetrySource.xctod, bytes),
-          ),
-        );
-        return;
+    try {
+      await _valueSub?.cancel();
+      _valueSub = null;
+      _info = null;
+
+      final previous = _notifying;
+      _notifying = null;
+      if (previous != null) {
+        try {
+          await previous.setNotifyValue(false);
+        } catch (_) {
+          // Already gone. Nothing left to quieten.
+        }
       }
+
+      if (generation != _generation) return;
+
+      for (final s in await device.discoverServices()) {
+        if (s.uuid != serviceUuid) continue;
+        for (final c in s.characteristics) {
+          if (c.uuid != txCharacteristicUuid) continue;
+          if (generation != _generation) return;
+          await c.setNotifyValue(true);
+          _notifying = c;
+          _valueSub = c.onValueReceived.listen(
+            (bytes) => _payloadController.add(
+              TelemetryPayload(TelemetrySource.xctod, bytes),
+            ),
+          );
+          return;
+        }
+      }
+
+      // A controller serving the control service but no NUS characteristic is
+      // not something this connection can recover from. Dropping out silently
+      // would leave a live link with nothing subscribed to it -- the panel
+      // stale forever, with no retry and no error, which is the exact failure
+      // the scan loop was already fixed for once.
+      await _teardown();
+      _scheduleRetry(generation);
+    } catch (_) {
+      // Called through unawaited(), so a throw here would surface as an
+      // unhandled zone error instead of a reconnection.
+      await _teardown();
+      _scheduleRetry(generation);
     }
   }
 
   Future<void> _teardown() async {
     await _valueSub?.cancel();
     _valueSub = null;
+    _notifying = null;
     await _connectionSub?.cancel();
     _connectionSub = null;
     try {

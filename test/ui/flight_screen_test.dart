@@ -297,8 +297,11 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Horímetro'), findsOneWidget);
-      // Four binary-only rows plus the two readings this frame lacks.
-      expect(find.text('–'), findsAtLeastNWidgets(4));
+      // Exactly the five rows only the binary service can fill: hour meter,
+      // cell delta, sensor states, uptime, firmware. An exact count is the
+      // point -- findsAtLeast would still pass if a row the sentence DOES
+      // carry silently started dashing.
+      expect(find.text('–'), findsNWidgets(5));
     });
   });
 

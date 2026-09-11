@@ -104,6 +104,11 @@ class XctodParser {
   /// Maps the sentence's status text onto the shared reason enum. `ARMED` and
   /// `DISARMED` carry no fault; anything else is a code, and one this app does
   /// not recognise is kept as raw text rather than dropped.
+  ///
+  /// `MANUAL` cannot actually arrive: `Xctod::writeSystemStatus()` folds both
+  /// `None` and `Manual` into the literal `DISARMED`. It is mapped anyway so
+  /// the table matches `DisarmReason.h` rather than the one surface that
+  /// happens to collapse two of its values.
   static DisarmReason _reason(String status) => switch (status) {
         'ARMED' || 'DISARMED' => DisarmReason.none,
         'MANUAL' => DisarmReason.manual,

@@ -36,47 +36,41 @@ void main() {
 
   test('a valid frame becomes the current frame', () {
     final h = LinkHealth();
-    expect(h.onFrame(frameAt(t0), t0), isTrue);
+    expect(h.onFrame(frameAt(t0)), isTrue);
     expect(h.frameAt(t0)!.socCoulomb, 87);
   });
 
   test('the frame survives up to the staleness threshold', () {
-    final h = LinkHealth()..onFrame(frameAt(t0), t0);
+    final h = LinkHealth()..onFrame(frameAt(t0));
     expect(h.frameAt(at(2)), isNotNull);
     expect(h.isStale(at(2)), isFalse);
   });
 
   test('past the threshold the frame is withheld, not frozen', () {
-    final h = LinkHealth()..onFrame(frameAt(t0), t0);
+    final h = LinkHealth()..onFrame(frameAt(t0));
     expect(h.frameAt(at(4)), isNull);
     expect(h.isStale(at(4)), isTrue);
   });
 
   test('a fresh frame clears staleness', () {
-    final h = LinkHealth()..onFrame(frameAt(t0), t0);
+    final h = LinkHealth()..onFrame(frameAt(t0));
     expect(h.isStale(at(4)), isTrue);
-    h.onFrame(frameAt(at(5)), at(5));
+    h.onFrame(frameAt(at(5)));
     expect(h.isStale(at(5)), isFalse);
     expect(h.frameAt(at(5)), isNotNull);
   });
 
   test('a rejected frame is counted and does not replace the good frame', () {
-    final h = LinkHealth()..onFrame(frameAt(t0), t0);
-    expect(h.onFrame(null, at(1)), isFalse);
+    final h = LinkHealth()..onFrame(frameAt(t0));
+    expect(h.onFrame(null), isFalse);
     expect(h.rejectedCount, 1);
     expect(h.frameAt(at(1))!.socCoulomb, 87);
   });
 
-  test('a rejected frame does not refresh staleness', () {
-    final h = LinkHealth()..onFrame(frameAt(t0), t0);
-    h.onFrame(null, at(2));
-    expect(h.isStale(at(4)), isTrue);
-  });
-
   test('reset clears the frame but keeps the rejection tally', () {
     final h = LinkHealth()
-      ..onFrame(frameAt(t0), t0)
-      ..onFrame(null, t0);
+      ..onFrame(frameAt(t0))
+      ..onFrame(null);
     h.reset();
     expect(h.frameAt(t0), isNull);
     expect(h.isStale(t0), isFalse);
@@ -84,18 +78,14 @@ void main() {
   });
 
   test('a rejected frame does not refresh the clock', () {
-    final t0 = DateTime.utc(2026, 9, 11, 12);
-    final health = LinkHealth();
-    health.onFrame(frameAt(t0), t0);
+    final h = LinkHealth()..onFrame(frameAt(t0));
 
     // Two seconds of garbage must not keep the panel alive: a stream of
     // rubbish has to age out exactly like silence.
-    final t2 = t0.add(const Duration(seconds: 2));
-    health.onFrame(null, t2);
-    expect(health.rejectedCount, 1);
+    h.onFrame(null);
+    expect(h.rejectedCount, 1);
 
-    final t4 = t0.add(const Duration(seconds: 4));
-    expect(health.frameAt(t4), isNull);
-    expect(health.isStale(t4), isTrue);
+    expect(h.frameAt(at(4)), isNull);
+    expect(h.isStale(at(4)), isTrue);
   });
 }

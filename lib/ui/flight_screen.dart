@@ -178,17 +178,22 @@ class _StatusRow extends StatelessWidget {
           _Chip(text: text, color: color),
           const Spacer(),
           if (f?.sessionSec != null) ...[
-            Text(
-              _clock(f!.sessionSec!),
-              maxLines: 1,
-              softWrap: false,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 1.2,
-                color: theme.colorScheme.onSurfaceVariant,
-                // Tabular figures, so the digits do not shuffle every second.
-                fontFeatures: const [FontFeature.tabularFigures()],
+            // Flexible for the same reason the chip beside it is: this row is
+            // a fixed height, so anything that cannot shrink overflows hard
+            // instead of ellipsizing.
+            Flexible(
+              child: Text(
+                _clock(f!.sessionSec!),
+                maxLines: 1,
+                softWrap: false,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.2,
+                  color: theme.colorScheme.onSurfaceVariant,
+                  // Tabular figures, so digits do not shuffle every second.
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
               ),
             ),
             const SizedBox(width: 10),

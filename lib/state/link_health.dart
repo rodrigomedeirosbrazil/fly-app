@@ -25,7 +25,10 @@ class LinkHealth {
   /// model, and which decoder ran is not this class's business. Rejections are
   /// counted and deliberately do **not** refresh the clock — a stream of
   /// garbage has to age out exactly like silence.
-  bool onFrame(TelemetryFrame? frame, DateTime now) {
+  ///
+  /// Takes no clock, unlike [frameAt] and [isStale]: freshness is measured
+  /// from the frame's own `receivedAt`, never from when this was called.
+  bool onFrame(TelemetryFrame? frame) {
     if (frame == null) {
       _rejected++;
       return false;
