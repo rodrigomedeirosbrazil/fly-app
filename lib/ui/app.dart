@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
-import '../state/config_editor.dart';
 import '../state/telemetry_repository.dart';
 import 'connection_screen.dart';
 import 'flight_screen.dart';
-import 'settings_screen.dart';
+import 'settings/settings_navigation.dart';
 
 class FlyApp extends StatefulWidget {
   const FlyApp({super.key});
@@ -73,26 +72,14 @@ class _FlyAppState extends State<FlyApp> {
               onOpenLocationSettings: () => _repo.openLocationSettings(),
             );
           }
-          final session = _repo.session;
           return FlightScreen(
             frame: frame,
             stale: _repo.isStale,
             firmwareVersion: _repo.firmwareVersion,
             thermalConfig: _repo.thermalConfig,
-            onOpenSettings: session == null
+            onOpenSettings: _repo.session == null
                 ? null
-                : () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => SettingsScreen(
-                          editor: ConfigEditor(session),
-                          power: _repo.powerConfig,
-                          thermal: _repo.thermalConfig,
-                          armed: _repo.frame?.isArmed ?? false,
-                          selectableMotorTempSource:
-                              _repo.selectableMotorTempSource,
-                        ),
-                      ),
-                    ),
+                : () => openSettings(context, _repo),
           );
         },
       ),
