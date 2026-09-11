@@ -45,6 +45,20 @@ success. Always `flutter build` first, or use `flutter run`. Check
 `stat -f "%Sm" build/ios/iphoneos/Runner.app/Runner` against your last edit if
 the device shows no change.
 
+**`flutter install` can hang indefinitely on a wireless device**, and so can
+`flutter devices` — both were observed sitting past a 10-minute timeout with
+the phone unlocked and reachable. `devicectl` talks to it directly and does
+not:
+
+```bash
+xcrun devicectl list devices
+xcrun devicectl device install app --device <udid> build/ios/iphoneos/Runner.app
+xcrun devicectl device process launch --device <udid> br.com.medeirostec.aerovolt
+```
+
+Still build with `flutter build ios --release` first — `devicectl` installs
+whatever is in `build/`, with the same staleness trap as `flutter install`.
+
 `flutter devices` lists connected hardware. An emulator or simulator is useless
 here — neither has a Bluetooth radio.
 
