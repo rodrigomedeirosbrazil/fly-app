@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../ble/fly_controller_link.dart';
+import '../protocol/control_info.dart';
 import '../protocol/control_telemetry_codec.dart';
 import '../protocol/line_assembler.dart';
 import '../protocol/telemetry_frame.dart';
@@ -51,6 +52,22 @@ class TelemetryRepository extends ChangeNotifier {
   bool get isStale => _health.isStale(_now());
 
   int get rejectedFrames => _health.rejectedCount;
+
+  /// Firmware version and controller type, as one support line — `2.4.1 ·
+  /// XAG`. Null on the `$XCTOD` path, where INFO was never read.
+  ///
+  /// Combined into one row rather than two on purpose: the overlay's height
+  /// budget in landscape is tight, and these two are always read together.
+  String? get firmwareVersion {
+    final i = _link.info;
+    if (i == null) return null;
+    final type = switch (i.controllerType) {
+      ControllerType.xag => 'XAG',
+      ControllerType.tmotor => 'Tmotor',
+      ControllerType.unknown => '?',
+    };
+    return '${i.appVersion} · $type';
+  }
 
   Future<void> start() async {
     final blocked = await _link.blockingCondition();

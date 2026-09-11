@@ -23,6 +23,12 @@ TelemetryFrame frame({
   int? cellMinMv = 3712,
   Set<LimitCause>? limitCauses,
   Duration? sessionSec,
+  Duration? hourMeterSec,
+  Duration? uptimeSec,
+  int? cellDeltaMv,
+  SignalState? motorTempState,
+  SignalState? escTempState,
+  SignalState? batteryVoltageState,
 }) =>
     TelemetryFrame(
       socCoulomb: 87,
@@ -45,6 +51,12 @@ TelemetryFrame frame({
       receivedAt: DateTime.utc(2026, 9, 9),
       limitCauses: limitCauses,
       sessionSec: sessionSec,
+      hourMeterSec: hourMeterSec,
+      uptimeSec: uptimeSec,
+      cellDeltaMv: cellDeltaMv,
+      motorTempState: motorTempState,
+      escTempState: escTempState,
+      batteryVoltageState: batteryVoltageState,
     );
 
 Widget wrap(Widget child) => MaterialApp(home: child);
@@ -257,6 +269,37 @@ void main() {
       // data behind it.
       expect(find.byTooltip('Mais dados'), findsOneWidget);
     });
+
+    testWidgets('the binary-only readings reach the drawer', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(
+          hourMeterSec: const Duration(seconds: 123456),
+          cellDeltaMv: 33,
+          uptimeSec: const Duration(seconds: 900),
+          motorTempState: SignalState.valid,
+          escTempState: SignalState.stale,
+          batteryVoltageState: SignalState.valid,
+        ),
+        stale: false,
+      )));
+      await tester.tap(find.text('MAIS DADOS'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('34:17:36'), findsOneWidget); // hour meter
+      expect(find.text('33 mV'), findsOneWidget);
+      expect(find.text('OK · PARADO · OK'), findsOneWidget);
+    });
+
+    testWidgets('a sentence-fed frame dashes them instead of showing zeros',
+        (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
+      await tester.tap(find.text('MAIS DADOS'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Horímetro'), findsOneWidget);
+      // Four binary-only rows plus the two readings this frame lacks.
+      expect(find.text('–'), findsAtLeastNWidgets(4));
+    });
   });
 
   group('the Android back button', () {
@@ -418,6 +461,13 @@ void main() {
           ),
           stale: false,
         )));
+        await tester.pumpAndSettle();
+
+        expect(tester.takeException(), isNull);
+
+        // Also test the overlay open at this size, especially the 852x393
+        // landscape where rows would overflow without scrolling.
+        await tester.tap(find.text('MAIS DADOS'));
         await tester.pumpAndSettle();
 
         expect(tester.takeException(), isNull);

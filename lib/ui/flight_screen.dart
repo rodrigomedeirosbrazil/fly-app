@@ -21,12 +21,19 @@ const int _seriesCells = 14;
 /// Neither `sessionSec` nor the thermal thresholds travel over the $XCTOD
 /// stream. They arrive with phase 2.
 class FlightScreen extends StatefulWidget {
-  const FlightScreen({super.key, required this.frame, required this.stale});
+  const FlightScreen({
+    super.key,
+    required this.frame,
+    required this.stale,
+    this.firmwareVersion,
+  });
 
   final TelemetryFrame? frame;
 
   /// True when a frame was received but has aged out.
   final bool stale;
+
+  final String? firmwareVersion;
 
   @override
   State<FlightScreen> createState() => _FlightScreenState();
@@ -76,6 +83,7 @@ class _FlightScreenState extends State<FlightScreen> {
                 _SecondaryData(
                   frame: f,
                   onClose: () => setState(() => _drawerOpen = false),
+                  firmwareVersion: widget.firmwareVersion,
                 ),
             ],
           ),
@@ -651,10 +659,15 @@ class _DrawerBar extends StatelessWidget {
 /// reachable but overlaid, so the BMS connecting or dropping cannot re-lay out
 /// the numbers the pilot is reading.
 class _SecondaryData extends StatelessWidget {
-  const _SecondaryData({required this.frame, required this.onClose});
+  const _SecondaryData({
+    required this.frame,
+    required this.onClose,
+    this.firmwareVersion,
+  });
 
   final TelemetryFrame? frame;
   final VoidCallback onClose;
+  final String? firmwareVersion;
 
   /// An unavailable reading is a dash. Same rule as the panel.
   static String _or(Object? value, String suffix) =>
@@ -672,6 +685,33 @@ class _SecondaryData extends StatelessWidget {
         _ => '–',
       };
 
+  /// `h:mm:ss`, for counters that run to hundreds of hours.
+  static String _hours(Duration? d) {
+    if (d == null) return '–';
+    final h = d.inHours;
+    final m = d.inMinutes % 60;
+    final s = d.inSeconds % 60;
+    return '$h:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  }
+
+  /// Sensor health in the pilot's language. Only Valid is a working sensor —
+  /// zero is a legitimate reading, so the state is the only thing that
+  /// answers this.
+  static String _signal(SignalState? s) => switch (s) {
+        SignalState.valid => 'OK',
+        SignalState.stale => 'PARADO',
+        SignalState.invalid => 'INVÁLIDO',
+        SignalState.absent => 'AUSENTE',
+        null => '–',
+      };
+
+  String get _signals {
+    final f = frame;
+    if (f == null || f.motorTempState == null) return '–';
+    return '${_signal(f.motorTempState)} · ${_signal(f.escTempState)}'
+        ' · ${_signal(f.batteryVoltageState)}';
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -684,6 +724,11 @@ class _SecondaryData extends StatelessWidget {
       ('Temp. máx. BMS', _or(f?.bmsMaxTempC, ' °C')),
       ('Células mín / máx', _cells),
       ('Origem temp. motor', _source),
+      ('Horímetro', _hours(f?.hourMeterSec)),
+      ('Delta de células', _or(f?.cellDeltaMv, ' mV')),
+      ('Sensores (mot · esc · bat)', _signals),
+      ('Tempo ligado', _hours(f?.uptimeSec)),
+      ('Firmware', firmwareVersion ?? '–'),
     ];
 
     return Positioned.fill(
@@ -715,28 +760,55 @@ class _SecondaryData extends StatelessWidget {
                           onPressed: onClose,
                         ),
                       ),
-                      for (final (label, value) in rows)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 7),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      // Proportional, not a point constant: the sheet's
+                      // Container is a Column child and so receives unbounded
+                      // height, which is why a plain Flexible cannot bound the
+                      // scroll view here. A fixed cap would force scrolling on
+                      // a tall phone that has room for every row, and would go
+                      // stale as phase 2 adds more of them.
+                      ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxHeight: MediaQuery.sizeOf(context).height * 0.7,
+                        ),
+                        child: SingleChildScrollView(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
                             children: [
-                              Text(
-                                label,
-                                style: TextStyle(
-                                  color: theme.colorScheme.onSurfaceVariant,
+                              for (final (label, value) in rows)
+                                Padding(
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 7),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          label,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            color: theme
+                                                .colorScheme.onSurfaceVariant,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 16),
+                                      Text(
+                                        value,
+                                        maxLines: 1,
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          fontFeatures: [
+                                            FontFeature.tabularFigures()
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ),
-                              Text(
-                                value,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  fontFeatures: [FontFeature.tabularFigures()],
-                                ),
-                              ),
                             ],
                           ),
                         ),
+                      ),
                     ],
                   ),
                 ),
