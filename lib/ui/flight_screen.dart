@@ -111,6 +111,24 @@ class _StatusRow extends StatelessWidget {
   final TelemetryFrame? frame;
   final bool stale;
 
+  /// `mm:ss`, and minutes keep counting past 60 rather than rolling over — a
+  /// paramotor flight is measured in minutes and an hour hand would be one
+  /// more thing to read.
+  static String _clock(Duration d) {
+    final minutes = d.inMinutes;
+    final seconds = d.inSeconds % 60;
+    return '${minutes.toString().padLeft(2, '0')}:'
+        '${seconds.toString().padLeft(2, '0')}';
+  }
+
+  /// The short codes the firmware already uses for disarm reasons, so the two
+  /// chips in this row speak the same vocabulary.
+  static String _causes(Set<LimitCause> causes) => [
+        if (causes.contains(LimitCause.battery)) 'BAT',
+        if (causes.contains(LimitCause.motorTemp)) 'MOT',
+        if (causes.contains(LimitCause.escTemp)) 'ESC',
+      ].join(' ');
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -151,10 +169,35 @@ class _StatusRow extends StatelessWidget {
           const SizedBox(width: 10),
           _Chip(text: text, color: color),
           const Spacer(),
+          if (f?.sessionSec != null) ...[
+            Text(
+              _clock(f!.sessionSec!),
+              maxLines: 1,
+              softWrap: false,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.2,
+                color: theme.colorScheme.onSurfaceVariant,
+                // Tabular figures, so the digits do not shuffle every second.
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+            const SizedBox(width: 10),
+          ],
           if (f != null && f.isLimited)
-            _Chip(
-              text: 'DISPONÍVEL ${f.powerPct} %',
-              color: theme.colorScheme.error,
+            Flexible(
+              child: _Chip(
+                // Leading with the cause is shorter than the old wording in
+                // the single-cause case, which is the common one: the chip
+                // gains information and loses width at the same time. A
+                // source that cannot say which limiter is acting keeps the
+                // original text.
+                text: f.limitCauses == null || f.limitCauses!.isEmpty
+                    ? 'DISPONÍVEL ${f.powerPct} %'
+                    : '${_causes(f.limitCauses!)} ${f.powerPct} %',
+                color: theme.colorScheme.error,
+              ),
             ),
         ],
       ),
@@ -178,6 +221,9 @@ class _Chip extends StatelessWidget {
       ),
       child: Text(
         text,
+        maxLines: 1,
+        softWrap: false,
+        overflow: TextOverflow.ellipsis,
         style: TextStyle(
           color: color,
           fontSize: 13,

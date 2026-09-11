@@ -21,6 +21,8 @@ TelemetryFrame frame({
   DisarmReason disarmReason = DisarmReason.none,
   int powerPct = 100,
   int? cellMinMv = 3712,
+  Set<LimitCause>? limitCauses,
+  Duration? sessionSec,
 }) =>
     TelemetryFrame(
       socCoulomb: 87,
@@ -41,6 +43,8 @@ TelemetryFrame frame({
       cellMinMv: cellMinMv,
       cellMaxMv: cellMaxMv,
       receivedAt: DateTime.utc(2026, 9, 9),
+      limitCauses: limitCauses,
+      sessionSec: sessionSec,
     );
 
 Widget wrap(Widget child) => MaterialApp(home: child);
@@ -301,6 +305,91 @@ void main() {
     });
   });
 
+  group('the limiter chip names its cause', () {
+    testWidgets('one cause leads the chip', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(powerPct: 80, limitCauses: {LimitCause.motorTemp}),
+        stale: false,
+      )));
+
+      expect(find.text('MOT 80 %'), findsOneWidget);
+      expect(find.textContaining('DISPONÍVEL'), findsNothing);
+    });
+
+    testWidgets('causes combine in a fixed order', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(powerPct: 70, limitCauses: {
+          LimitCause.escTemp,
+          LimitCause.battery,
+        }),
+        stale: false,
+      )));
+
+      expect(find.text('BAT ESC 70 %'), findsOneWidget);
+    });
+
+    testWidgets('a source that cannot say keeps the original wording',
+        (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(powerPct: 80, limitCauses: null),
+        stale: false,
+      )));
+
+      expect(find.text('DISPONÍVEL 80 %'), findsOneWidget);
+    });
+
+    testWidgets('an empty cause set with full power shows no chip at all',
+        (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(powerPct: 100, limitCauses: const <LimitCause>{}),
+        stale: false,
+      )));
+
+      // Asserted against the chip's own wording, not against '%' — the
+      // throttle and battery cards carry percentages of their own.
+      expect(find.textContaining('DISPONÍVEL'), findsNothing);
+      expect(find.textContaining('100 %'), findsNothing);
+    });
+  });
+
+  group('the flight clock', () {
+    testWidgets('renders as mm:ss in the space the status row reserves',
+        (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(sessionSec: const Duration(seconds: 754)),
+        stale: false,
+      )));
+
+      expect(find.text('12:34'), findsOneWidget);
+    });
+
+    testWidgets('passes an hour without wrapping to zero', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(sessionSec: const Duration(seconds: 3725)),
+        stale: false,
+      )));
+
+      expect(find.text('62:05'), findsOneWidget);
+    });
+
+    testWidgets('is simply absent on the sentence path', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(sessionSec: null),
+        stale: false,
+      )));
+
+      // A bare ':' would also match readings elsewhere on the panel, so this
+      // asserts the clock's own shape: two digits, a colon, two digits.
+      expect(
+        find.byWidgetPredicate((w) =>
+            w is Text &&
+            w.data != null &&
+            RegExp(r'^\d{2}:\d{2}$').hasMatch(w.data!)),
+        findsNothing,
+      );
+    });
+  });
+
   group('layout holds at real device sizes', () {
     // A widget test fails on RenderFlex overflow, so pumping at each size and
     // settling is the assertion. 393x852 is the iPhone 14 Pro this was first
@@ -317,7 +406,18 @@ void main() {
         tester.view.devicePixelRatio = 1.0;
         addTearDown(tester.view.reset);
 
-        await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
+        await tester.pumpWidget(wrap(FlightScreen(
+          frame: frame(
+            powerPct: 70,
+            limitCauses: {
+              LimitCause.battery,
+              LimitCause.motorTemp,
+              LimitCause.escTemp,
+            },
+            sessionSec: const Duration(seconds: 754),
+          ),
+          stale: false,
+        )));
         await tester.pumpAndSettle();
 
         expect(tester.takeException(), isNull);
