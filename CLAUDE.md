@@ -351,6 +351,25 @@ reading" is the frame's rule rather than a second one. There is no "reset to
 default": `BATTERY_DIVIDER_RATIO` is a compile-time constant per board and
 reaches neither `INFO` nor any config group, so the app cannot know it.
 
+### A number field that cannot be read is not a zero
+
+`TextInputType.number` is iOS's `numberPad`, which carries **no decimal
+separator**. Four settings fields are decimal, so that alone made `3,15`
+untypeable on an iPhone; they use `numberWithOptions(decimal: true)`.
+
+`parseSetting` reads both separators — the labels are written `3,15 V`, which
+is what a pilot types and what `double.parse` rejects — and returns **null**
+rather than zero when it cannot read the field. The old `?? 0` was the real
+hazard: `abc` in the motor reduction start became `0 °C`, which passes the
+0..150 range *and* the `start < max` ordering rule, and would have been
+written as a band cutting power from zero upward. That is the configuration
+the ordering rules exist to refuse, reached around them.
+
+The input filter is an allow-list of digits and separators, not a fixed-width
+mask — these fields have different lengths, and a mask would fix each one's
+shape in advance. It restricts the alphabet; the parse judges the format, and
+the parse is the half that covers paste, hardware keyboards and `1.2.3`.
+
 ### The Dart enum order does not match the firmware's
 
 `MotorTempSource` is declared `{can, ntc, none}` here; the firmware's
