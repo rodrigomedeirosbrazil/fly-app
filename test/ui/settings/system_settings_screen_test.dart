@@ -56,7 +56,6 @@ class RecordingEditor implements ConfigEditor {
   @override
   Future<BmsScanState?> readBmsScan() async => null;
 
-  @override
   /// What the pairing poll sees. `remoteMac` turning non-zero is the ONLY
   /// readback pairing has -- REMOTE_PAIR answers Ok the instant it raises a
   /// flag -- so a test cannot reach the paired state without this.
