@@ -312,6 +312,45 @@ assumed data is what this codebase refuses everywhere else. A failed re-read is
 still a success — the controller accepted the write; only the confirmation is
 missing.
 
+### A pushed route freezes unless its content listens
+
+`MaterialPageRoute`'s builder runs **once**. Anything read from the repository
+inside it is a snapshot, so the settings screens' content sits in a
+`ListenableBuilder` on `TelemetryRepository`.
+
+This shipped wrong once: `armed` was captured at push time, so arming the
+aircraft while the settings screen was open did not disable saving. The
+firmware still refused with `ErrState`, so nothing unsafe was written — but
+the gate the pilot could see did not move. **Every widget test passed**,
+because each pumped a fresh widget with the flag already set; they tested the
+widget, not the wiring. `test/ui/settings/settings_navigation_test.dart` pins
+the shape instead — both that saving is available when disarmed and that it
+disables when arming happens mid-screen.
+
+The same trap caught the PIN dialog: a pushed route runs its builder once, so
+the `TextEditingController` it created became stale as the user typed. When
+the dialog dismissed, `Navigator.pop` started the teardown and the controller
+disposed while the `TextField` was still mounted. The controller is now owned
+by the settings screen and outlives every dialog, because the route that
+borrowed it cannot outlive the screen that created it.
+
+### The settings screens mirror the portal
+
+Four areas, per-cell voltage entry with the pack total beside it, a dropdown of
+the pack sizes the portal offers, and a voltage divider that is **derived, not
+typed** — the formula comes from `src/WebServer/Pages/ConfigPowerPage.h`.
+A pilot who knows one surface should recognise the other.
+
+`kSeriesCells` is 14, mirroring the firmware's `BATTERY_CELL_COUNT`. Both the
+flight panel and the settings screens convert pack voltage to per-cell with
+it.
+
+Calibration goes inert when `frame.voltage` is null — the codec already nulls
+it unless the battery-voltage signal state is `Valid`, so "no trustworthy
+reading" is the frame's rule rather than a second one. There is no "reset to
+default": `BATTERY_DIVIDER_RATIO` is a compile-time constant per board and
+reaches neither `INFO` nor any config group, so the app cannot know it.
+
 ### The Dart enum order does not match the firmware's
 
 `MotorTempSource` is declared `{can, ntc, none}` here; the firmware's

@@ -156,6 +156,13 @@ so it takes the modern permission path and never executes the API ≤ 30 branch.
 That branch is covered by a table test and by nothing else. Confirming it
 needs an Android 7–11 device.
 
+**The default voltage divider ratio is unreachable over BLE.**
+`Settings::getDefaultVoltageDividerRatio()` returns `BATTERY_DIVIDER_RATIO`, a
+compile-time constant per board, and it appears in neither `INFO` nor any
+config group. The app can calibrate but cannot offer the portal's "Resetar
+para Padrão". Exposing it would mean a byte in `INFO`, which is a protocol
+change for a button.
+
 **Does phase 2 extend the NUS service or add a second one?**
 
 **Does phase 3's OTA go over BLE or hand off to WiFi?** BLE in principle; the
