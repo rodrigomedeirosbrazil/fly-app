@@ -1,28 +1,36 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fly_app/protocol/xctod_frame.dart';
+import 'package:fly_app/protocol/telemetry_frame.dart';
 import 'package:fly_app/ui/flight_screen.dart';
 import 'package:fly_app/ui/widgets/dial.dart';
 
 import 'navigator_utils.dart';
 
-XctodFrame frame({
+TelemetryFrame frame({
   double? voltage = 50.4,
-  int? motorTempC = 61,
+  double? motorTempC = 61,
   MotorTempSource source = MotorTempSource.can,
-  int? escTempC = 54,
-  int? currentA = 30,
+  double? escTempC = 54,
+  double? currentA = 30,
   int? rpm = 4200,
   int socVoltage = 91,
   int? bmsMaxTempC = 38,
   int? cellMaxMv = 3745,
   double? powerKw = 1.5,
   ArmState armState = ArmState.armed,
-  String? disarmCode,
+  DisarmReason disarmReason = DisarmReason.none,
   int powerPct = 100,
   int? cellMinMv = 3712,
+  Set<LimitCause>? limitCauses,
+  Duration? sessionSec,
+  Duration? hourMeterSec,
+  Duration? uptimeSec,
+  int? cellDeltaMv,
+  SignalState? motorTempState,
+  SignalState? escTempState,
+  SignalState? batteryVoltageState,
 }) =>
-    XctodFrame(
+    TelemetryFrame(
       socCoulomb: 87,
       socVoltage: socVoltage,
       voltage: voltage,
@@ -36,11 +44,19 @@ XctodFrame frame({
       currentA: currentA,
       escTempC: escTempC,
       armState: armState,
-      disarmCode: disarmCode,
+      disarmReason: disarmReason,
       bmsMaxTempC: bmsMaxTempC,
       cellMinMv: cellMinMv,
       cellMaxMv: cellMaxMv,
       receivedAt: DateTime.utc(2026, 9, 9),
+      limitCauses: limitCauses,
+      sessionSec: sessionSec,
+      hourMeterSec: hourMeterSec,
+      uptimeSec: uptimeSec,
+      cellDeltaMv: cellDeltaMv,
+      motorTempState: motorTempState,
+      escTempState: escTempState,
+      batteryVoltageState: batteryVoltageState,
     );
 
 Widget wrap(Widget child) => MaterialApp(home: child);
@@ -78,7 +94,7 @@ void main() {
   testWidgets('a disarm code is shown in the space the status bar reserves',
       (tester) async {
     await tester.pumpWidget(wrap(FlightScreen(
-      frame: frame(armState: ArmState.disarmed, disarmCode: 'MOT SRC'),
+      frame: frame(armState: ArmState.disarmed, disarmReason: DisarmReason.motorTempSourceChanged),
       stale: false,
     )));
 
@@ -253,6 +269,40 @@ void main() {
       // data behind it.
       expect(find.byTooltip('Mais dados'), findsOneWidget);
     });
+
+    testWidgets('the binary-only readings reach the drawer', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(
+          hourMeterSec: const Duration(seconds: 123456),
+          cellDeltaMv: 33,
+          uptimeSec: const Duration(seconds: 900),
+          motorTempState: SignalState.valid,
+          escTempState: SignalState.stale,
+          batteryVoltageState: SignalState.valid,
+        ),
+        stale: false,
+      )));
+      await tester.tap(find.text('MAIS DADOS'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('34:17:36'), findsOneWidget); // hour meter
+      expect(find.text('33 mV'), findsOneWidget);
+      expect(find.text('OK · PARADO · OK'), findsOneWidget);
+    });
+
+    testWidgets('a sentence-fed frame dashes them instead of showing zeros',
+        (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
+      await tester.tap(find.text('MAIS DADOS'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Horímetro'), findsOneWidget);
+      // Exactly the five rows only the binary service can fill: hour meter,
+      // cell delta, sensor states, uptime, firmware. An exact count is the
+      // point -- findsAtLeast would still pass if a row the sentence DOES
+      // carry silently started dashing.
+      expect(find.text('–'), findsNWidgets(5));
+    });
   });
 
   group('the Android back button', () {
@@ -301,6 +351,91 @@ void main() {
     });
   });
 
+  group('the limiter chip names its cause', () {
+    testWidgets('one cause leads the chip', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(powerPct: 80, limitCauses: {LimitCause.motorTemp}),
+        stale: false,
+      )));
+
+      expect(find.text('MOT 80 %'), findsOneWidget);
+      expect(find.textContaining('DISPONÍVEL'), findsNothing);
+    });
+
+    testWidgets('causes combine in a fixed order', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(powerPct: 70, limitCauses: {
+          LimitCause.escTemp,
+          LimitCause.battery,
+        }),
+        stale: false,
+      )));
+
+      expect(find.text('BAT ESC 70 %'), findsOneWidget);
+    });
+
+    testWidgets('a source that cannot say keeps the original wording',
+        (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(powerPct: 80, limitCauses: null),
+        stale: false,
+      )));
+
+      expect(find.text('DISPONÍVEL 80 %'), findsOneWidget);
+    });
+
+    testWidgets('an empty cause set with full power shows no chip at all',
+        (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(powerPct: 100, limitCauses: const <LimitCause>{}),
+        stale: false,
+      )));
+
+      // Asserted against the chip's own wording, not against '%' — the
+      // throttle and battery cards carry percentages of their own.
+      expect(find.textContaining('DISPONÍVEL'), findsNothing);
+      expect(find.textContaining('100 %'), findsNothing);
+    });
+  });
+
+  group('the flight clock', () {
+    testWidgets('renders as mm:ss in the space the status row reserves',
+        (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(sessionSec: const Duration(seconds: 754)),
+        stale: false,
+      )));
+
+      expect(find.text('12:34'), findsOneWidget);
+    });
+
+    testWidgets('passes an hour without wrapping to zero', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(sessionSec: const Duration(seconds: 3725)),
+        stale: false,
+      )));
+
+      expect(find.text('62:05'), findsOneWidget);
+    });
+
+    testWidgets('is simply absent on the sentence path', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(sessionSec: null),
+        stale: false,
+      )));
+
+      // A bare ':' would also match readings elsewhere on the panel, so this
+      // asserts the clock's own shape: two digits, a colon, two digits.
+      expect(
+        find.byWidgetPredicate((w) =>
+            w is Text &&
+            w.data != null &&
+            RegExp(r'^\d{2}:\d{2}$').hasMatch(w.data!)),
+        findsNothing,
+      );
+    });
+  });
+
   group('layout holds at real device sizes', () {
     // A widget test fails on RenderFlex overflow, so pumping at each size and
     // settling is the assertion. 393x852 is the iPhone 14 Pro this was first
@@ -317,7 +452,25 @@ void main() {
         tester.view.devicePixelRatio = 1.0;
         addTearDown(tester.view.reset);
 
-        await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
+        await tester.pumpWidget(wrap(FlightScreen(
+          frame: frame(
+            powerPct: 70,
+            limitCauses: {
+              LimitCause.battery,
+              LimitCause.motorTemp,
+              LimitCause.escTemp,
+            },
+            sessionSec: const Duration(seconds: 754),
+          ),
+          stale: false,
+        )));
+        await tester.pumpAndSettle();
+
+        expect(tester.takeException(), isNull);
+
+        // Also test the overlay open at this size, especially the 852x393
+        // landscape where rows would overflow without scrolling.
+        await tester.tap(find.text('MAIS DADOS'));
         await tester.pumpAndSettle();
 
         expect(tester.takeException(), isNull);

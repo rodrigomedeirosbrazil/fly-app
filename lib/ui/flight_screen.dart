@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../protocol/xctod_frame.dart';
+import '../protocol/telemetry_frame.dart';
 import 'widgets/dial.dart';
 
 /// Number of series cells. The firmware has no support for other pack sizes, so
@@ -21,12 +21,19 @@ const int _seriesCells = 14;
 /// Neither `sessionSec` nor the thermal thresholds travel over the $XCTOD
 /// stream. They arrive with phase 2.
 class FlightScreen extends StatefulWidget {
-  const FlightScreen({super.key, required this.frame, required this.stale});
+  const FlightScreen({
+    super.key,
+    required this.frame,
+    required this.stale,
+    this.firmwareVersion,
+  });
 
-  final XctodFrame? frame;
+  final TelemetryFrame? frame;
 
   /// True when a frame was received but has aged out.
   final bool stale;
+
+  final String? firmwareVersion;
 
   @override
   State<FlightScreen> createState() => _FlightScreenState();
@@ -76,6 +83,7 @@ class _FlightScreenState extends State<FlightScreen> {
                 _SecondaryData(
                   frame: f,
                   onClose: () => setState(() => _drawerOpen = false),
+                  firmwareVersion: widget.firmwareVersion,
                 ),
             ],
           ),
@@ -108,8 +116,26 @@ class _Card extends StatelessWidget {
 class _StatusRow extends StatelessWidget {
   const _StatusRow({required this.frame, required this.stale});
 
-  final XctodFrame? frame;
+  final TelemetryFrame? frame;
   final bool stale;
+
+  /// `mm:ss`, and minutes keep counting past 60 rather than rolling over — a
+  /// paramotor flight is measured in minutes and an hour hand would be one
+  /// more thing to read.
+  static String _clock(Duration d) {
+    final minutes = d.inMinutes;
+    final seconds = d.inSeconds % 60;
+    return '${minutes.toString().padLeft(2, '0')}:'
+        '${seconds.toString().padLeft(2, '0')}';
+  }
+
+  /// The short codes the firmware already uses for disarm reasons, so the two
+  /// chips in this row speak the same vocabulary.
+  static String _causes(Set<LimitCause> causes) => [
+        if (causes.contains(LimitCause.battery)) 'BAT',
+        if (causes.contains(LimitCause.motorTemp)) 'MOT',
+        if (causes.contains(LimitCause.escTemp)) 'ESC',
+      ].join(' ');
 
   @override
   Widget build(BuildContext context) {
@@ -151,10 +177,40 @@ class _StatusRow extends StatelessWidget {
           const SizedBox(width: 10),
           _Chip(text: text, color: color),
           const Spacer(),
+          if (f?.sessionSec != null) ...[
+            // Flexible for the same reason the chip beside it is: this row is
+            // a fixed height, so anything that cannot shrink overflows hard
+            // instead of ellipsizing.
+            Flexible(
+              child: Text(
+                _clock(f!.sessionSec!),
+                maxLines: 1,
+                softWrap: false,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.2,
+                  color: theme.colorScheme.onSurfaceVariant,
+                  // Tabular figures, so digits do not shuffle every second.
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+          ],
           if (f != null && f.isLimited)
-            _Chip(
-              text: 'DISPONÍVEL ${f.powerPct} %',
-              color: theme.colorScheme.error,
+            Flexible(
+              child: _Chip(
+                // Leading with the cause is shorter than the old wording in
+                // the single-cause case, which is the common one: the chip
+                // gains information and loses width at the same time. A
+                // source that cannot say which limiter is acting keeps the
+                // original text.
+                text: f.limitCauses == null || f.limitCauses!.isEmpty
+                    ? 'DISPONÍVEL ${f.powerPct} %'
+                    : '${_causes(f.limitCauses!)} ${f.powerPct} %',
+                color: theme.colorScheme.error,
+              ),
             ),
         ],
       ),
@@ -178,6 +234,9 @@ class _Chip extends StatelessWidget {
       ),
       child: Text(
         text,
+        maxLines: 1,
+        softWrap: false,
+        overflow: TextOverflow.ellipsis,
         style: TextStyle(
           color: color,
           fontSize: 13,
@@ -195,7 +254,7 @@ class _Chip extends StatelessWidget {
 class _BatteryCard extends StatefulWidget {
   const _BatteryCard({required this.frame});
 
-  final XctodFrame? frame;
+  final TelemetryFrame? frame;
 
   @override
   State<_BatteryCard> createState() => _BatteryCardState();
@@ -236,7 +295,7 @@ class _BatteryCardState extends State<_BatteryCard> {
   /// Per-cell prefers the BMS minimum cell — a measurement. Falling back to
   /// pack voltage over [_seriesCells] is a mean dressed up as a minimum, and
   /// says so with a tilde.
-  ({String text, String unit})? _perCellReading(XctodFrame f) {
+  ({String text, String unit})? _perCellReading(TelemetryFrame f) {
     final min = f.cellMinMv;
     if (min != null) {
       return (text: (min / 1000).toStringAsFixed(2), unit: 'V/cél');
@@ -300,7 +359,7 @@ class _BatteryCardState extends State<_BatteryCard> {
                   Expanded(
                     child: _Reading(
                       label: 'CORRENTE',
-                      value: f!.currentA.toString(),
+                      value: f!.currentA!.round().toString(),
                       unit: 'A',
                     ),
                   ),
@@ -397,7 +456,7 @@ class _Reading extends StatelessWidget {
 class _InstrumentRow extends StatelessWidget {
   const _InstrumentRow({required this.frame});
 
-  final XctodFrame? frame;
+  final TelemetryFrame? frame;
 
   @override
   Widget build(BuildContext context) {
@@ -421,7 +480,7 @@ class _InstrumentRow extends StatelessWidget {
           Expanded(
             child: _Card(
               child: Dial(
-                value: f?.motorTempC?.toDouble(),
+                value: f?.motorTempC,
                 max: 140,
                 unit: '°C',
                 caption: 'MOTOR',
@@ -437,7 +496,7 @@ class _InstrumentRow extends StatelessWidget {
           Expanded(
             child: _Card(
               child: Dial(
-                value: f?.escTempC?.toDouble(),
+                value: f?.escTempC,
                 max: 140,
                 unit: '°C',
                 caption: 'ESC',
@@ -498,7 +557,7 @@ class _Readout extends StatelessWidget {
 class _ThrottleCard extends StatelessWidget {
   const _ThrottleCard({required this.frame});
 
-  final XctodFrame? frame;
+  final TelemetryFrame? frame;
 
   @override
   Widget build(BuildContext context) {
@@ -605,10 +664,15 @@ class _DrawerBar extends StatelessWidget {
 /// reachable but overlaid, so the BMS connecting or dropping cannot re-lay out
 /// the numbers the pilot is reading.
 class _SecondaryData extends StatelessWidget {
-  const _SecondaryData({required this.frame, required this.onClose});
+  const _SecondaryData({
+    required this.frame,
+    required this.onClose,
+    this.firmwareVersion,
+  });
 
-  final XctodFrame? frame;
+  final TelemetryFrame? frame;
   final VoidCallback onClose;
+  final String? firmwareVersion;
 
   /// An unavailable reading is a dash. Same rule as the panel.
   static String _or(Object? value, String suffix) =>
@@ -626,18 +690,50 @@ class _SecondaryData extends StatelessWidget {
         _ => '–',
       };
 
+  /// `h:mm:ss`, for counters that run to hundreds of hours.
+  static String _hours(Duration? d) {
+    if (d == null) return '–';
+    final h = d.inHours;
+    final m = d.inMinutes % 60;
+    final s = d.inSeconds % 60;
+    return '$h:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  }
+
+  /// Sensor health in the pilot's language. Only Valid is a working sensor —
+  /// zero is a legitimate reading, so the state is the only thing that
+  /// answers this.
+  static String _signal(SignalState? s) => switch (s) {
+        SignalState.valid => 'OK',
+        SignalState.stale => 'PARADO',
+        SignalState.invalid => 'INVÁLIDO',
+        SignalState.absent => 'AUSENTE',
+        null => '–',
+      };
+
+  String get _signals {
+    final f = frame;
+    if (f == null || f.motorTempState == null) return '–';
+    return '${_signal(f.motorTempState)} · ${_signal(f.escTempState)}'
+        ' · ${_signal(f.batteryVoltageState)}';
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final f = frame;
 
     final rows = <(String, String)>[
-      ('Carga (por tensão)', f == null ? '–' : '${f.socVoltage} %'),
+      ('Carga (por tensão)', _or(f?.socVoltage, ' %')),
       ('RPM', _or(f?.rpm, '')),
       ('Acelerador (bruto)', _or(f?.throttleRaw, '')),
       ('Temp. máx. BMS', _or(f?.bmsMaxTempC, ' °C')),
       ('Células mín / máx', _cells),
       ('Origem temp. motor', _source),
+      ('Horímetro', _hours(f?.hourMeterSec)),
+      ('Delta de células', _or(f?.cellDeltaMv, ' mV')),
+      ('Sensores (mot · esc · bat)', _signals),
+      ('Tempo ligado', _hours(f?.uptimeSec)),
+      ('Firmware', firmwareVersion ?? '–'),
     ];
 
     return Positioned.fill(
@@ -669,28 +765,55 @@ class _SecondaryData extends StatelessWidget {
                           onPressed: onClose,
                         ),
                       ),
-                      for (final (label, value) in rows)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 7),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      // Proportional, not a point constant: the sheet's
+                      // Container is a Column child and so receives unbounded
+                      // height, which is why a plain Flexible cannot bound the
+                      // scroll view here. A fixed cap would force scrolling on
+                      // a tall phone that has room for every row, and would go
+                      // stale as phase 2 adds more of them.
+                      ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxHeight: MediaQuery.sizeOf(context).height * 0.7,
+                        ),
+                        child: SingleChildScrollView(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
                             children: [
-                              Text(
-                                label,
-                                style: TextStyle(
-                                  color: theme.colorScheme.onSurfaceVariant,
+                              for (final (label, value) in rows)
+                                Padding(
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 7),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          label,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            color: theme
+                                                .colorScheme.onSurfaceVariant,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 16),
+                                      Text(
+                                        value,
+                                        maxLines: 1,
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          fontFeatures: [
+                                            FontFeature.tabularFigures()
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ),
-                              Text(
-                                value,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  fontFeatures: [FontFeature.tabularFigures()],
-                                ),
-                              ),
                             ],
                           ),
                         ),
+                      ),
                     ],
                   ),
                 ),

@@ -1,5 +1,4 @@
-import '../protocol/xctod_frame.dart';
-import '../protocol/xctod_parser.dart';
+import '../protocol/telemetry_frame.dart';
 
 /// Decides whether the telemetry on screen is still true.
 ///
@@ -13,16 +12,23 @@ class LinkHealth {
   /// never reads a stale number as current.
   final Duration staleAfter;
 
-  XctodFrame? _last;
+  TelemetryFrame? _last;
   int _rejected = 0;
 
-  /// Lines received that did not decode. Surfaced in the UI rather than
+  /// Payloads received that did not decode. Surfaced in the UI rather than
   /// silenced: on Android this is the symptom of an MTU that never grew.
   int get rejectedCount => _rejected;
 
-  /// Feeds one reassembled line. Returns true when it produced a usable frame.
-  bool onLine(String line, DateTime now) {
-    final frame = XctodParser.parse(line, receivedAt: now);
+  /// Feeds one decoded frame, or null when the payload was rejected.
+  ///
+  /// Decoding happens above this class now: two sources produce the same
+  /// model, and which decoder ran is not this class's business. Rejections are
+  /// counted and deliberately do **not** refresh the clock — a stream of
+  /// garbage has to age out exactly like silence.
+  ///
+  /// Takes no clock, unlike [frameAt] and [isStale]: freshness is measured
+  /// from the frame's own `receivedAt`, never from when this was called.
+  bool onFrame(TelemetryFrame? frame) {
     if (frame == null) {
       _rejected++;
       return false;
@@ -33,7 +39,7 @@ class LinkHealth {
 
   /// The current frame, or null once it is older than [staleAfter]. Withholding
   /// it is deliberate: no data beats stale data.
-  XctodFrame? frameAt(DateTime now) {
+  TelemetryFrame? frameAt(DateTime now) {
     final f = _last;
     if (f == null) return null;
     if (now.difference(f.receivedAt) > staleAfter) return null;

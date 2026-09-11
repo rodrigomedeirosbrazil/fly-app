@@ -70,7 +70,11 @@ class _FlyAppState extends State<FlyApp> {
               onOpenLocationSettings: () => _repo.openLocationSettings(),
             );
           }
-          return FlightScreen(frame: frame, stale: _repo.isStale);
+          return FlightScreen(
+            frame: frame,
+            stale: _repo.isStale,
+            firmwareVersion: _repo.firmwareVersion,
+          );
         },
       ),
     );

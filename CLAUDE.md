@@ -92,6 +92,93 @@ fly-controller and fly-throttle.
 > into the wrong columns. A firmware change to the sentence is a change to this
 > repo too.
 
+## The binary wire contract
+
+The controller also serves a **Fly Control** GATT service carrying a 56-byte
+binary telemetry struct at 1 Hz. It is not advertised — the 31-byte
+advertising payload cannot hold a second 128-bit UUID — so the scan filter
+stays on the NUS UUID and the service is found only after connecting.
+
+| | |
+|---|---|
+| Service | `D4CF0001-9B9D-4BFD-8F7F-40C6989D3EA9` |
+| `INFO` (read) | `D4CF0002-…` — 28 bytes, static for the session |
+| `TELEMETRY` (notify) | `D4CF0003-…` — 56 bytes |
+| `CMD` / `RSP` | `D4CF0004-…` / `D4CF0005-…` — **not implemented** |
+
+`lib/protocol/control_telemetry_codec.dart` is the **second** hand-duplicated
+fly-controller header in this repo, after `xctod_parser.dart`. The definition
+of record is `src/BleControl/ControlProtocol.h`, described by
+`docs/BLE-CONTROL-PROTOCOL.md`. Fields are read **by offset**, so the hazard is
+identical to the CSV one: a field that moves in the firmware decodes silently
+into the wrong column here. `test/ControlProtocolTest.cpp` there and
+`test/protocol/control_telemetry_codec_test.dart` here pin the same numbers,
+and they are the only thing that catches it.
+
+### Service presence is the capability handshake
+
+Firmware without the service simply does not have it, so a client that fails
+to find it falls back to `$XCTOD`. **Do not delete that fallback.**
+
+The source is chosen at discovery and **fixed once the first frame renders**.
+Three things fall back, and all three can only happen before anything reaches
+the screen: the service is absent, `INFO` will not read, or the first frame
+carries an unknown struct `ver`. After that the source is locked — a flip
+mid-flight would silently change which readings exist, and the flight clock
+would vanish under a pilot reading it. `lib/state/telemetry_source_policy.dart`
+is pure and table-tested for the same reason `ble_permission_policy.dart` is.
+
+### The gate is the frame's `ver`, not `INFO.protocolVersion`
+
+`ControlTelemetryCodec.kStructVersion` is **1**. The struct carries its own version at
+offset 0, bumped only when a telemetry field changes position or meaning.
+`INFO.protocolVersion` is broader — it also moves for config opcodes this app
+never sends — so gating the panel on it would cost the flight clock for a
+change that does not affect the panel. `protocolVersion` is recorded as a
+diagnostic and nothing else.
+
+Note the protocol document claims a higher `protocolVersion` still works
+because of the append rule. That is not true in the case the bump is defined
+for: if a field *moved*, appending saves nothing. See `ROADMAP.md`.
+
+### A short packet is corruption, not an old struct
+
+`ControlTelemetryCodec.kMinTelemetryLength` is **56**. Longer packets decode their first 56 bytes,
+so future firmware works. Shorter ones are rejected whole and counted.
+
+At protocol version 1 no older struct exists, so a short packet can only be
+corruption or an ATT-truncated notification — which is what the rejected-frame
+counter on the connection screen exists to diagnose. Decoding as far as the
+bytes go would turn a 20-byte fragment into a panel of plausible readings with
+the counter at zero. Same rule as the CSV parser: a malformed frame is
+rejected whole, because conflating it with a missing reading produces a
+screenful of convincing nulls.
+
+**`rejectedFrames` now counts binary frames too.** Its meaning on the
+connection screen is unchanged.
+
+### Absence has three sources and one answer
+
+`validity` bits cover availability (does this build produce the reading at
+all): current, RPM, power, BMS, per-cell. `signalStates` packs sensor *health*
+two bits at a time for motor temp, ESC temp and battery voltage — `Absent`,
+`Stale`, `Invalid`, `Valid` — and **only `Valid` means the number can be
+trusted, because zero is a legitimate reading**. `socCc` has neither and is
+always present; `socVolt` has neither but follows the battery-voltage state,
+because a percentage derived from a distrusted voltage is not a reading.
+
+All three collapse to `null` in `TelemetryFrame`, so every widget keeps the
+hide-don't-print-zero rule for free. The states themselves are carried
+alongside, so the decode stays lossless.
+
+### The Dart enum order does not match the firmware's
+
+`MotorTempSource` is declared `{can, ntc, none}` here; the firmware's
+`MotorTempOrigin` is `{None = 0, Can = 1, Ntc = 2}`. The codec maps it with an
+explicit `switch` and must never index one by the other's integer.
+`DisarmReason` *is* positional, with a trailing `unknown` this repo adds so a
+reason from newer firmware degrades instead of throwing.
+
 ## Project Structure
 
 ```
@@ -381,13 +468,15 @@ shipped app.
 
 ## What is deliberately absent
 
-Not oversights — this data does not exist on the BLE stream:
+Not oversights — this data does not exist on the `$XCTOD` stream, and is
+available only when the binary service is present:
 
-- **Flight clock** (`sessionSec`)
-- **Which limiter is acting** (`powerAlert.causes[]`)
+- **Flight clock** (`sessionSec`) — **done**, shown in the status row
+- **Which limiter is acting** (`limitCauses`) — **done**, named on the chip
+
+Still absent, and both need the `CMD`/`RSP` channel (phase 2, subsystem 2):
+
 - **The red reduction band** on the thermal dials — the thresholds are
   configurable in the controller's NVS, so drawing the factory 80/100 °C would
-  show a number that may not be this pilot's
-- **Buzzer mirroring**
-
-All four need phase 2.
+  show a number that may not be this pilot's. Needs `CFG_GET`.
+- **Buzzer mirroring** — needs the `RSP` event channel.
