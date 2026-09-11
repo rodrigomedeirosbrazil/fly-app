@@ -10,10 +10,15 @@ import 'package:flutter/material.dart';
 /// Sized only as a proportion of the space it is given — no point sizes — which
 /// is what survives an orientation change and a 320 pt phone alike.
 ///
-/// There is deliberately no reduction band. The thermal thresholds are
-/// configurable in the controller's NVS and do not travel over the $XCTOD
-/// stream, so the red zone the web panel draws cannot be drawn here yet
-/// without inventing the numbers. It arrives with phase 2.
+/// The reduction band is the arc between where the controller begins cutting
+/// power and where it cuts it entirely. Both come from the controller's NVS
+/// over `CFG_GET`, so they are this pilot's numbers rather than the factory
+/// defaults — which is why the band could not be drawn before phase 2.
+///
+/// [bandStart] and [bandEnd] null means no band: the sentence path, firmware
+/// that cannot answer, or thresholds that do not describe a range. The scale
+/// stays [max] regardless, so the needle angle means the same temperature on
+/// every aircraft.
 class Dial extends StatelessWidget {
   const Dial({
     super.key,
@@ -24,6 +29,8 @@ class Dial extends StatelessWidget {
     this.caption,
     this.badge,
     this.showScale = false,
+    this.bandStart,
+    this.bandEnd,
   });
 
   final double? value;
@@ -42,11 +49,18 @@ class Dial extends StatelessWidget {
   /// Draw 0 and [max] at the ring's open ends.
   final bool showScale;
 
+  /// Where power reduction begins, in the same unit as [value].
+  final double? bandStart;
+
+  /// Where power is cut entirely.
+  final double? bandEnd;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final v = value;
     final fraction = (v == null || max <= 0) ? 0.0 : (v / max).clamp(0.0, 1.0);
+    final band = _bandFractions();
 
     return Column(
       children: [
@@ -59,6 +73,9 @@ class Dial extends StatelessWidget {
                   fraction: fraction,
                   trackColor: theme.colorScheme.surfaceContainerHighest,
                   valueColor: theme.colorScheme.primary,
+                  bandColor: theme.colorScheme.error,
+                  bandStartFraction: band.$1,
+                  bandEndFraction: band.$2,
                 ),
                 child: Stack(
                   children: [
@@ -131,6 +148,18 @@ class Dial extends StatelessWidget {
           right: 0, bottom: 0, child: Text(max.round().toString(), style: style)),
     ];
   }
+
+  /// The band as fractions of the arc, or (null, null) when there is none.
+  ///
+  /// Guards the same rule `ThermalConfig` does, because a Dial can be built
+  /// from anywhere: numbers that do not describe a range do not become one.
+  (double?, double?) _bandFractions() {
+    final start = bandStart;
+    final end = bandEnd;
+    if (start == null || end == null) return (null, null);
+    if (max <= 0 || start <= 0 || start >= end) return (null, null);
+    return ((start / max).clamp(0.0, 1.0), (end / max).clamp(0.0, 1.0));
+  }
 }
 
 /// The number and its unit on one baseline. The unit is small and adjacent, not
@@ -184,11 +213,17 @@ class _DialPainter extends CustomPainter {
     required this.fraction,
     required this.trackColor,
     required this.valueColor,
+    required this.bandColor,
+    required this.bandStartFraction,
+    required this.bandEndFraction,
   });
 
   final double fraction;
   final Color trackColor;
   final Color valueColor;
+  final Color bandColor;
+  final double? bandStartFraction;
+  final double? bandEndFraction;
 
   /// Bottom-left, sweeping clockwise through the top to bottom-right.
   static const double _start = 3 * pi / 4;
@@ -211,6 +246,26 @@ class _DialPainter extends CustomPainter {
       ..color = trackColor;
     canvas.drawArc(rect, _start, _sweep, false, track);
 
+    final bandStart = bandStartFraction;
+    final bandEnd = bandEndFraction;
+    if (bandStart != null && bandEnd != null) {
+      // Under the value arc, so the reading is never obscured by its own
+      // warning. Butt caps: a round cap would overhang the threshold and put
+      // red where the controller is not yet reducing.
+      final band = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = stroke
+        ..strokeCap = StrokeCap.butt
+        ..color = bandColor.withValues(alpha: 0.35);
+      canvas.drawArc(
+        rect,
+        _start + _sweep * bandStart,
+        _sweep * (bandEnd - bandStart),
+        false,
+        band,
+      );
+    }
+
     if (fraction <= 0) return;
 
     final value = Paint()
@@ -225,5 +280,8 @@ class _DialPainter extends CustomPainter {
   bool shouldRepaint(_DialPainter old) =>
       old.fraction != fraction ||
       old.valueColor != valueColor ||
-      old.trackColor != trackColor;
+      old.trackColor != trackColor ||
+      old.bandColor != bandColor ||
+      old.bandStartFraction != bandStartFraction ||
+      old.bandEndFraction != bandEndFraction;
 }
