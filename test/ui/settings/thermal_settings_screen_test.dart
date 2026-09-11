@@ -99,6 +99,36 @@ void main() {
     expect(find.textContaining('0 a 150'), findsOneWidget);
   });
 
+  testWidgets('a field that is not a number goes inert, never to zero',
+      (tester) async {
+    await tester.pumpWidget(wrap(screen()));
+    // enterText bypasses the input formatter the same way a paste or a
+    // hardware keyboard does, which is the case the formatter cannot cover.
+    await tester.enterText(find.byKey(const Key('motor-start')), 'abc');
+    await tester.pump();
+
+    expect(tester.widget<ElevatedButton>(save()).onPressed, isNull);
+    expect(find.textContaining('números válidos'), findsOneWidget);
+  });
+
+  testWidgets('an empty field is unanswered, not zero', (tester) async {
+    await tester.pumpWidget(wrap(screen()));
+    await tester.enterText(find.byKey(const Key('esc-start')), '');
+    await tester.pump();
+
+    expect(tester.widget<ElevatedButton>(save()).onPressed, isNull);
+  });
+
+  testWidgets('a comma is a decimal separator, not a rejection',
+      (tester) async {
+    await tester.pumpWidget(wrap(screen()));
+    await tester.enterText(find.byKey(const Key('motor-start')), '82,5');
+    await tester.pump();
+    await tapSave(tester);
+
+    expect(editor.saves.single.motorReductionStartC, closeTo(82.5, 1e-9));
+  });
+
   testWidgets('armed makes save inert and says so', (tester) async {
     await tester.pumpWidget(wrap(screen(armed: true)));
     expect(tester.widget<ElevatedButton>(save()).onPressed, isNull);

@@ -229,4 +229,25 @@ void main() {
       }
     }
   });
+
+  group('parseSetting', () {
+    test('reads a comma as the decimal separator', () {
+      expect(parseSetting('3,15'), closeTo(3.15, 1e-9));
+    });
+
+    test('reads a dot too, and surrounding space', () {
+      expect(parseSetting(' 3.15 '), closeTo(3.15, 1e-9));
+    });
+
+    test('an empty field is unanswered, not zero', () {
+      expect(parseSetting(''), isNull);
+      expect(parseSetting('   '), isNull);
+    });
+
+    test('text is null rather than a plausible zero', () {
+      expect(parseSetting('abc'), isNull);
+      expect(parseSetting('1.2.3'), isNull);
+      expect(parseSetting('12v'), isNull);
+    });
+  });
 }

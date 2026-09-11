@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../protocol/config_groups.dart';
 import '../../protocol/settings_validation.dart';
 import '../../state/config_editor.dart';
+import 'number_input.dart';
 
 class ThermalSettingsScreen extends StatefulWidget {
   const ThermalSettingsScreen({
@@ -96,11 +97,23 @@ class _ThermalSettingsScreenState extends State<ThermalSettingsScreen> {
   SettingsError _validateThermal() {
     if (widget.config == null) return SettingsError.none;
 
-    final motorStart = double.tryParse(_motorStartController.text) ?? 0;
-    final motorMax = double.tryParse(_motorMaxController.text) ?? 0;
-    final escStart = double.tryParse(_escStartController.text) ?? 0;
-    final escMax = double.tryParse(_escMaxController.text) ?? 0;
-    final motorSource = int.tryParse(_motorSourceController.text) ?? 0;
+    // Null, not zero. A field holding `abc` -- or `3,15` before parseSetting
+    // understood the comma -- used to read as 0 °C, which passes both the
+    // range and the ordering rule and writes a band that cuts power from zero
+    // upward.
+    final motorStart = parseSetting(_motorStartController.text);
+    final motorMax = parseSetting(_motorMaxController.text);
+    final escStart = parseSetting(_escStartController.text);
+    final escMax = parseSetting(_escMaxController.text);
+    final motorSource = int.tryParse(_motorSourceController.text.trim());
+
+    if (motorStart == null ||
+        motorMax == null ||
+        escStart == null ||
+        escMax == null ||
+        motorSource == null) {
+      return SettingsError.invalidNumber;
+    }
 
     return validateThermal(
       motorReductionStartC: motorStart,
@@ -112,11 +125,11 @@ class _ThermalSettingsScreenState extends State<ThermalSettingsScreen> {
   }
 
   Future<void> _saveThermal() async {
-    final motorStart = double.tryParse(_motorStartController.text) ?? 0;
-    final motorMax = double.tryParse(_motorMaxController.text) ?? 0;
-    final escStart = double.tryParse(_escStartController.text) ?? 0;
-    final escMax = double.tryParse(_escMaxController.text) ?? 0;
-    final motorSource = int.tryParse(_motorSourceController.text) ?? 0;
+    final motorStart = parseSetting(_motorStartController.text) ?? 0;
+    final motorMax = parseSetting(_motorMaxController.text) ?? 0;
+    final escStart = parseSetting(_escStartController.text) ?? 0;
+    final escMax = parseSetting(_escMaxController.text) ?? 0;
+    final motorSource = int.tryParse(_motorSourceController.text.trim()) ?? 0;
 
     final config = ThermalConfig(
       motorReductionStartC: motorStart,
@@ -210,12 +223,11 @@ class _ThermalSettingsScreenState extends State<ThermalSettingsScreen> {
       // changed something between the first save and entering the PIN.
       final outcome = await widget.editor.saveThermal(
         ThermalConfig(
-          motorReductionStartC:
-              double.tryParse(_motorStartController.text) ?? 0,
-          motorMaxC: double.tryParse(_motorMaxController.text) ?? 0,
-          escReductionStartC: double.tryParse(_escStartController.text) ?? 0,
-          escMaxC: double.tryParse(_escMaxController.text) ?? 0,
-          motorTempSource: int.tryParse(_motorSourceController.text) ?? 0,
+          motorReductionStartC: parseSetting(_motorStartController.text) ?? 0,
+          motorMaxC: parseSetting(_motorMaxController.text) ?? 0,
+          escReductionStartC: parseSetting(_escStartController.text) ?? 0,
+          escMaxC: parseSetting(_escMaxController.text) ?? 0,
+          motorTempSource: int.tryParse(_motorSourceController.text.trim()) ?? 0,
         ),
         pin: pin,
       );
@@ -249,7 +261,8 @@ class _ThermalSettingsScreenState extends State<ThermalSettingsScreen> {
                   labelText: 'Início da redução do motor (°C)',
                   border: OutlineInputBorder(),
                 ),
-                keyboardType: TextInputType.number,
+                keyboardType: kSettingsKeyboard,
+                inputFormatters: kSettingsFormatters,
               ),
               const SizedBox(height: 12),
               TextField(
@@ -259,7 +272,8 @@ class _ThermalSettingsScreenState extends State<ThermalSettingsScreen> {
                   labelText: 'Máximo do motor (°C)',
                   border: OutlineInputBorder(),
                 ),
-                keyboardType: TextInputType.number,
+                keyboardType: kSettingsKeyboard,
+                inputFormatters: kSettingsFormatters,
               ),
               const SizedBox(height: 12),
               TextField(
@@ -269,7 +283,8 @@ class _ThermalSettingsScreenState extends State<ThermalSettingsScreen> {
                   labelText: 'Início da redução do ESC (°C)',
                   border: OutlineInputBorder(),
                 ),
-                keyboardType: TextInputType.number,
+                keyboardType: kSettingsKeyboard,
+                inputFormatters: kSettingsFormatters,
               ),
               const SizedBox(height: 12),
               TextField(
@@ -279,14 +294,15 @@ class _ThermalSettingsScreenState extends State<ThermalSettingsScreen> {
                   labelText: 'Máximo do ESC (°C)',
                   border: OutlineInputBorder(),
                 ),
-                keyboardType: TextInputType.number,
+                keyboardType: kSettingsKeyboard,
+                inputFormatters: kSettingsFormatters,
               ),
               const SizedBox(height: 12),
               if (widget.selectableMotorTempSource) ...[
                 const Text('Origem da temperatura do motor'),
                 const SizedBox(height: 8),
                 DropdownButton<int>(
-                  value: int.tryParse(_motorSourceController.text) ?? 0,
+                  value: int.tryParse(_motorSourceController.text.trim()) ?? 0,
                   items: const [
                     DropdownMenuItem(value: 0, child: Text('CAN')),
                     DropdownMenuItem(value: 1, child: Text('NTC')),

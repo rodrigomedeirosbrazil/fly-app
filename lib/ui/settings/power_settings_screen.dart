@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../protocol/config_groups.dart';
 import '../../protocol/settings_validation.dart';
 import '../../state/config_editor.dart';
+import 'number_input.dart';
 
 class PowerSettingsScreen extends StatefulWidget {
   const PowerSettingsScreen({
@@ -132,8 +133,17 @@ class _PowerSettingsScreenState extends State<PowerSettingsScreen> {
   SettingsError _validatePower() {
     if (widget.config == null) return SettingsError.none;
 
-    final minPerCell = double.tryParse(_minVoltageCellController.text) ?? 0;
-    final maxPerCell = double.tryParse(_maxVoltageCellController.text) ?? 0;
+    // Null, not zero: `abc` -- or `3,15` before parseSetting understood the
+    // comma -- must not read as a deliberate 0 V.
+    final minPerCell = parseSetting(_minVoltageCellController.text);
+    final maxPerCell = parseSetting(_maxVoltageCellController.text);
+    if (minPerCell == null || maxPerCell == null) {
+      return SettingsError.invalidNumber;
+    }
+    if (_showCustomCapacity &&
+        parseSetting(_capacityCustomController.text) == null) {
+      return SettingsError.invalidNumber;
+    }
 
     final minVoltageMv = (minPerCell * kSeriesCells * 1000).toInt();
     final maxVoltageMv = (maxPerCell * kSeriesCells * 1000).toInt();
@@ -153,36 +163,36 @@ class _PowerSettingsScreenState extends State<PowerSettingsScreen> {
       return _selectedCapacityPreset!;
     }
     if (_showCustomCapacity) {
-      final ahValue = double.tryParse(_capacityCustomController.text) ?? 0;
+      final ahValue = parseSetting(_capacityCustomController.text) ?? 0;
       return (ahValue * 1000).toInt();
     }
     return 0;
   }
 
   double _getMinVoltageMv() {
-    final minPerCell = double.tryParse(_minVoltageCellController.text) ?? 0;
+    final minPerCell = parseSetting(_minVoltageCellController.text) ?? 0;
     return minPerCell * kSeriesCells * 1000;
   }
 
   double _getMaxVoltageMv() {
-    final maxPerCell = double.tryParse(_maxVoltageCellController.text) ?? 0;
+    final maxPerCell = parseSetting(_maxVoltageCellController.text) ?? 0;
     return maxPerCell * kSeriesCells * 1000;
   }
 
   double _getPackTotalMin() {
-    final minPerCell = double.tryParse(_minVoltageCellController.text) ?? 0;
+    final minPerCell = parseSetting(_minVoltageCellController.text) ?? 0;
     return minPerCell * kSeriesCells;
   }
 
   double _getPackTotalMax() {
-    final maxPerCell = double.tryParse(_maxVoltageCellController.text) ?? 0;
+    final maxPerCell = parseSetting(_maxVoltageCellController.text) ?? 0;
     return maxPerCell * kSeriesCells;
   }
 
   double? _getComputedCalibrationRatio() {
     if (widget.sensorVolts == null || widget.sensorVolts == 0) return null;
 
-    final bmsRef = double.tryParse(_bmsReferenceController.text);
+    final bmsRef = parseSetting(_bmsReferenceController.text);
     if (bmsRef == null) return null;
 
     final currentRatio = widget.config?.voltageDividerRatio ?? 0;
@@ -194,7 +204,7 @@ class _PowerSettingsScreenState extends State<PowerSettingsScreen> {
   bool _isCalibrationValid() {
     if (widget.sensorVolts == null) return false;
 
-    final bmsRef = double.tryParse(_bmsReferenceController.text);
+    final bmsRef = parseSetting(_bmsReferenceController.text);
     if (bmsRef == null) return false;
 
     final refError = validateCalibrationReference(bmsRef);
@@ -403,7 +413,8 @@ class _PowerSettingsScreenState extends State<PowerSettingsScreen> {
                     labelText: 'Capacidade (Ah)',
                     border: OutlineInputBorder(),
                   ),
-                  keyboardType: TextInputType.number,
+                  keyboardType: kSettingsKeyboard,
+                  inputFormatters: kSettingsFormatters,
                 ),
               ],
               const SizedBox(height: 24),
@@ -421,7 +432,8 @@ class _PowerSettingsScreenState extends State<PowerSettingsScreen> {
                   border: const OutlineInputBorder(),
                   helperText: 'Total: ${minPackVoltage.toStringAsFixed(2)} V (14 células)',
                 ),
-                keyboardType: TextInputType.number,
+                keyboardType: kSettingsKeyboard,
+                inputFormatters: kSettingsFormatters,
               ),
               const SizedBox(height: 12),
               TextField(
@@ -432,7 +444,8 @@ class _PowerSettingsScreenState extends State<PowerSettingsScreen> {
                   border: const OutlineInputBorder(),
                   helperText: 'Total: ${maxPackVoltage.toStringAsFixed(2)} V (14 células)',
                 ),
-                keyboardType: TextInputType.number,
+                keyboardType: kSettingsKeyboard,
+                inputFormatters: kSettingsFormatters,
               ),
               const SizedBox(height: 12),
               if (powerErrorMessage != null)
@@ -477,7 +490,8 @@ class _PowerSettingsScreenState extends State<PowerSettingsScreen> {
                   helperText:
                       'Tensão que o BMS mostra. O sistema calculará o fator de correção automaticamente.',
                 ),
-                keyboardType: TextInputType.number,
+                keyboardType: kSettingsKeyboard,
+                inputFormatters: kSettingsFormatters,
               ),
               const SizedBox(height: 12),
               Text(
@@ -497,7 +511,7 @@ class _PowerSettingsScreenState extends State<PowerSettingsScreen> {
                   _bmsReferenceController.text.isNotEmpty)
                 Text(
                   messageFor(validateCalibrationReference(
-                          double.tryParse(_bmsReferenceController.text) ?? 0))
+                          parseSetting(_bmsReferenceController.text) ?? 0))
                       .toString(),
                   style: TextStyle(color: Theme.of(context).colorScheme.error),
                 ),

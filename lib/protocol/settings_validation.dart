@@ -27,10 +27,30 @@ enum SettingsError {
   motorTempSourceInvalid,
 
   // --- This app's own. See the ordering section below. ---
+  invalidNumber,
   voltageOrder,
   motorTempOrder,
   escTempOrder,
   calibrationReferenceRange,
+}
+
+/// Reads a number the way a Brazilian pilot types it, and returns **null**
+/// rather than a plausible zero when it cannot.
+///
+/// The comma is the decimal separator here, and every label on these screens
+/// is written with one (`3,15 V`), so `double.parse` alone rejects exactly
+/// what the pilot is most likely to enter. The old `?? 0` then turned that
+/// rejection into a valid-looking reading: `0 °C` passes the 0..150 range and
+/// the ordering rule, so a mistyped reduction start would have been written
+/// as a band that cuts power from zero upward -- the same unusable
+/// configuration the ordering rules exist to refuse.
+///
+/// Empty is null too. A blank field is a field the pilot has not answered,
+/// not a zero they chose.
+double? parseSetting(String text) {
+  final trimmed = text.trim().replaceAll(',', '.');
+  if (trimmed.isEmpty) return null;
+  return double.tryParse(trimmed);
 }
 
 // ---------------------------------------------------------------------------
@@ -207,4 +227,6 @@ String? messageFor(SettingsError error) => switch (error) {
             'iguais ou invertidos cortam a potência',
       SettingsError.calibrationReferenceRange =>
         'Tensão de referência: 10 a 65 V',
+      SettingsError.invalidNumber =>
+        'Preencha todos os campos com números válidos',
     };
