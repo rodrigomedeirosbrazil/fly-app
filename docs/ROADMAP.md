@@ -35,6 +35,12 @@ protocol for.
 
 ### Phase 2 — a real GATT service
 
+**Telemetry is done** (2026-09-11). The app reads the binary `TELEMETRY`
+characteristic when the service is present and falls back to `$XCTOD`
+otherwise, which delivered the flight clock and the acting limiter. `CMD`,
+`RSP`, config editing and buzzer mirroring are still open — they are what the
+remaining two absent items need.
+
 A binary telemetry characteristic (roughly 200 B of CSV becomes ~40 B, and it
 can carry fields the sentence has no room for), plus a command characteristic
 and a config characteristic. `Xctod` stays up for XCTrack.
@@ -74,6 +80,10 @@ what makes the flash arithmetic work overall: phase 4 returns more than phases
 | **Design for XCTrack coexistence**, decide later | Whether the app runs alongside XCTrack or replaces it is undecided; phase 1 leaves `Xctod` untouched so both stay possible. |
 
 ## Open questions
+
+**Is the firmware branch merged?** As of 2026-09-11, no. `b769fa1` lives on
+`worktree-ble-control-service`. Nothing in the binary path has run on a
+controller until it is.
 
 **Does the radio hold with the app connected?** Untested with XCTrack connected
 at the same time, and untested with the ESP-NOW remote throttle also active —
@@ -120,6 +130,21 @@ repository, with no shared package and no version handshake. Inserting a field
 anywhere but the end shifts everything after it and this parser decodes into
 the wrong columns without erroring. `fly-controller`'s `CLAUDE.md` and
 `XCTOD-PROTOCOL.md` do not mention this app yet — they should.
+
+**The protocol document contradicts itself on versioning.**
+`docs/BLE-CONTROL-PROTOCOL.md` says to bump `CONTROL_PROTOCOL_VERSION`
+"whenever an existing field moves", and separately that a higher version than
+the client knows still works "because the append rule lets it". Both cannot
+hold: if a field moved, appending saves nothing and the client decodes shifted
+columns in silence — the exact `$XCTOD` hazard the binary protocol exists to
+remove. This app gates on the telemetry struct's own `ver` instead, which is
+scoped correctly. The document should say so; worth a PR against
+fly-controller, because anyone writing another client will walk into it.
+
+**The voltage decimal bug does not affect the binary path.**
+`writeBatteryInfo()`'s zero-padding bug is still wrong for XCTrack and for this
+app's fallback mode, but `batteryMv` is raw millivolts, so the panel is immune
+whenever the control service is present.
 
 ## What phase 1 did not do
 
