@@ -41,6 +41,12 @@ otherwise, which delivered the flight clock and the acting limiter. `CMD`,
 `RSP`, config editing and buzzer mirroring are still open — they are what the
 remaining two absent items need.
 
+**The request channel is done** (2026-09-11). `CMD`/`RSP` with sequence
+matching and timeouts, plus `CFG_GET`, which delivered the thermal reduction
+band. Writes, the PIN session, config editing, the action opcodes and buzzer
+mirroring are still open — and the firmware already serves all of them, so
+from here the app is the lagging side of phase 2.
+
 A binary telemetry characteristic (roughly 200 B of CSV becomes ~40 B, and it
 can carry fields the sentence has no room for), plus a command characteristic
 and a config characteristic. `Xctod` stays up for XCTrack.
@@ -141,6 +147,12 @@ needs an Android 7–11 device.
 
 **Does phase 3's OTA go over BLE or hand off to WiFi?** BLE in principle; the
 throughput actually observed may reopen it.
+
+**How much flash did the control service actually cost?** `ROADMAP.md` still
+describes phase 2 as blocked on flash, with a Bluedroid → NimBLE port as the
+likely payment. The whole service shipped without that happening. The headroom
+left in the 1.875 MB slot is unmeasured, and phase 3's OTA is additive — so
+the number matters before it is planned.
 
 ## Known issues in fly-controller
 

@@ -104,7 +104,8 @@ stays on the NUS UUID and the service is found only after connecting.
 | Service | `D4CF0001-9B9D-4BFD-8F7F-40C6989D3EA9` |
 | `INFO` (read) | `D4CF0002-…` — 28 bytes, static for the session |
 | `TELEMETRY` (notify) | `D4CF0003-…` — 56 bytes |
-| `CMD` / `RSP` | `D4CF0004-…` / `D4CF0005-…` — **not implemented** |
+| `CMD` (write) | `D4CF0004-…` — `[op][seq][len][payload]` |
+| `RSP` (notify) | `D4CF0005-…` — `[op][seq][status][len][payload]` |
 
 `lib/protocol/control_telemetry_codec.dart` is the **second** hand-duplicated
 fly-controller header in this repo, after `xctod_parser.dart`. The definition
@@ -170,6 +171,62 @@ because a percentage derived from a distrusted voltage is not a reading.
 All three collapse to `null` in `TelemetryFrame`, so every widget keeps the
 hide-don't-print-zero rule for free. The states themselves are carried
 alongside, so the decode stays lossless.
+
+### The request channel answers nothing when it fails
+
+`CMD` and `RSP` carry requests and replies, matched by a one-byte sequence.
+`lib/state/control_session.dart` owns that matching and is pure — it takes a
+transport, so timeouts and sequence races test in milliseconds.
+
+**A timeout is the only failure detector that exists.** The firmware answers
+neither a malformed frame, because it cannot know which sequence to reply to,
+nor a request its queue dropped — `ControlRequestQueue` is four deep, discards
+the *newest* on overflow, and returns before any dispatch. The session waits
+2 s, which is generous against a firmware loop that already ticks at 1 Hz and
+well clear of its 10 s task watchdog.
+
+**Sequences start at 1 and never reach 0.** That is what makes demultiplexing
+free: `seq` 0 is reserved for unsolicited events, no pending request can carry
+it, so an event falls through to `ControlSession.events` with no special case.
+They also count upward without coming round again early — a request that timed
+out may still have a reply in flight, and a reused number would let it complete
+something else.
+
+**The session never retries**, because it cannot tell a lost request from a
+slow one. `PIN_CHANGE`, `SESSION_RESET` and `BUZZER_PREVIEW` are not safe to
+repeat. Callers that know their request is a read retry themselves; the
+thermal fetch does, three times.
+
+A request may not exceed **32 bytes** of payload (`kMaxCommandPayload`). The
+firmware copies it into a fixed queue slot and drops the whole request when it
+does not fit, with no reply — so `encodeCommand` throws instead of sending.
+
+Two rules with no UI behind them yet, recorded because subsystem 3 inherits
+them: **`errState` must never prompt for a PIN** (`gateRequest()` reports armed
+before auth precisely so a client does not ask for a password to do something
+refused either way), and **`errBadOp` means "this firmware cannot do that"**,
+not an error to show.
+
+### The thermal band is the pilot's numbers, or nothing
+
+`CFG_GET` of the `Thermal` group (17 bytes, id 1) is fetched **once per
+connection**, triggered by the first decoded binary frame rather than by
+connecting — at that point the source is settled and the service has produced
+something.
+
+**Nothing is cached.** The app cannot distinguish one controller from another
+and the pilot can change these from the web portal, so a remembered threshold
+would draw the band at a temperature that is not this aircraft's. A band that
+is wrong is worse than no band, because it looks like information.
+
+**A band is drawn only when `0 < start < end`.** An unconfigured NVS returns
+zeros, and a band from zero to zero — or to the end of the scale — would paint
+the whole dial red. Motor and ESC are judged separately.
+
+The dial's scale stays **fixed at 140 °C**; only the band is configured. The
+needle angle has to mean the same temperature on every aircraft and across a
+configuration change, or the pilot's sense of where it sits when things are
+fine stops transferring.
 
 ### The Dart enum order does not match the firmware's
 
@@ -473,10 +530,9 @@ available only when the binary service is present:
 
 - **Flight clock** (`sessionSec`) — **done**, shown in the status row
 - **Which limiter is acting** (`limitCauses`) — **done**, named on the chip
+- **The red reduction band** on the thermal dials — **done**, from `CFG_GET`
 
-Still absent, and both need the `CMD`/`RSP` channel (phase 2, subsystem 2):
+Still absent:
 
-- **The red reduction band** on the thermal dials — the thresholds are
-  configurable in the controller's NVS, so drawing the factory 80/100 °C would
-  show a number that may not be this pilot's. Needs `CFG_GET`.
-- **Buzzer mirroring** — needs the `RSP` event channel.
+- **Buzzer mirroring** — needs `EVT_BEEP` playback off the `RSP` event stream,
+  which `ControlSession` already separates and discards. Phase 2, subsystem 5.
