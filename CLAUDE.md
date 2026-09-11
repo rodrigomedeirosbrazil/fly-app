@@ -223,6 +223,16 @@ is wrong is worse than no band, because it looks like information.
 zeros, and a band from zero to zero — or to the end of the scale — would paint
 the whole dial red. Motor and ESC are judged separately.
 
+**The band has two zones, because the derating does.** `Power::calcMotorTempLimit`
+returns 100 below the reduction start, ramps linearly to 0 at the maximum, and
+then `constrain(..., 0, 100)` holds it at **zero for every temperature above
+that**. So the arc past the maximum is not a return to normal — it is the one
+region where the motor is certainly not pushing. The ramp is drawn
+translucent, the cut solid, and the cut runs to the end of the scale.
+
+Drawing only the ramp was the first attempt and it was wrong in the most
+misleading direction: it left the hottest part of the dial looking untouched.
+
 The dial's scale stays **fixed at 140 °C**; only the band is configured. The
 needle angle has to mean the same temperature on every aircraft and across a
 configuration change, or the pilot's sense of where it sits when things are

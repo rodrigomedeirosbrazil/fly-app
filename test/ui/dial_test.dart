@@ -74,7 +74,7 @@ void main() {
       final painter = paint.painter!;
       return _DialPainterProbe(
         start: (painter as dynamic).bandStartFraction as double?,
-        end: (painter as dynamic).bandEndFraction as double?,
+        cut: (painter as dynamic).cutFraction as double?,
       );
     }
 
@@ -87,8 +87,7 @@ void main() {
       expect(probe(tester).start, isNull);
     });
 
-    testWidgets('spans start to end as a fraction of the fixed scale',
-        (tester) async {
+    testWidgets('the ramp spans start to the cut point', (tester) async {
       await tester.pumpWidget(wrap(const Dial(
         value: 61,
         max: 140,
@@ -98,7 +97,24 @@ void main() {
       )));
       final p = probe(tester);
       expect(p.start, closeTo(0.5, 1e-9));
-      expect(p.end, closeTo(1.0, 1e-9));
+      expect(p.cut, closeTo(1.0, 1e-9));
+    });
+
+    testWidgets('the cut point sits where power reaches zero, not at the end',
+        (tester) async {
+      // The firmware's calcMotorTempLimit constrains to 0 above maxTemp, so
+      // everything past it is full cut, not a return to normal. The painter
+      // fills cut..1.0 as the danger zone.
+      await tester.pumpWidget(wrap(const Dial(
+        value: 61,
+        max: 140,
+        unit: '°C',
+        bandStart: 70,
+        bandEnd: 105,
+      )));
+      final p = probe(tester);
+      expect(p.start, closeTo(0.5, 1e-9), reason: '70 of 140');
+      expect(p.cut, closeTo(0.75, 1e-9), reason: '105 of 140');
     });
 
     testWidgets('a maximum beyond the scale runs to the end of the arc',
@@ -110,7 +126,7 @@ void main() {
         bandStart: 70,
         bandEnd: 200,
       )));
-      expect(probe(tester).end, closeTo(1.0, 1e-9),
+      expect(probe(tester).cut, closeTo(1.0, 1e-9),
           reason: 'clamped, never drawn off the arc');
     });
 
@@ -144,7 +160,11 @@ void main() {
 }
 
 class _DialPainterProbe {
-  const _DialPainterProbe({required this.start, required this.end});
+  const _DialPainterProbe({required this.start, required this.cut});
+
+  /// Where reduction begins, as a fraction of the arc.
   final double? start;
-  final double? end;
+
+  /// Where power reaches zero. Everything from here to 1.0 is full cut.
+  final double? cut;
 }

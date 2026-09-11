@@ -15,6 +15,12 @@ import 'package:flutter/material.dart';
 /// over `CFG_GET`, so they are this pilot's numbers rather than the factory
 /// defaults — which is why the band could not be drawn before phase 2.
 ///
+/// It has two zones, because the firmware's derating has two. From
+/// [bandStart] to [bandEnd] power ramps down proportionally; **above**
+/// [bandEnd] `Power::calcMotorTempLimit` constrains it to zero and leaves it
+/// there. So the arc past [bandEnd] is not a return to normal — it is the one
+/// region where the motor is certainly not pushing, and it is drawn solid.
+///
 /// [bandStart] and [bandEnd] null means no band: the sentence path, firmware
 /// that cannot answer, or thresholds that do not describe a range. The scale
 /// stays [max] regardless, so the needle angle means the same temperature on
@@ -52,7 +58,7 @@ class Dial extends StatelessWidget {
   /// Where power reduction begins, in the same unit as [value].
   final double? bandStart;
 
-  /// Where power is cut entirely.
+  /// Where power reaches zero. Everything hotter is also zero.
   final double? bandEnd;
 
   @override
@@ -75,7 +81,7 @@ class Dial extends StatelessWidget {
                   valueColor: theme.colorScheme.primary,
                   bandColor: theme.colorScheme.error,
                   bandStartFraction: band.$1,
-                  bandEndFraction: band.$2,
+                  cutFraction: band.$2,
                 ),
                 child: Stack(
                   children: [
@@ -215,15 +221,18 @@ class _DialPainter extends CustomPainter {
     required this.valueColor,
     required this.bandColor,
     required this.bandStartFraction,
-    required this.bandEndFraction,
+    required this.cutFraction,
   });
 
   final double fraction;
   final Color trackColor;
   final Color valueColor;
   final Color bandColor;
+  /// Where reduction begins, as a fraction of the arc.
   final double? bandStartFraction;
-  final double? bandEndFraction;
+
+  /// Where power reaches zero. From here to the end of the arc is full cut.
+  final double? cutFraction;
 
   /// Bottom-left, sweeping clockwise through the top to bottom-right.
   static const double _start = 3 * pi / 4;
@@ -247,23 +256,29 @@ class _DialPainter extends CustomPainter {
     canvas.drawArc(rect, _start, _sweep, false, track);
 
     final bandStart = bandStartFraction;
-    final bandEnd = bandEndFraction;
-    if (bandStart != null && bandEnd != null) {
-      // Under the value arc, so the reading is never obscured by its own
-      // warning. Butt caps: a round cap would overhang the threshold and put
-      // red where the controller is not yet reducing.
-      final band = Paint()
+    final cut = cutFraction;
+    if (bandStart != null && cut != null) {
+      // Both under the value arc, so a warning never obscures the number it
+      // warns about. Butt caps: a round cap overhangs its own threshold and
+      // would put red where the controller is not yet reducing.
+      Paint zone(double alpha) => Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = stroke
         ..strokeCap = StrokeCap.butt
-        ..color = bandColor.withValues(alpha: 0.35);
-      canvas.drawArc(
-        rect,
-        _start + _sweep * bandStart,
-        _sweep * (bandEnd - bandStart),
-        false,
-        band,
-      );
+        ..color = bandColor.withValues(alpha: alpha);
+
+      // The ramp: power falls proportionally across this span.
+      if (cut > bandStart) {
+        canvas.drawArc(rect, _start + _sweep * bandStart,
+            _sweep * (cut - bandStart), false, zone(0.30));
+      }
+      // The cut: power is zero from here to the end of the scale, so the
+      // band does not stop at the threshold -- stopping would suggest the
+      // arc beyond it is safe again, which is the opposite of true.
+      if (cut < 1.0) {
+        canvas.drawArc(rect, _start + _sweep * cut, _sweep * (1.0 - cut),
+            false, zone(0.70));
+      }
     }
 
     if (fraction <= 0) return;
@@ -283,5 +298,5 @@ class _DialPainter extends CustomPainter {
       old.trackColor != trackColor ||
       old.bandColor != bandColor ||
       old.bandStartFraction != bandStartFraction ||
-      old.bandEndFraction != bandEndFraction;
+      old.cutFraction != cutFraction;
 }
