@@ -84,4 +84,70 @@ class ThermalConfig {
 
   static double? _bandEnd(double start, double end) =>
       _isBand(start, end) ? end : null;
+
+  Uint8List encode() {
+    final d = ByteData(kLength);
+    d.setInt32(0, (motorReductionStartC * 1000).round(), Endian.little);
+    d.setInt32(4, (motorMaxC * 1000).round(), Endian.little);
+    d.setInt32(8, (escReductionStartC * 1000).round(), Endian.little);
+    d.setInt32(12, (escMaxC * 1000).round(), Endian.little);
+    d.setUint8(16, motorTempSource);
+    return d.buffer.asUint8List();
+  }
+}
+
+/// The `Power` group: pack size, its voltage window, whether power control is
+/// on, and the voltage divider ratio.
+///
+/// Little-endian, `#pragma pack(1)`, matching `ConfigPower` in the firmware's
+/// `src/BleControl/ControlProtocol.h`.
+class PowerConfig {
+  const PowerConfig({
+    required this.capacityMah,
+    required this.minVoltageMv,
+    required this.maxVoltageMv,
+    required this.powerControlEnabled,
+    required this.voltageDividerRatio,
+  });
+
+  static const int kLength = 9;
+
+  final int capacityMah;
+  final int minVoltageMv;
+  final int maxVoltageMv;
+  final bool powerControlEnabled;
+
+  /// Sent as hundredths: the firmware stores a float that cannot be memcpy'd.
+  final double voltageDividerRatio;
+
+  /// Returns null below [kLength]. Longer decodes its first [kLength] bytes,
+  /// so future firmware appending a field still works; shorter is corruption,
+  /// same reasoning as every other group here.
+  static PowerConfig? decode(List<int> bytes) {
+    if (bytes.length < kLength) return null;
+
+    final d = ByteData.sublistView(
+      bytes is Uint8List ? bytes : Uint8List.fromList(bytes),
+    );
+
+    return PowerConfig(
+      capacityMah: d.getUint16(0, Endian.little),
+      minVoltageMv: d.getUint16(2, Endian.little),
+      maxVoltageMv: d.getUint16(4, Endian.little),
+      // Any non-zero is true. The firmware writes 1, but a C bool field read
+      // as a byte is not contractually 0-or-1.
+      powerControlEnabled: d.getUint8(6) != 0,
+      voltageDividerRatio: d.getUint16(7, Endian.little) / 100.0,
+    );
+  }
+
+  Uint8List encode() {
+    final d = ByteData(kLength);
+    d.setUint16(0, capacityMah, Endian.little);
+    d.setUint16(2, minVoltageMv, Endian.little);
+    d.setUint16(4, maxVoltageMv, Endian.little);
+    d.setUint8(6, powerControlEnabled ? 1 : 0);
+    d.setUint16(7, (voltageDividerRatio * 100).round(), Endian.little);
+    return d.buffer.asUint8List();
+  }
 }

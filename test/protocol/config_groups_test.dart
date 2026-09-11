@@ -114,4 +114,128 @@ void main() {
           reason: 'one sensor unconfigured must not cost the other its band');
     });
   });
+
+  group('PowerConfig', () {
+    /// Wire-shaped 9-byte ConfigPower. Every setter is an offset assertion.
+    Uint8List powerBytes({
+      int capacityMah = 0,
+      int minVoltageMv = 0,
+      int maxVoltageMv = 0,
+      int powerControlEnabled = 0,
+      int dividerRatioX100 = 0,
+      int length = 9,
+    }) {
+      final d = ByteData(9);
+      d.setUint16(0, capacityMah, Endian.little);
+      d.setUint16(2, minVoltageMv, Endian.little);
+      d.setUint16(4, maxVoltageMv, Endian.little);
+      d.setUint8(6, powerControlEnabled);
+      d.setUint16(7, dividerRatioX100, Endian.little);
+      return d.buffer.asUint8List().sublist(0, length);
+    }
+
+    test('every field lands where the header says it does', () {
+      final c = PowerConfig.decode(powerBytes(
+        capacityMah: 20000,
+        minVoltageMv: 42000,
+        maxVoltageMv: 58800,
+        powerControlEnabled: 1,
+        dividerRatioX100: 1105,
+      ))!;
+
+      expect(c.capacityMah, 20000);
+      expect(c.minVoltageMv, 42000);
+      expect(c.maxVoltageMv, 58800);
+      expect(c.powerControlEnabled, isTrue);
+      expect(c.voltageDividerRatio, closeTo(11.05, 1e-9));
+    });
+
+    test('the enable flag is any non-zero, not just 1', () {
+      expect(PowerConfig.decode(powerBytes(powerControlEnabled: 0))!
+          .powerControlEnabled, isFalse);
+      expect(PowerConfig.decode(powerBytes(powerControlEnabled: 2))!
+          .powerControlEnabled, isTrue);
+    });
+
+    test('a short payload is rejected whole', () {
+      expect(PowerConfig.decode(powerBytes(length: 8)), isNull);
+      expect(PowerConfig.decode(const []), isNull);
+    });
+
+    test('a longer payload decodes its first 9 bytes', () {
+      final padded = Uint8List(16)..setRange(0, 9, powerBytes(capacityMah: 20000));
+      expect(PowerConfig.decode(padded)!.capacityMah, 20000);
+    });
+  });
+
+  group('encoding', () {
+    test('a power group round-trips through decode', () {
+      const original = PowerConfig(
+        capacityMah: 20000,
+        minVoltageMv: 42000,
+        maxVoltageMv: 58800,
+        powerControlEnabled: true,
+        voltageDividerRatio: 11.05,
+      );
+      final back = PowerConfig.decode(original.encode())!;
+
+      expect(back.capacityMah, 20000);
+      expect(back.minVoltageMv, 42000);
+      expect(back.maxVoltageMv, 58800);
+      expect(back.powerControlEnabled, isTrue);
+      expect(back.voltageDividerRatio, closeTo(11.05, 1e-9));
+    });
+
+    test('a thermal group round-trips through decode', () {
+      const original = ThermalConfig(
+        motorReductionStartC: 80,
+        motorMaxC: 100,
+        escReductionStartC: 70.5,
+        escMaxC: 95.25,
+        motorTempSource: 1,
+      );
+      final back = ThermalConfig.decode(original.encode())!;
+
+      expect(back.motorReductionStartC, closeTo(80, 1e-9));
+      expect(back.motorMaxC, closeTo(100, 1e-9));
+      expect(back.escReductionStartC, closeTo(70.5, 1e-9));
+      expect(back.escMaxC, closeTo(95.25, 1e-9));
+      expect(back.motorTempSource, 1);
+    });
+
+    test('encoded groups are exactly the length the firmware expects', () {
+      expect(
+        const PowerConfig(
+          capacityMah: 1,
+          minVoltageMv: 1,
+          maxVoltageMv: 1,
+          powerControlEnabled: false,
+          voltageDividerRatio: 1,
+        ).encode().length,
+        PowerConfig.kLength,
+      );
+      expect(
+        const ThermalConfig(
+          motorReductionStartC: 1,
+          motorMaxC: 2,
+          escReductionStartC: 1,
+          escMaxC: 2,
+          motorTempSource: 0,
+        ).encode().length,
+        ThermalConfig.kLength,
+      );
+    });
+
+    test('a negative temperature survives the round trip', () {
+      const original = ThermalConfig(
+        motorReductionStartC: -5.25,
+        motorMaxC: 100,
+        escReductionStartC: 70,
+        escMaxC: 95,
+        motorTempSource: 0,
+      );
+      expect(ThermalConfig.decode(original.encode())!.motorReductionStartC,
+          closeTo(-5.25, 1e-9));
+    });
+  });
 }
