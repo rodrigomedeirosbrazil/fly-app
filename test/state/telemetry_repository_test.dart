@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fly_app/ble/fly_controller_link.dart';
+import 'package:fly_app/protocol/config_groups.dart';
 import 'package:fly_app/state/telemetry_repository.dart';
 import 'package:fly_app/state/telemetry_source_policy.dart';
 
@@ -28,12 +29,47 @@ Uint8List binarySample({int ver = 1, int sessionSec = 754}) {
 class FakeLink extends FlyControllerLink {
   final _status = StreamController<LinkStatus>.broadcast();
   final _payloads = StreamController<TelemetryPayload>.broadcast();
+  final _responses = StreamController<List<int>>.broadcast();
+  final commands = <List<int>>[];
 
   @override
   Stream<LinkStatus> get status => _status.stream;
 
   @override
   Stream<TelemetryPayload> get payloads => _payloads.stream;
+
+  @override
+  Stream<List<int>> get responses => _responses.stream;
+
+  @override
+  bool get canSendCommands => true;
+
+  /// Set to fail every write, standing in for a controller with no CMD.
+  bool rejectCommands = false;
+
+  @override
+  Future<void> sendCommand(List<int> bytes) async {
+    if (rejectCommands) throw StateError('no CMD characteristic');
+    commands.add(bytes);
+  }
+
+  /// Replies to the request at [index] with a full Thermal group.
+  void replyThermal(int index, {int status = 0}) {
+    final req = commands[index];
+    final d = ByteData(17);
+    d.setInt32(0, 80000, Endian.little);
+    d.setInt32(4, 100000, Endian.little);
+    d.setInt32(8, 70000, Endian.little);
+    d.setInt32(12, 95000, Endian.little);
+    final payload = status == 0 ? d.buffer.asUint8List() : Uint8List(0);
+    _responses.add([req[0], req[1], status, payload.length, ...payload]);
+  }
+
+  /// Replies with a status and no payload.
+  void replyStatus(int index, int status) {
+    final req = commands[index];
+    _responses.add([req[0], req[1], status, 0]);
+  }
 
   /// Set before calling start() to simulate a precondition the pilot has to
   /// fix: a refused permission, Bluetooth off, or location off.
@@ -57,6 +93,7 @@ class FakeLink extends FlyControllerLink {
   Future<void> dispose() async {
     await _status.close();
     await _payloads.close();
+    await _responses.close();
   }
 
   int fallbackCalls = 0;
@@ -214,5 +251,81 @@ void main() {
     expect(link.fallbackCalls, 0,
         reason: 'a live panel must not swap which readings exist');
     expect(repo.rejectedFrames, 1);
+  });
+
+  group('thermal config', () {
+    test('is requested once, after the first binary frame', () async {
+      link.emit(LinkStatus.connected);
+      expect(link.commands, isEmpty,
+          reason: 'connecting alone proves nothing about the service');
+
+      link.feedBinary(binarySample());
+      await pumpEventQueue();
+
+      expect(link.commands, hasLength(1));
+      expect(link.commands.single[0], 0x10, reason: 'CFG_GET');
+      expect(link.commands.single[3], ConfigGroup.thermal.id);
+
+      link.replyThermal(0);
+      await pumpEventQueue();
+
+      expect(repo.thermalConfig, isNotNull);
+      expect(repo.thermalConfig!.motorBandStartC, closeTo(80.0, 1e-9));
+      expect(repo.thermalConfig!.motorBandEndC, closeTo(100.0, 1e-9));
+
+      // A second frame must not re-ask.
+      link.feedBinary(binarySample());
+      await pumpEventQueue();
+      expect(link.commands, hasLength(1));
+    });
+
+    test('is never requested on the sentence path', () async {
+      await receiveOneFrame();
+      expect(repo.frame, isNotNull);
+      expect(link.commands, isEmpty,
+          reason: 'firmware without the service has no CMD to write to');
+      expect(repo.thermalConfig, isNull);
+    });
+
+    test('a refusal stops without retrying', () async {
+      link.emit(LinkStatus.connected);
+      link.feedBinary(binarySample());
+      await pumpEventQueue();
+
+      link.replyStatus(0, 2); // ErrBadOp — old firmware
+      await pumpEventQueue();
+
+      expect(link.commands, hasLength(1));
+      expect(repo.thermalConfig, isNull,
+          reason: 'no band, and nothing on screen says so');
+    });
+
+    test('a failed write does not retry either', () async {
+      link.rejectCommands = true;
+      link.emit(LinkStatus.connected);
+      link.feedBinary(binarySample());
+      await pumpEventQueue();
+
+      expect(repo.thermalConfig, isNull);
+    });
+
+    test('a reconnection asks again', () async {
+      link.emit(LinkStatus.connected);
+      link.feedBinary(binarySample());
+      await pumpEventQueue();
+      link.replyThermal(0);
+      await pumpEventQueue();
+      expect(repo.thermalConfig, isNotNull);
+
+      link.emit(LinkStatus.disconnected);
+      await pumpEventQueue();
+      expect(repo.thermalConfig, isNull,
+          reason: 'thresholds are per connection and never cached');
+
+      link.emit(LinkStatus.connected);
+      link.feedBinary(binarySample());
+      await pumpEventQueue();
+      expect(link.commands, hasLength(2));
+    });
   });
 }

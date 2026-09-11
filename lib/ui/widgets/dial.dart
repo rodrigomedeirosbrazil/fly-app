@@ -10,10 +10,21 @@ import 'package:flutter/material.dart';
 /// Sized only as a proportion of the space it is given — no point sizes — which
 /// is what survives an orientation change and a 320 pt phone alike.
 ///
-/// There is deliberately no reduction band. The thermal thresholds are
-/// configurable in the controller's NVS and do not travel over the $XCTOD
-/// stream, so the red zone the web panel draws cannot be drawn here yet
-/// without inventing the numbers. It arrives with phase 2.
+/// The reduction band is the arc between where the controller begins cutting
+/// power and where it cuts it entirely. Both come from the controller's NVS
+/// over `CFG_GET`, so they are this pilot's numbers rather than the factory
+/// defaults — which is why the band could not be drawn before phase 2.
+///
+/// It has two zones, because the firmware's derating has two. From
+/// [bandStart] to [bandEnd] power ramps down proportionally; **above**
+/// [bandEnd] `Power::calcMotorTempLimit` constrains it to zero and leaves it
+/// there. So the arc past [bandEnd] is not a return to normal — it is the one
+/// region where the motor is certainly not pushing, and it is drawn solid.
+///
+/// [bandStart] and [bandEnd] null means no band: the sentence path, firmware
+/// that cannot answer, or thresholds that do not describe a range. The scale
+/// stays [max] regardless, so the needle angle means the same temperature on
+/// every aircraft.
 class Dial extends StatelessWidget {
   const Dial({
     super.key,
@@ -24,6 +35,8 @@ class Dial extends StatelessWidget {
     this.caption,
     this.badge,
     this.showScale = false,
+    this.bandStart,
+    this.bandEnd,
   });
 
   final double? value;
@@ -42,11 +55,18 @@ class Dial extends StatelessWidget {
   /// Draw 0 and [max] at the ring's open ends.
   final bool showScale;
 
+  /// Where power reduction begins, in the same unit as [value].
+  final double? bandStart;
+
+  /// Where power reaches zero. Everything hotter is also zero.
+  final double? bandEnd;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final v = value;
     final fraction = (v == null || max <= 0) ? 0.0 : (v / max).clamp(0.0, 1.0);
+    final band = _bandFractions();
 
     return Column(
       children: [
@@ -59,6 +79,10 @@ class Dial extends StatelessWidget {
                   fraction: fraction,
                   trackColor: theme.colorScheme.surfaceContainerHighest,
                   valueColor: theme.colorScheme.primary,
+                  rampColor: theme.colorScheme.tertiary,
+                  cutColor: theme.colorScheme.error,
+                  bandStartFraction: band.$1,
+                  cutFraction: band.$2,
                 ),
                 child: Stack(
                   children: [
@@ -131,6 +155,18 @@ class Dial extends StatelessWidget {
           right: 0, bottom: 0, child: Text(max.round().toString(), style: style)),
     ];
   }
+
+  /// The band as fractions of the arc, or (null, null) when there is none.
+  ///
+  /// Guards the same rule `ThermalConfig` does, because a Dial can be built
+  /// from anywhere: numbers that do not describe a range do not become one.
+  (double?, double?) _bandFractions() {
+    final start = bandStart;
+    final end = bandEnd;
+    if (start == null || end == null) return (null, null);
+    if (max <= 0 || start <= 0 || start >= end) return (null, null);
+    return ((start / max).clamp(0.0, 1.0), (end / max).clamp(0.0, 1.0));
+  }
 }
 
 /// The number and its unit on one baseline. The unit is small and adjacent, not
@@ -184,11 +220,25 @@ class _DialPainter extends CustomPainter {
     required this.fraction,
     required this.trackColor,
     required this.valueColor,
+    required this.rampColor,
+    required this.cutColor,
+    required this.bandStartFraction,
+    required this.cutFraction,
   });
 
   final double fraction;
   final Color trackColor;
   final Color valueColor;
+  /// Amber for the ramp, red for the cut. Two colours rather than two
+  /// opacities of one: caution and danger are different states, and the
+  /// instrument convention for them is older than this app.
+  final Color rampColor;
+  final Color cutColor;
+  /// Where reduction begins, as a fraction of the arc.
+  final double? bandStartFraction;
+
+  /// Where power reaches zero. From here to the end of the arc is full cut.
+  final double? cutFraction;
 
   /// Bottom-left, sweeping clockwise through the top to bottom-right.
   static const double _start = 3 * pi / 4;
@@ -211,6 +261,32 @@ class _DialPainter extends CustomPainter {
       ..color = trackColor;
     canvas.drawArc(rect, _start, _sweep, false, track);
 
+    final bandStart = bandStartFraction;
+    final cut = cutFraction;
+    if (bandStart != null && cut != null) {
+      // Both under the value arc, so a warning never obscures the number it
+      // warns about. Butt caps: a round cap overhangs its own threshold and
+      // would put red where the controller is not yet reducing.
+      Paint zone(Color color) => Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = stroke
+        ..strokeCap = StrokeCap.butt
+        ..color = color;
+
+      // The ramp: power falls proportionally across this span.
+      if (cut > bandStart) {
+        canvas.drawArc(rect, _start + _sweep * bandStart,
+            _sweep * (cut - bandStart), false, zone(rampColor));
+      }
+      // The cut: power is zero from here to the end of the scale, so the
+      // band does not stop at the threshold -- stopping would suggest the
+      // arc beyond it is safe again, which is the opposite of true.
+      if (cut < 1.0) {
+        canvas.drawArc(rect, _start + _sweep * cut, _sweep * (1.0 - cut),
+            false, zone(cutColor));
+      }
+    }
+
     if (fraction <= 0) return;
 
     final value = Paint()
@@ -225,5 +301,9 @@ class _DialPainter extends CustomPainter {
   bool shouldRepaint(_DialPainter old) =>
       old.fraction != fraction ||
       old.valueColor != valueColor ||
-      old.trackColor != trackColor;
+      old.trackColor != trackColor ||
+      old.rampColor != rampColor ||
+      old.cutColor != cutColor ||
+      old.bandStartFraction != bandStartFraction ||
+      old.cutFraction != cutFraction;
 }

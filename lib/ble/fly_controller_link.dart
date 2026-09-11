@@ -61,6 +61,10 @@ class FlyControllerLink {
       Guid('D4CF0002-9B9D-4BFD-8F7F-40C6989D3EA9');
   static final Guid controlTelemetryUuid =
       Guid('D4CF0003-9B9D-4BFD-8F7F-40C6989D3EA9');
+  static final Guid controlCmdUuid =
+      Guid('D4CF0004-9B9D-4BFD-8F7F-40C6989D3EA9');
+  static final Guid controlRspUuid =
+      Guid('D4CF0005-9B9D-4BFD-8F7F-40C6989D3EA9');
 
   static const String deviceName = 'FlyController';
 
@@ -97,6 +101,32 @@ class FlyControllerLink {
   /// Dropping only the Dart subscription leaves the controller pushing 56-byte
   /// frames at 1 Hz to nobody for the rest of the flight.
   BluetoothCharacteristic? _notifying;
+  BluetoothCharacteristic? _cmd;
+  StreamSubscription<List<int>>? _rspSub;
+  final _responseController = StreamController<List<int>>.broadcast();
+
+  /// Frames arriving on `RSP` — replies and events both. Empty on the
+  /// `$XCTOD` path, where the control service does not exist.
+  Stream<List<int>> get responses => _responseController.stream;
+
+  /// True when this connection can carry requests at all.
+  bool get canSendCommands => _cmd != null;
+
+  /// Writes one `CMD` frame.
+  ///
+  /// Throws when there is no command characteristic, which
+  /// [ControlSession] turns into ControlDropped — the honest answer, since a
+  /// controller without the service will never reply.
+  Future<void> sendCommand(List<int> bytes) async {
+    final cmd = _cmd;
+    if (cmd == null) {
+      throw StateError('no CMD characteristic on this connection');
+    }
+    // withoutResponse: false — an ATT write response is the only
+    // acknowledgement that the frame reached the controller at all.
+    await cmd.write(bytes, withoutResponse: false);
+  }
+
   StreamSubscription<BluetoothConnectionState>? _connectionSub;
   bool _wantConnection = false;
   int _attempt = 0;
@@ -348,6 +378,16 @@ class FlyControllerLink {
     );
 
     if (source == TelemetrySource.control) {
+      _cmd = find(controlServiceUuid, controlCmdUuid);
+      final rsp = find(controlServiceUuid, controlRspUuid);
+      if (rsp != null) {
+        await rsp.setNotifyValue(true);
+        _rspSub = rsp.onValueReceived.listen(_responseController.add);
+      } else {
+        // A control service without RSP can still stream telemetry. Requests
+        // are simply unavailable, which canSendCommands reports.
+        _cmd = null;
+      }
       return (TelemetrySource.control, controlTelemetry!);
     }
 
@@ -386,6 +426,9 @@ class FlyControllerLink {
       await _valueSub?.cancel();
       _valueSub = null;
       _info = null;
+      await _rspSub?.cancel();
+      _rspSub = null;
+      _cmd = null;
 
       final previous = _notifying;
       _notifying = null;
@@ -434,6 +477,9 @@ class FlyControllerLink {
     await _valueSub?.cancel();
     _valueSub = null;
     _notifying = null;
+    await _rspSub?.cancel();
+    _rspSub = null;
+    _cmd = null;
     await _connectionSub?.cancel();
     _connectionSub = null;
     try {
@@ -450,5 +496,6 @@ class FlyControllerLink {
     await _teardown();
     await _statusController.close();
     await _payloadController.close();
+    await _responseController.close();
   }
 }

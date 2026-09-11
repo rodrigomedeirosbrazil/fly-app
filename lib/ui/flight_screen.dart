@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../protocol/config_groups.dart';
 import '../protocol/telemetry_frame.dart';
 import 'widgets/dial.dart';
 
@@ -26,6 +27,7 @@ class FlightScreen extends StatefulWidget {
     required this.frame,
     required this.stale,
     this.firmwareVersion,
+    this.thermalConfig,
   });
 
   final TelemetryFrame? frame;
@@ -34,6 +36,10 @@ class FlightScreen extends StatefulWidget {
   final bool stale;
 
   final String? firmwareVersion;
+
+  /// This pilot's configured reduction thresholds, or null when they are not
+  /// known. Null draws no band and changes nothing else.
+  final ThermalConfig? thermalConfig;
 
   @override
   State<FlightScreen> createState() => _FlightScreenState();
@@ -68,7 +74,10 @@ class _FlightScreenState extends State<FlightScreen> {
                     const SizedBox(height: 8),
                     Expanded(child: _BatteryCard(frame: f)),
                     const SizedBox(height: 8),
-                    _InstrumentRow(frame: f),
+                    _InstrumentRow(
+                      frame: f,
+                      thermalConfig: widget.thermalConfig,
+                    ),
                     const SizedBox(height: 8),
                     _ThrottleCard(frame: f),
                     const SizedBox(height: 8),
@@ -454,9 +463,10 @@ class _Reading extends StatelessWidget {
 /// would have to invent a full scale — and a needle at 80% of an invented scale
 /// reads as a real limit.
 class _InstrumentRow extends StatelessWidget {
-  const _InstrumentRow({required this.frame});
+  const _InstrumentRow({required this.frame, this.thermalConfig});
 
   final TelemetryFrame? frame;
+  final ThermalConfig? thermalConfig;
 
   @override
   Widget build(BuildContext context) {
@@ -489,6 +499,8 @@ class _InstrumentRow extends StatelessWidget {
                   MotorTempSource.ntc => 'NTC',
                   _ => null,
                 },
+                bandStart: thermalConfig?.motorBandStartC,
+                bandEnd: thermalConfig?.motorBandEndC,
               ),
             ),
           ),
@@ -500,6 +512,8 @@ class _InstrumentRow extends StatelessWidget {
                 max: 140,
                 unit: '°C',
                 caption: 'ESC',
+                bandStart: thermalConfig?.escBandStartC,
+                bandEnd: thermalConfig?.escBandEndC,
               ),
             ),
           ),

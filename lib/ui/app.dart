@@ -42,7 +42,8 @@ class _FlyAppState extends State<FlyApp> {
         colorScheme: const ColorScheme.dark(
           primary: Color(0xFF3FB950), // gauge fill, live indicator
           secondary: Color(0xFF3B82F6), // throttle
-          error: Color(0xFFF85149), // armed, faults, limiting
+          error: Color(0xFFF85149), // armed, faults, power cut
+          tertiary: Color(0xFFD29922), // thermal reduction ramp
           surface: Color(0xFF0D1117), // page
           surfaceContainer: Color(0xFF161B22), // cards
           surfaceContainerHigh: Color(0xFF1C222B), // overlay
@@ -74,6 +75,7 @@ class _FlyAppState extends State<FlyApp> {
             frame: frame,
             stale: _repo.isStale,
             firmwareVersion: _repo.firmwareVersion,
+            thermalConfig: _repo.thermalConfig,
           );
         },
       ),

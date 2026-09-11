@@ -1,5 +1,8 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:fly_app/protocol/config_groups.dart';
 import 'package:fly_app/protocol/telemetry_frame.dart';
 import 'package:fly_app/ui/flight_screen.dart';
 import 'package:fly_app/ui/widgets/dial.dart';
@@ -58,6 +61,16 @@ TelemetryFrame frame({
       escTempState: escTempState,
       batteryVoltageState: batteryVoltageState,
     );
+
+/// A wire-shaped Thermal group: motor 80–100 °C, ESC 70–95 °C.
+Uint8List thermalGroupBytes() {
+  final d = ByteData(17);
+  d.setInt32(0, 80000, Endian.little);
+  d.setInt32(4, 100000, Endian.little);
+  d.setInt32(8, 70000, Endian.little);
+  d.setInt32(12, 95000, Endian.little);
+  return d.buffer.asUint8List();
+}
 
 Widget wrap(Widget child) => MaterialApp(home: child);
 
@@ -436,6 +449,40 @@ void main() {
     });
   });
 
+  group('the thermal band reaches the dials', () {
+    Dial dialWithCaption(WidgetTester tester, String caption) =>
+        tester.widgetList<Dial>(find.byType(Dial)).firstWhere(
+              (d) => d.caption == caption,
+            );
+
+    testWidgets('motor and ESC each get their own thresholds',
+        (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(),
+        stale: false,
+        thermalConfig: ThermalConfig.decode(thermalGroupBytes())!,
+      )));
+
+      expect(dialWithCaption(tester, 'MOTOR').bandStart, closeTo(80.0, 1e-9));
+      expect(dialWithCaption(tester, 'MOTOR').bandEnd, closeTo(100.0, 1e-9));
+      expect(dialWithCaption(tester, 'ESC').bandStart, closeTo(70.0, 1e-9));
+      expect(dialWithCaption(tester, 'ESC').bandEnd, closeTo(95.0, 1e-9));
+    });
+
+    testWidgets('no config means no band, and nothing else changes',
+        (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(),
+        stale: false,
+        thermalConfig: null,
+      )));
+
+      expect(dialWithCaption(tester, 'MOTOR').bandStart, isNull);
+      expect(dialWithCaption(tester, 'ESC').bandStart, isNull);
+      expect(find.text('61'), findsOneWidget, reason: 'the reading is intact');
+    });
+  });
+
   group('layout holds at real device sizes', () {
     // A widget test fails on RenderFlex overflow, so pumping at each size and
     // settling is the assertion. 393x852 is the iPhone 14 Pro this was first
@@ -463,6 +510,7 @@ void main() {
             sessionSec: const Duration(seconds: 754),
           ),
           stale: false,
+          thermalConfig: ThermalConfig.decode(thermalGroupBytes()),
         )));
         await tester.pumpAndSettle();
 
