@@ -81,6 +81,36 @@ what makes the flash arithmetic work overall: phase 4 returns more than phases
 
 ## Open questions
 
+**Does the binary telemetry path work on real hardware?** **Yes — answered
+2026-09-11**, on an iPhone 14 Pro against a controller running
+`worktree-ble-control-service`. Every reading the struct carries rendered,
+including the flight clock and the fields the drawer gained, and the
+discarded-frame counter stayed at **zero**.
+
+The same build was tested first against `main` firmware, which has no control
+service, and fell back to `$XCTOD` with the panel rendering exactly as it did
+in phase 1. That was the check most likely to be skipped and the only one that
+proves the fallback survived the migration — service presence really is the
+capability handshake.
+
+Disconnecting left the flight panel showing stale data rather than returning
+to the connection screen, so the absence in `TelemetryRepository._onStatus`
+still does its job on a real link.
+
+Three things this did **not** measure, and none of them are hypothetical:
+
+- **The limiter chip has never fired.** No limiter acted during the test, so
+  `BAT`/`MOT`/`ESC` on the status chip is covered by widget tests and nothing
+  else. It needs a hot motor or a low pack.
+- **Android has not seen the binary path at all.** The MTU answer below was
+  measured against the ~90-byte `$XCTOD` sentence. The struct is 56 bytes and
+  needs an ATT MTU of at least 59, where Android's default is 23 — the same
+  negotiation, so the risk is low, but low is not measured. The
+  discarded-frame counter is the instrument: non-zero there is an MTU that
+  never grew.
+- **The drawer was not opened in landscape**, which is the orientation whose
+  height forced it to become scrollable.
+
 **Is the firmware branch merged?** As of 2026-09-11, no. `b769fa1` lives on
 `worktree-ble-control-service`. Nothing in the binary path has run on a
 controller until it is.
