@@ -262,12 +262,17 @@ void main() {
       link.feedBinary(binarySample());
       await pumpEventQueue();
 
-      expect(link.commands, hasLength(1));
-      expect(link.commands.single[0], 0x10, reason: 'CFG_GET');
-      expect(link.commands.single[3], ConfigGroup.thermal.id);
+      expect(link.commands, hasLength(1),
+          reason: 'thermal is requested first');
+      expect(link.commands[0][0], 0x10, reason: 'CFG_GET');
+      expect(link.commands[0][3], ConfigGroup.thermal.id);
 
       link.replyThermal(0);
       await pumpEventQueue();
+
+      expect(link.commands, hasLength(2),
+          reason: 'power is requested after thermal succeeds');
+      expect(link.commands[1][3], ConfigGroup.power.id);
 
       expect(repo.thermalConfig, isNotNull);
       expect(repo.thermalConfig!.motorBandStartC, closeTo(80.0, 1e-9));
@@ -276,7 +281,7 @@ void main() {
       // A second frame must not re-ask.
       link.feedBinary(binarySample());
       await pumpEventQueue();
-      expect(link.commands, hasLength(1));
+      expect(link.commands, hasLength(2));
     });
 
     test('is never requested on the sentence path', () async {
@@ -295,6 +300,9 @@ void main() {
       link.replyStatus(0, 2); // ErrBadOp — old firmware
       await pumpEventQueue();
 
+      // CFG_GET is one opcode with the group as a payload byte, so ErrBadOp
+      // is about the request itself: the Power group would be refused
+      // identically and is not asked for.
       expect(link.commands, hasLength(1));
       expect(repo.thermalConfig, isNull,
           reason: 'no band, and nothing on screen says so');
@@ -315,6 +323,8 @@ void main() {
       await pumpEventQueue();
       link.replyThermal(0);
       await pumpEventQueue();
+      expect(link.commands, hasLength(2),
+          reason: 'thermal and power sent after first frame');
       expect(repo.thermalConfig, isNotNull);
 
       link.emit(LinkStatus.disconnected);
@@ -325,7 +335,8 @@ void main() {
       link.emit(LinkStatus.connected);
       link.feedBinary(binarySample());
       await pumpEventQueue();
-      expect(link.commands, hasLength(2));
+      expect(link.commands, hasLength(3),
+          reason: 'thermal sent again after reconnect');
     });
   });
 }

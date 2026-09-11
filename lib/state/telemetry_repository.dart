@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../ble/fly_controller_link.dart';
 import '../protocol/config_groups.dart';
 import '../protocol/control_info.dart';
+import '../protocol/control_frame.dart';
 import '../protocol/control_telemetry_codec.dart';
 import '../protocol/line_assembler.dart';
 import '../protocol/telemetry_frame.dart';
@@ -71,6 +72,20 @@ class TelemetryRepository extends ChangeNotifier {
     return '${i.appVersion} · $type';
   }
 
+  /// The live request channel, or null on the `$XCTOD` path. Exposed so the
+  /// settings screen can build a [ConfigEditor] for this connection; the
+  /// repository stays glue and owns no editing rules of its own.
+  ControlSession? get session => _session;
+
+  /// Whether the controller reports a selectable motor temperature source.
+  /// False when INFO was never read.
+  bool get selectableMotorTempSource =>
+      _link.info?.hasSelectableMotorTempSource ?? false;
+
+  /// The `Power` group, fetched alongside the thermal one.
+  PowerConfig? get powerConfig => _powerConfig;
+  PowerConfig? _powerConfig;
+
   Future<void> start() async {
     final blocked = await _link.blockingCondition();
     if (blocked != null) {
@@ -110,34 +125,58 @@ class TelemetryRepository extends ChangeNotifier {
 
   bool _thermalRequested = false;
 
-  /// Asks for the thermal group once per connection.
+  /// Requests a config group with retry on timeout.
+  ///
+  /// Retries only a timeout, and only because `CFG_GET` is a read and
+  /// repeating it costs nothing. A refusal or a dropped link stops at once —
+  /// there is nothing to wait for. Returns null on any failure.
+  /// Returns the controller's answer, whatever it was.
+  ///
+  /// The result rather than the bytes, because the caller has to tell a
+  /// refusal apart from silence: `CFG_GET` is a single opcode with the group
+  /// as a payload byte, so `ErrBadOp` means this firmware has no `CFG_GET` at
+  /// all and asking for the other group would get the same answer.
+  Future<ControlResult> _requestGroup(
+    ControlSession session,
+    ConfigGroup group,
+  ) async {
+    ControlResult result = const ControlTimeout();
+    for (var attempt = 0; attempt < 3; attempt++) {
+      result = await session.request(
+        op: 0x10, // CFG_GET
+        payload: [group.id],
+      );
+      if (result is! ControlTimeout) return result;
+    }
+    return result;
+  }
+
+  /// Asks for the thermal and power groups once per connection.
   ///
   /// Triggered by the first decoded binary frame rather than by connecting:
   /// at that point the source is settled and the service has demonstrably
   /// produced something.
   ///
-  /// Retries only a timeout, and only because `CFG_GET` is a read and
-  /// repeating it costs nothing. A refusal or a dropped link stops at once —
-  /// there is nothing to wait for. Failure is silent and the dials simply
-  /// render as they did before this existed.
-  Future<void> _fetchThermalConfig(ControlSession session) async {
-    for (var attempt = 0; attempt < 3; attempt++) {
-      final result = await session.request(
-        op: 0x10, // CFG_GET
-        payload: [ConfigGroup.thermal.id],
-      );
+  /// Failure is silent and the dials simply render as they did before this
+  /// existed.
+  Future<void> _fetchConfig(ControlSession session) async {
+    final thermal = await _requestGroup(session, ConfigGroup.thermal);
+    if (thermal is ControlOk) {
+      _thermalConfig = ThermalConfig.decode(thermal.payload);
+      notifyListeners();
+    } else if (thermal is ControlRefused &&
+        thermal.status == ControlStatus.errBadOp) {
+      // This firmware does not have CFG_GET. The group is only a payload
+      // byte, so the Power request would be refused identically -- and on a
+      // controller that never answers, skipping it halves the traffic spent
+      // finding that out.
+      return;
+    }
 
-      switch (result) {
-        case ControlOk(:final payload):
-          _thermalConfig = ThermalConfig.decode(payload);
-          notifyListeners();
-          return;
-        case ControlRefused():
-        case ControlDropped():
-          return;
-        case ControlTimeout():
-          break; // breaks the switch; the for loop tries again
-      }
+    final power = await _requestGroup(session, ConfigGroup.power);
+    if (power is ControlOk) {
+      _powerConfig = PowerConfig.decode(power.payload);
+      notifyListeners();
     }
   }
 
@@ -154,6 +193,7 @@ class TelemetryRepository extends ChangeNotifier {
       _session = null;
       _thermalRequested = false;
       _thermalConfig = null;
+      _powerConfig = null;
     }
     if (s == LinkStatus.idle) {
       // Only an explicit stop() forgets the last frame. A drop must keep it:
@@ -200,7 +240,7 @@ class TelemetryRepository extends ChangeNotifier {
               _link.sendCommand,
               incoming: _link.responses,
             );
-            unawaited(_fetchThermalConfig(session));
+            unawaited(_fetchConfig(session));
           }
         }
     }

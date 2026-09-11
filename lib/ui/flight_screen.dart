@@ -28,6 +28,7 @@ class FlightScreen extends StatefulWidget {
     required this.stale,
     this.firmwareVersion,
     this.thermalConfig,
+    this.onOpenSettings,
   });
 
   final TelemetryFrame? frame;
@@ -40,6 +41,11 @@ class FlightScreen extends StatefulWidget {
   /// This pilot's configured reduction thresholds, or null when they are not
   /// known. Null draws no band and changes nothing else.
   final ThermalConfig? thermalConfig;
+
+  /// Opens the settings screen. Null when this connection has no request
+  /// channel — the `$XCTOD` path, or a controller without the control
+  /// service.
+  final VoidCallback? onOpenSettings;
 
   @override
   State<FlightScreen> createState() => _FlightScreenState();
@@ -93,6 +99,8 @@ class _FlightScreenState extends State<FlightScreen> {
                   frame: f,
                   onClose: () => setState(() => _drawerOpen = false),
                   firmwareVersion: widget.firmwareVersion,
+                  onOpenSettings: widget.onOpenSettings,
+                  armed: f?.isArmed ?? false,
                 ),
             ],
           ),
@@ -682,11 +690,15 @@ class _SecondaryData extends StatelessWidget {
     required this.frame,
     required this.onClose,
     this.firmwareVersion,
+    this.onOpenSettings,
+    required this.armed,
   });
 
   final TelemetryFrame? frame;
   final VoidCallback onClose;
   final String? firmwareVersion;
+  final VoidCallback? onOpenSettings;
+  final bool armed;
 
   /// An unavailable reading is a dash. Same rule as the panel.
   static String _or(Object? value, String suffix) =>
@@ -824,6 +836,19 @@ class _SecondaryData extends StatelessWidget {
                                     ],
                                   ),
                                 ),
+                              const SizedBox(height: 8),
+                              _SettingsEntry(
+                                // Disabled rather than hidden: presence is fixed and
+                                // only the state changes, the same rule the status
+                                // chips follow. A gate the pilot can see beats an
+                                // ErrState arriving after the tap.
+                                onTap: armed ? null : onOpenSettings,
+                                reason: armed
+                                    ? 'Indisponível com a aeronave armada'
+                                    : onOpenSettings == null
+                                        ? 'Indisponível nesta conexão'
+                                        : null,
+                              ),
                             ],
                           ),
                         ),
@@ -834,6 +859,63 @@ class _SecondaryData extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The way out of the panel and into settings. The only navigation this app
+/// offers from the flight screen, and deliberately behind the drawer the
+/// pilot has to open on purpose.
+class _SettingsEntry extends StatelessWidget {
+  const _SettingsEntry({required this.onTap, required this.reason});
+
+  final VoidCallback? onTap;
+  final String? reason;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final enabled = onTap != null;
+    final color = enabled
+        ? theme.colorScheme.onSurface
+        : theme.colorScheme.onSurfaceVariant;
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Row(
+          children: [
+            Icon(Icons.tune, size: 20, color: color),
+            const SizedBox(width: 12),
+            Text(
+              'CONFIGURAÇÕES',
+              maxLines: 1,
+              style: TextStyle(
+                fontSize: 13,
+                letterSpacing: 1.5,
+                fontWeight: FontWeight.w700,
+                color: color,
+              ),
+            ),
+            const SizedBox(width: 12),
+            if (reason != null)
+              Expanded(
+                child: Text(
+                  reason!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
     );

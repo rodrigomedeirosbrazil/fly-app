@@ -316,6 +316,52 @@ void main() {
       // carry silently started dashing.
       expect(find.text('–'), findsNWidgets(5));
     });
+
+    testWidgets('the settings entry is present and live when disarmed',
+        (tester) async {
+      var opened = false;
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(armState: ArmState.disarmed),
+        stale: false,
+        onOpenSettings: () => opened = true,
+      )));
+      await tester.tap(find.text('MAIS DADOS'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('CONFIGURAÇÕES'));
+      await tester.pumpAndSettle();
+      expect(opened, isTrue);
+    });
+
+    testWidgets('armed leaves the entry in place but inert', (tester) async {
+      var opened = false;
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(armState: ArmState.armed),
+        stale: false,
+        onOpenSettings: () => opened = true,
+      )));
+      await tester.tap(find.text('MAIS DADOS'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('CONFIGURAÇÕES'), findsOneWidget,
+          reason: 'fixed presence, varying state');
+      await tester.tap(find.text('CONFIGURAÇÕES'));
+      await tester.pumpAndSettle();
+      expect(opened, isFalse);
+    });
+
+    testWidgets('a connection with no request channel leaves it inert too',
+        (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(armState: ArmState.disarmed),
+        stale: false,
+        onOpenSettings: null,
+      )));
+      await tester.tap(find.text('MAIS DADOS'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('CONFIGURAÇÕES'), findsOneWidget);
+    });
   });
 
   group('the Android back button', () {
