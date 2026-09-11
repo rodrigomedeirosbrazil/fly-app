@@ -79,7 +79,8 @@ class Dial extends StatelessWidget {
                   fraction: fraction,
                   trackColor: theme.colorScheme.surfaceContainerHighest,
                   valueColor: theme.colorScheme.primary,
-                  bandColor: theme.colorScheme.error,
+                  rampColor: theme.colorScheme.tertiary,
+                  cutColor: theme.colorScheme.error,
                   bandStartFraction: band.$1,
                   cutFraction: band.$2,
                 ),
@@ -219,7 +220,8 @@ class _DialPainter extends CustomPainter {
     required this.fraction,
     required this.trackColor,
     required this.valueColor,
-    required this.bandColor,
+    required this.rampColor,
+    required this.cutColor,
     required this.bandStartFraction,
     required this.cutFraction,
   });
@@ -227,7 +229,11 @@ class _DialPainter extends CustomPainter {
   final double fraction;
   final Color trackColor;
   final Color valueColor;
-  final Color bandColor;
+  /// Amber for the ramp, red for the cut. Two colours rather than two
+  /// opacities of one: caution and danger are different states, and the
+  /// instrument convention for them is older than this app.
+  final Color rampColor;
+  final Color cutColor;
   /// Where reduction begins, as a fraction of the arc.
   final double? bandStartFraction;
 
@@ -261,23 +267,23 @@ class _DialPainter extends CustomPainter {
       // Both under the value arc, so a warning never obscures the number it
       // warns about. Butt caps: a round cap overhangs its own threshold and
       // would put red where the controller is not yet reducing.
-      Paint zone(double alpha) => Paint()
+      Paint zone(Color color) => Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = stroke
         ..strokeCap = StrokeCap.butt
-        ..color = bandColor.withValues(alpha: alpha);
+        ..color = color;
 
       // The ramp: power falls proportionally across this span.
       if (cut > bandStart) {
         canvas.drawArc(rect, _start + _sweep * bandStart,
-            _sweep * (cut - bandStart), false, zone(0.30));
+            _sweep * (cut - bandStart), false, zone(rampColor));
       }
       // The cut: power is zero from here to the end of the scale, so the
       // band does not stop at the threshold -- stopping would suggest the
       // arc beyond it is safe again, which is the opposite of true.
       if (cut < 1.0) {
         canvas.drawArc(rect, _start + _sweep * cut, _sweep * (1.0 - cut),
-            false, zone(0.70));
+            false, zone(cutColor));
       }
     }
 
@@ -296,7 +302,8 @@ class _DialPainter extends CustomPainter {
       old.fraction != fraction ||
       old.valueColor != valueColor ||
       old.trackColor != trackColor ||
-      old.bandColor != bandColor ||
+      old.rampColor != rampColor ||
+      old.cutColor != cutColor ||
       old.bandStartFraction != bandStartFraction ||
       old.cutFraction != cutFraction;
 }

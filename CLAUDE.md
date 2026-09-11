@@ -385,7 +385,14 @@ widget test fails on `RenderFlex overflowed`, so the pump *is* the assertion.
 `ColorScheme.fromSeed` tints every surface toward the seed hue, which turned
 the background green. The palette in `ui/app.dart` is explicit and neutral, so
 the only colour on screen is the data: green for the gauge, blue for throttle,
-red for armed and faults.
+red for armed, faults and the thermal cut, amber for the thermal reduction
+ramp.
+
+Amber was added for the ramp rather than a second opacity of red. Caution and
+danger are different states and the instrument convention for them predates
+this app by a long way; two alphas of one hue made the reader work out which
+was which. It is `#D29922`, from the same Primer palette as the green and the
+red, so it is not a colour picked in isolation.
 
 ### The logo is derived, not drawn
 
