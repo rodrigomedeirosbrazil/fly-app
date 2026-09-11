@@ -1,4 +1,4 @@
-import '../protocol/xctod_frame.dart';
+import '../protocol/telemetry_frame.dart';
 import '../protocol/xctod_parser.dart';
 
 /// Decides whether the telemetry on screen is still true.
@@ -13,7 +13,7 @@ class LinkHealth {
   /// never reads a stale number as current.
   final Duration staleAfter;
 
-  XctodFrame? _last;
+  TelemetryFrame? _last;
   int _rejected = 0;
 
   /// Lines received that did not decode. Surfaced in the UI rather than
@@ -33,7 +33,7 @@ class LinkHealth {
 
   /// The current frame, or null once it is older than [staleAfter]. Withholding
   /// it is deliberate: no data beats stale data.
-  XctodFrame? frameAt(DateTime now) {
+  TelemetryFrame? frameAt(DateTime now) {
     final f = _last;
     if (f == null) return null;
     if (now.difference(f.receivedAt) > staleAfter) return null;

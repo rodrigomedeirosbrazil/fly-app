@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../protocol/xctod_frame.dart';
+import '../protocol/telemetry_frame.dart';
 import 'widgets/dial.dart';
 
 /// Number of series cells. The firmware has no support for other pack sizes, so
@@ -23,7 +23,7 @@ const int _seriesCells = 14;
 class FlightScreen extends StatefulWidget {
   const FlightScreen({super.key, required this.frame, required this.stale});
 
-  final XctodFrame? frame;
+  final TelemetryFrame? frame;
 
   /// True when a frame was received but has aged out.
   final bool stale;
@@ -108,7 +108,7 @@ class _Card extends StatelessWidget {
 class _StatusRow extends StatelessWidget {
   const _StatusRow({required this.frame, required this.stale});
 
-  final XctodFrame? frame;
+  final TelemetryFrame? frame;
   final bool stale;
 
   @override
@@ -195,7 +195,7 @@ class _Chip extends StatelessWidget {
 class _BatteryCard extends StatefulWidget {
   const _BatteryCard({required this.frame});
 
-  final XctodFrame? frame;
+  final TelemetryFrame? frame;
 
   @override
   State<_BatteryCard> createState() => _BatteryCardState();
@@ -236,7 +236,7 @@ class _BatteryCardState extends State<_BatteryCard> {
   /// Per-cell prefers the BMS minimum cell — a measurement. Falling back to
   /// pack voltage over [_seriesCells] is a mean dressed up as a minimum, and
   /// says so with a tilde.
-  ({String text, String unit})? _perCellReading(XctodFrame f) {
+  ({String text, String unit})? _perCellReading(TelemetryFrame f) {
     final min = f.cellMinMv;
     if (min != null) {
       return (text: (min / 1000).toStringAsFixed(2), unit: 'V/cél');
@@ -300,7 +300,7 @@ class _BatteryCardState extends State<_BatteryCard> {
                   Expanded(
                     child: _Reading(
                       label: 'CORRENTE',
-                      value: f!.currentA.toString(),
+                      value: f!.currentA!.round().toString(),
                       unit: 'A',
                     ),
                   ),
@@ -397,7 +397,7 @@ class _Reading extends StatelessWidget {
 class _InstrumentRow extends StatelessWidget {
   const _InstrumentRow({required this.frame});
 
-  final XctodFrame? frame;
+  final TelemetryFrame? frame;
 
   @override
   Widget build(BuildContext context) {
@@ -421,7 +421,7 @@ class _InstrumentRow extends StatelessWidget {
           Expanded(
             child: _Card(
               child: Dial(
-                value: f?.motorTempC?.toDouble(),
+                value: f?.motorTempC,
                 max: 140,
                 unit: '°C',
                 caption: 'MOTOR',
@@ -437,7 +437,7 @@ class _InstrumentRow extends StatelessWidget {
           Expanded(
             child: _Card(
               child: Dial(
-                value: f?.escTempC?.toDouble(),
+                value: f?.escTempC,
                 max: 140,
                 unit: '°C',
                 caption: 'ESC',
@@ -498,7 +498,7 @@ class _Readout extends StatelessWidget {
 class _ThrottleCard extends StatelessWidget {
   const _ThrottleCard({required this.frame});
 
-  final XctodFrame? frame;
+  final TelemetryFrame? frame;
 
   @override
   Widget build(BuildContext context) {
@@ -607,7 +607,7 @@ class _DrawerBar extends StatelessWidget {
 class _SecondaryData extends StatelessWidget {
   const _SecondaryData({required this.frame, required this.onClose});
 
-  final XctodFrame? frame;
+  final TelemetryFrame? frame;
   final VoidCallback onClose;
 
   /// An unavailable reading is a dash. Same rule as the panel.
@@ -632,7 +632,7 @@ class _SecondaryData extends StatelessWidget {
     final f = frame;
 
     final rows = <(String, String)>[
-      ('Carga (por tensão)', f == null ? '–' : '${f.socVoltage} %'),
+      ('Carga (por tensão)', _or(f?.socVoltage, ' %')),
       ('RPM', _or(f?.rpm, '')),
       ('Acelerador (bruto)', _or(f?.throttleRaw, '')),
       ('Temp. máx. BMS', _or(f?.bmsMaxTempC, ' °C')),

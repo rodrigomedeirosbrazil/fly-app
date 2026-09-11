@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../ble/fly_controller_link.dart';
 import '../protocol/line_assembler.dart';
-import '../protocol/xctod_frame.dart';
+import '../protocol/telemetry_frame.dart';
 import 'link_health.dart';
 
 /// Single source of truth for the UI.
@@ -41,7 +41,7 @@ class TelemetryRepository extends ChangeNotifier {
   LinkStatus get status => _status;
 
   /// The frame to render, or null when there is nothing trustworthy to show.
-  XctodFrame? get frame => _health.frameAt(_now());
+  TelemetryFrame? get frame => _health.frameAt(_now());
 
   /// True when a frame was received and has since aged out. Distinguishes
   /// "signal lost" from "never connected".

@@ -1,6 +1,6 @@
-import 'xctod_frame.dart';
+import 'telemetry_frame.dart';
 
-/// Decodes one `$XCTOD` line into an [XctodFrame].
+/// Decodes one `$XCTOD` line into a [TelemetryFrame].
 ///
 /// The wire format is duplicated from `fly-controller`'s `src/Xctod/Xctod.cpp`;
 /// there is no shared package between the two repos. If the firmware changes
@@ -13,7 +13,7 @@ class XctodParser {
 
   /// Returns null when [line] is not a well-formed frame. The caller counts
   /// rejections; nothing partial is ever handed to the UI.
-  static XctodFrame? parse(String line, {required DateTime receivedAt}) {
+  static TelemetryFrame? parse(String line, {required DateTime receivedAt}) {
     final parts = line.trim().split(',');
     if (parts.length != fieldCount + 1) return null;
     if (parts.first != prefix) return null;
@@ -68,7 +68,7 @@ class XctodParser {
       return null;
     }
 
-    return XctodFrame(
+    return TelemetryFrame(
       socCoulomb: socCoulomb,
       socVoltage: socVoltage,
       voltage: voltage,
@@ -76,14 +76,14 @@ class XctodParser {
       throttlePct: throttlePct,
       throttleRaw: throttleRaw,
       powerPct: powerPct,
-      motorTempC: motorTempC,
+      motorTempC: motorTempC?.toDouble(),
       motorTempSource: _source(f[8]),
       rpm: rpm,
-      currentA: currentA,
-      escTempC: escTempC,
+      currentA: currentA?.toDouble(),
+      escTempC: escTempC?.toDouble(),
       armState: status == 'ARMED' ? ArmState.armed : ArmState.disarmed,
-      disarmCode:
-          (status == 'ARMED' || status == 'DISARMED') ? null : status,
+      disarmReason: _reason(status),
+      rawDisarmCode: _reason(status) == DisarmReason.unknown ? status : null,
       bmsMaxTempC: bmsMaxTempC,
       cellMinMv: cellMinMv,
       cellMaxMv: cellMaxMv,
@@ -99,5 +99,20 @@ class XctodParser {
         'can' => MotorTempSource.can,
         'ntc' => MotorTempSource.ntc,
         _ => MotorTempSource.none,
+      };
+
+  /// Maps the sentence's status text onto the shared reason enum. `ARMED` and
+  /// `DISARMED` carry no fault; anything else is a code, and one this app does
+  /// not recognise is kept as raw text rather than dropped.
+  static DisarmReason _reason(String status) => switch (status) {
+        'ARMED' || 'DISARMED' => DisarmReason.none,
+        'MANUAL' => DisarmReason.manual,
+        'THR ERR' => DisarmReason.throttleWiredInvalid,
+        'LINK ERR' => DisarmReason.throttleLinkLost,
+        'MOT ERR' => DisarmReason.motorTempLost,
+        'ESC ERR' => DisarmReason.escTempLost,
+        'BATT ERR' => DisarmReason.batteryVoltageLost,
+        'MOT SRC' => DisarmReason.motorTempSourceChanged,
+        _ => DisarmReason.unknown,
       };
 }

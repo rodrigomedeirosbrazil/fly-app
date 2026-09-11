@@ -1,28 +1,28 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fly_app/protocol/xctod_frame.dart';
+import 'package:fly_app/protocol/telemetry_frame.dart';
 import 'package:fly_app/ui/flight_screen.dart';
 import 'package:fly_app/ui/widgets/dial.dart';
 
 import 'navigator_utils.dart';
 
-XctodFrame frame({
+TelemetryFrame frame({
   double? voltage = 50.4,
-  int? motorTempC = 61,
+  double? motorTempC = 61,
   MotorTempSource source = MotorTempSource.can,
-  int? escTempC = 54,
-  int? currentA = 30,
+  double? escTempC = 54,
+  double? currentA = 30,
   int? rpm = 4200,
   int socVoltage = 91,
   int? bmsMaxTempC = 38,
   int? cellMaxMv = 3745,
   double? powerKw = 1.5,
   ArmState armState = ArmState.armed,
-  String? disarmCode,
+  DisarmReason disarmReason = DisarmReason.none,
   int powerPct = 100,
   int? cellMinMv = 3712,
 }) =>
-    XctodFrame(
+    TelemetryFrame(
       socCoulomb: 87,
       socVoltage: socVoltage,
       voltage: voltage,
@@ -36,7 +36,7 @@ XctodFrame frame({
       currentA: currentA,
       escTempC: escTempC,
       armState: armState,
-      disarmCode: disarmCode,
+      disarmReason: disarmReason,
       bmsMaxTempC: bmsMaxTempC,
       cellMinMv: cellMinMv,
       cellMaxMv: cellMaxMv,
@@ -78,7 +78,7 @@ void main() {
   testWidgets('a disarm code is shown in the space the status bar reserves',
       (tester) async {
     await tester.pumpWidget(wrap(FlightScreen(
-      frame: frame(armState: ArmState.disarmed, disarmCode: 'MOT SRC'),
+      frame: frame(armState: ArmState.disarmed, disarmReason: DisarmReason.motorTempSourceChanged),
       stale: false,
     )));
 

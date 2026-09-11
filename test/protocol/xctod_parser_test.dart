@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fly_app/protocol/xctod_frame.dart';
+import 'package:fly_app/protocol/telemetry_frame.dart';
 import 'package:fly_app/protocol/xctod_parser.dart';
 
 /// Tmotor build, every sensor healthy, armed and flying.
@@ -24,11 +24,11 @@ void main() {
       expect(f.throttlePct, 42);
       expect(f.throttleRaw, 1234);
       expect(f.powerPct, 100);
-      expect(f.motorTempC, 61);
+      expect(f.motorTempC, 61.0);
       expect(f.motorTempSource, MotorTempSource.can);
       expect(f.rpm, 4200);
-      expect(f.currentA, 30);
-      expect(f.escTempC, 54);
+      expect(f.currentA, 30.0);
+      expect(f.escTempC, 54.0);
       expect(f.armState, ArmState.armed);
       expect(f.disarmCode, isNull);
       expect(f.bmsMaxTempC, 38);
@@ -57,7 +57,7 @@ void main() {
       final f = XctodParser.parse(degraded, receivedAt: t0)!;
 
       expect(f.voltage, 48.1);
-      expect(f.escTempC, 44);
+      expect(f.escTempC, 44.0);
       expect(f.throttleRaw, 812);
     });
 
@@ -70,7 +70,7 @@ void main() {
   });
 
   group('status field', () {
-    XctodFrame parseStatus(String status) {
+    TelemetryFrame parseStatus(String status) {
       final line = healthy.replaceFirst('ARMED', status);
       return XctodParser.parse(line, receivedAt: t0)!;
     }
@@ -111,7 +111,7 @@ void main() {
       final f = XctodParser.parse(line, receivedAt: t0);
       expect(f, isNotNull);
       expect(f!.motorTempSource, MotorTempSource.none);
-      expect(f.motorTempC, 61);
+      expect(f.motorTempC, 61.0);
     });
   });
 
