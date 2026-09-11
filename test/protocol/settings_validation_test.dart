@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:fly_app/protocol/mac_address.dart';
 import 'package:fly_app/protocol/settings_validation.dart';
 
 void main() {
@@ -215,6 +216,54 @@ void main() {
 
     test('has a message like every other error', () {
       expect(messageFor(SettingsError.calibrationReferenceRange), isNotNull);
+    });
+  });
+
+  group('validateBms', () {
+    test('accepts a configured BMS', () {
+      expect(
+          validateBms(bmsType: 1, bmsMac: [1, 2, 3, 4, 5, 6]),
+          SettingsError.none);
+    });
+
+    test('accepts no BMS with no address', () {
+      expect(validateBms(bmsType: 0, bmsMac: kUnsetMac), SettingsError.none);
+    });
+
+    test('a type outside 0..3 is refused', () {
+      expect(validateBms(bmsType: 4, bmsMac: [1, 2, 3, 4, 5, 6]),
+          SettingsError.bmsTypeInvalid);
+      expect(validateBms(bmsType: -1, bmsMac: [1, 2, 3, 4, 5, 6]),
+          SettingsError.bmsTypeInvalid);
+    });
+
+    test('a type with no address is half configured, and refused', () {
+      expect(validateBms(bmsType: 2, bmsMac: kUnsetMac),
+          SettingsError.bmsMacMissing);
+    });
+
+    test('an address with no type is allowed, because it does nothing', () {
+      expect(validateBms(bmsType: 0, bmsMac: [1, 2, 3, 4, 5, 6]),
+          SettingsError.none);
+    });
+  });
+
+  group('validateSystem', () {
+    test('accepts the portal range', () {
+      expect(validateSystem(buzzerVolume: 0, throttleSource: 0),
+          SettingsError.none);
+      expect(validateSystem(buzzerVolume: 100, throttleSource: 1),
+          SettingsError.none);
+    });
+
+    test('a volume past 100 is refused', () {
+      expect(validateSystem(buzzerVolume: 101, throttleSource: 0),
+          SettingsError.buzzerVolumeRange);
+    });
+
+    test('an unknown throttle source is refused', () {
+      expect(validateSystem(buzzerVolume: 50, throttleSource: 2),
+          SettingsError.throttleSourceInvalid);
     });
   });
 

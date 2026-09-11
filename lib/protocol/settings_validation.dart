@@ -14,6 +14,8 @@
 /// see at a glance what is a copy and what is an addition.
 library;
 
+import 'mac_address.dart';
+
 enum SettingsError {
   none,
 
@@ -25,6 +27,10 @@ enum SettingsError {
   motorTempRange,
   escTempRange,
   motorTempSourceInvalid,
+  bmsTypeInvalid,
+  bmsMacMissing,
+  buzzerVolumeRange,
+  throttleSourceInvalid,
 
   // --- This app's own. See the ordering section below. ---
   invalidNumber,
@@ -106,6 +112,38 @@ SettingsError validateMotorTempSource(int source) =>
     source > 1 || source < 0
         ? SettingsError.motorTempSourceInvalid
         : SettingsError.none;
+
+/// 0 none, 1 JBD, 2 Daly, 3 JK — and **a non-zero type requires an address**.
+///
+/// Both rules are the firmware's, from `BleControl`'s own handler. The second
+/// is what makes a half-configured BMS impossible: a type with no MAC would
+/// have the controller trying to reach a device it has no way to name.
+///
+/// The reverse is allowed. An address with type 0 reaches nothing, so it is
+/// dead data rather than a broken configuration, and the portal keeps it too
+/// — which lets a pilot turn a BMS off without losing the address.
+SettingsError validateBms({
+  required int bmsType,
+  required List<int> bmsMac,
+}) {
+  if (bmsType < 0 || bmsType > 3) return SettingsError.bmsTypeInvalid;
+  if (bmsType != 0 && isUnsetMac(bmsMac)) return SettingsError.bmsMacMissing;
+  return SettingsError.none;
+}
+
+/// Buzzer volume 0..100 and throttle source 0 wired / 1 wireless.
+SettingsError validateSystem({
+  required int buzzerVolume,
+  required int throttleSource,
+}) {
+  if (buzzerVolume < 0 || buzzerVolume > 100) {
+    return SettingsError.buzzerVolumeRange;
+  }
+  if (throttleSource < 0 || throttleSource > 1) {
+    return SettingsError.throttleSourceInvalid;
+  }
+  return SettingsError.none;
+}
 
 // ---------------------------------------------------------------------------
 // This app's own rules. The firmware has none of these, and says why:
@@ -217,6 +255,11 @@ String? messageFor(SettingsError error) => switch (error) {
       SettingsError.motorTempRange => 'Temperatura do motor: 0 a 150 °C',
       SettingsError.escTempRange => 'Temperatura do ESC: 0 a 150 °C',
       SettingsError.motorTempSourceInvalid => 'Origem de temperatura inválida',
+      SettingsError.bmsTypeInvalid => 'Tipo de BMS inválido',
+      SettingsError.bmsMacMissing =>
+        'Escolha o endereço do BMS — um tipo sem endereço não conecta',
+      SettingsError.buzzerVolumeRange => 'Volume do buzzer: 0 a 100',
+      SettingsError.throttleSourceInvalid => 'Origem do acelerador inválida',
       SettingsError.voltageOrder =>
         'A tensão mínima precisa ser menor que a máxima',
       SettingsError.motorTempOrder =>
