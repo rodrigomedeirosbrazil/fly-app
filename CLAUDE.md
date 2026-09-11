@@ -238,6 +238,66 @@ needle angle has to mean the same temperature on every aircraft and across a
 configuration change, or the pilot's sense of where it sits when things are
 fine stops transferring.
 
+### Writing needs a PIN, and the PIN is never stored
+
+`AUTH` (`0x01`) carries the PIN as raw characters. `BleControl::handleAuth`
+requires an **exact length match** before comparing, and **fails closed**: a
+wrong PIN clears whatever authentication the connection had already earned.
+
+The app asks for it on the **first save of a connection**, never on opening the
+settings screen — reads are open, so the screen shows current values without
+prompting, and the flight panel prompts for nothing ever. Nothing is persisted:
+no plaintext PIN on the device, none in a phone backup. The firmware clears
+`authenticated_` in `onCentralDisconnected()`, so per-connection is the shape
+it already expects.
+
+**`ErrState` must never produce a PIN prompt.** `gateRequest()` reports armed
+*before* auth precisely so a client does not ask for a password to do something
+that would be refused either way.
+
+`AUTH` and `CFG_SET` are **idempotent** — the same correct PIN, or the same
+payload, lands on the same state — so `ConfigEditor` retries them on a timeout.
+`PIN_CHANGE` is not, which is why the session itself never retries and each
+caller decides.
+
+### The app validates more than the firmware, on purpose
+
+`lib/protocol/settings_validation.dart` is the **fourth** hand-copied
+fly-controller contract here. Its mirrored half comes from
+`src/Settings/SettingsValidation.h`; its second half does not exist there.
+
+The firmware says why it has no ordering check: *"the portal has never had one,
+and adding it here would silently change what it accepts."* Sound for the
+firmware, bad for a pilot — `Power::calcMotorTempLimit` returns 0 outright when
+`reductionStart == maxTemp`, and `constrain(..., 0, 100)` pins it to 0 when
+start is above max. Either way power is cut from the reduction start upward, so
+`start 20 °C, max 10 °C` makes the motor unusable above 20 °C and that is found
+on takeoff.
+
+So the form refuses to produce it. **Do not "align" the two files by deleting
+the ordering rules.** The divergence is the point, and it covers only values
+nobody wants.
+
+**`ErrBadArg` is the only detector of real drift.** Nothing checks that the two
+copies agree, so a write the app accepted and the firmware refused means the
+mirrored ranges have moved apart. It is reported as that, not as a pilot error.
+
+### Settings is the only way out of the flight screen
+
+The entry sits in the "MAIS DADOS" drawer — already outside the card stack,
+already opened deliberately — and is **disabled with its reason** while armed
+or on a connection with no request channel, rather than hidden. Fixed presence,
+varying state, the same rule the status chips follow.
+
+A gate the pilot sees before acting beats an `ErrState` arriving after the tap.
+The screen itself also disables saving if the aircraft arms while it is open.
+
+After a successful write the app **re-reads the group** instead of trusting the
+values it just sent, because the band on the dials is drawn from them and
+assumed data is what this codebase refuses everywhere else. A failed re-read is
+still a success — the controller accepted the write; only the confirmation is
+missing.
+
 ### The Dart enum order does not match the firmware's
 
 `MotorTempSource` is declared `{can, ntc, none}` here; the firmware's

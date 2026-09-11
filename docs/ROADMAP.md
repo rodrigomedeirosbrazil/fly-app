@@ -47,6 +47,14 @@ band. Writes, the PIN session, config editing, the action opcodes and buzzer
 mirroring are still open — and the firmware already serves all of them, so
 from here the app is the lagging side of phase 2.
 
+**Configuration writes are done** (2026-09-11). The `Power` and `Thermal`
+groups can be changed from the app, authenticated per connection with the
+controller's PIN. `Bms` and `System` wait on subsystem 4, which produces the
+MAC addresses they carry.
+
+This is the first piece of the web portal with a real alternative, and
+therefore the first step toward phase 4.
+
 A binary telemetry characteristic (roughly 200 B of CSV becomes ~40 B, and it
 can carry fields the sentence has no room for), plus a command characteristic
 and a config characteristic. `Xctod` stays up for XCTrack.
@@ -120,6 +128,11 @@ Three things this did **not** measure, and none of them are hypothetical:
 **Is the firmware branch merged?** As of 2026-09-11, no. `b769fa1` lives on
 `worktree-ble-control-service`. Nothing in the binary path has run on a
 controller until it is.
+
+**Does a write survive a power cycle?** Nothing has ever written to this
+controller from the app. A `CFG_SET` returning `Ok` means the firmware accepted
+it and the app confirms by re-reading, but neither proves it reached NVS rather
+than RAM. Power-cycle the controller and check.
 
 **Does the radio hold with the app connected?** Untested with XCTrack connected
 at the same time, and untested with the ESP-NOW remote throttle also active —
