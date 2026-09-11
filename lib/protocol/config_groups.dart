@@ -160,3 +160,76 @@ class PowerConfig {
     return d.buffer.asUint8List();
   }
 }
+
+/// `ConfigBms`, 7 bytes: `[type u8][mac 6]`.
+///
+/// Same rules as the other groups: shorter is corruption and decodes to null,
+/// longer decodes its known prefix so firmware that appends a field still
+/// works.
+class BmsConfig {
+  const BmsConfig({required this.bmsType, required this.bmsMac});
+
+  /// 0 none, 1 JBD, 2 Daly, 3 JK. Mirrors the firmware's own numbering; there
+  /// is no Dart enum here because the value is written straight back and a
+  /// type this app does not know must survive the round trip.
+  final int bmsType;
+
+  /// Six raw bytes. All zero means unset — see `mac_address.dart`.
+  final List<int> bmsMac;
+
+  static const int kLength = 7;
+
+  static BmsConfig? decode(List<int> bytes) {
+    if (bytes.length < kLength) return null;
+    return BmsConfig(
+      bmsType: bytes[0],
+      bmsMac: List<int>.unmodifiable(bytes.sublist(1, 7)),
+    );
+  }
+
+  Uint8List encode() {
+    final out = Uint8List(kLength);
+    out[0] = bmsType;
+    out.setRange(1, 7, bmsMac);
+    return out;
+  }
+}
+
+/// `ConfigSystem`, 8 bytes: `[volume u8][throttleSource u8][mac 6]`.
+class SystemConfig {
+  const SystemConfig({
+    required this.buzzerVolume,
+    required this.throttleSource,
+    required this.remoteMac,
+  });
+
+  /// 0–100.
+  final int buzzerVolume;
+
+  /// 0 wired, 1 wireless (ESP-NOW).
+  final int throttleSource;
+
+  /// The paired remote throttle. All zero means none — and this field is the
+  /// **only** readback the pairing flow has, because `REMOTE_PAIR` answers
+  /// `Ok` the moment it sets a flag, long before a remote is heard.
+  final List<int> remoteMac;
+
+  static const int kLength = 8;
+
+  static SystemConfig? decode(List<int> bytes) {
+    if (bytes.length < kLength) return null;
+    return SystemConfig(
+      buzzerVolume: bytes[0],
+      throttleSource: bytes[1],
+      remoteMac: List<int>.unmodifiable(bytes.sublist(2, 8)),
+    );
+  }
+
+  Uint8List encode() {
+    final out = Uint8List(kLength);
+    out[0] = buzzerVolume;
+    out[1] = throttleSource;
+    out.setRange(2, 8, remoteMac);
+    return out;
+  }
+}

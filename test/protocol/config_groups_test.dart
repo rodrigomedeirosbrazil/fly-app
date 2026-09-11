@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fly_app/protocol/config_groups.dart';
+import 'package:fly_app/protocol/mac_address.dart';
 
 /// Builds a wire-shaped 17-byte ConfigThermal. Every setter is an offset
 /// assertion: if the firmware moves a field, this helper changes and every
@@ -242,6 +243,55 @@ void main() {
       );
       expect(ThermalConfig.decode(original.encode())!.motorReductionStartC,
           closeTo(-5.25, 1e-9));
+    });
+  });
+
+  group('BmsConfig', () {
+    test('decodes the 7-byte layout offset by offset', () {
+      final c = BmsConfig.decode(
+          [3, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF])!;
+      expect(c.bmsType, 3);
+      expect(c.bmsMac, [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]);
+    });
+
+    test('round trips', () {
+      const c = BmsConfig(bmsType: 1, bmsMac: [1, 2, 3, 4, 5, 6]);
+      expect(BmsConfig.decode(c.encode())!.bmsType, 1);
+      expect(BmsConfig.decode(c.encode())!.bmsMac, [1, 2, 3, 4, 5, 6]);
+    });
+
+    test('a short payload is corruption, not an old struct', () {
+      expect(BmsConfig.decode([3, 0xAA, 0xBB]), isNull);
+      expect(BmsConfig.decode(const []), isNull);
+    });
+
+    test('a longer payload decodes its known prefix', () {
+      final c = BmsConfig.decode([2, 1, 2, 3, 4, 5, 6, 99, 99])!;
+      expect(c.bmsType, 2);
+      expect(c.bmsMac, [1, 2, 3, 4, 5, 6]);
+    });
+  });
+
+  group('SystemConfig', () {
+    test('decodes the 8-byte layout offset by offset', () {
+      final c = SystemConfig.decode(
+          [70, 1, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66])!;
+      expect(c.buzzerVolume, 70);
+      expect(c.throttleSource, 1);
+      expect(c.remoteMac, [0x11, 0x22, 0x33, 0x44, 0x55, 0x66]);
+    });
+
+    test('round trips', () {
+      const c = SystemConfig(
+          buzzerVolume: 55, throttleSource: 0, remoteMac: kUnsetMac);
+      final back = SystemConfig.decode(c.encode())!;
+      expect(back.buzzerVolume, 55);
+      expect(back.throttleSource, 0);
+      expect(back.remoteMac, kUnsetMac);
+    });
+
+    test('a short payload is corruption', () {
+      expect(SystemConfig.decode([70, 1, 0x11]), isNull);
     });
   });
 }
