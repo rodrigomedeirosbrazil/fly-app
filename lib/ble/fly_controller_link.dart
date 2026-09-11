@@ -4,7 +4,9 @@ import 'dart:io' show Platform;
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../protocol/control_info.dart';
 import '../state/ble_permission_policy.dart';
+import '../state/telemetry_source_policy.dart';
 import 'android_host.dart';
 
 /// What the UI needs to know about the radio, without knowing about the radio.
@@ -22,6 +24,18 @@ enum LinkStatus {
   locationOff,
 }
 
+/// One notification, tagged with the characteristic that produced it.
+///
+/// Tagged rather than read from a `source` getter at handling time: a stream
+/// event has to be self-describing, or a payload still queued across a
+/// reconnect gets handed to the wrong decoder.
+class TelemetryPayload {
+  const TelemetryPayload(this.source, this.bytes);
+
+  final TelemetrySource source;
+  final List<int> bytes;
+}
+
 /// Owns the BLE conversation with the controller.
 ///
 /// Emits raw notification payloads on [payloads]; it does not know what a
@@ -36,6 +50,17 @@ class FlyControllerLink {
   /// controller — this app can listen and nothing else.
   static final Guid txCharacteristicUuid =
       Guid('6E400003-B5A3-F393-E0A9-E50E24DCCA9E');
+
+  /// The controller's own binary service. **Not advertised** — the 31-byte
+  /// advertising payload cannot hold a second 128-bit UUID — so the scan
+  /// filter stays on the NUS UUID and this is only ever found after
+  /// connecting. Its presence is the capability handshake.
+  static final Guid controlServiceUuid =
+      Guid('D4CF0001-9B9D-4BFD-8F7F-40C6989D3EA9');
+  static final Guid controlInfoUuid =
+      Guid('D4CF0002-9B9D-4BFD-8F7F-40C6989D3EA9');
+  static final Guid controlTelemetryUuid =
+      Guid('D4CF0003-9B9D-4BFD-8F7F-40C6989D3EA9');
 
   static const String deviceName = 'FlyController';
 
@@ -56,10 +81,14 @@ class FlyControllerLink {
   final AndroidHost _host;
 
   final _statusController = StreamController<LinkStatus>.broadcast();
-  final _payloadController = StreamController<List<int>>.broadcast();
+  final _payloadController = StreamController<TelemetryPayload>.broadcast();
 
   Stream<LinkStatus> get status => _statusController.stream;
-  Stream<List<int>> get payloads => _payloadController.stream;
+  Stream<TelemetryPayload> get payloads => _payloadController.stream;
+
+  /// Read once at discovery; null on the `$XCTOD` path.
+  ControlInfo? get info => _info;
+  ControlInfo? _info;
 
   BluetoothDevice? _device;
   StreamSubscription<List<int>>? _valueSub;
@@ -192,8 +221,8 @@ class FlyControllerLink {
         return;
       }
 
-      final characteristic = await _findTxCharacteristic(device);
-      if (characteristic == null) {
+      final selected = await _selectTelemetry(device);
+      if (selected == null) {
         await _teardown();
         return _scheduleRetry(generation);
       }
@@ -203,8 +232,10 @@ class FlyControllerLink {
         return;
       }
 
+      final (source, characteristic) = selected;
       await characteristic.setNotifyValue(true);
-      _valueSub = characteristic.onValueReceived.listen(_payloadController.add);
+      _valueSub = characteristic.onValueReceived
+          .listen((bytes) => _payloadController.add(TelemetryPayload(source, bytes)));
 
       _connectionSub = device.connectionState.listen((state) {
         if (state == BluetoothConnectionState.disconnected) {
@@ -275,16 +306,48 @@ class FlyControllerLink {
     return found;
   }
 
-  Future<BluetoothCharacteristic?> _findTxCharacteristic(
+  /// Finds the telemetry characteristic to subscribe to, consulting
+  /// [chooseAtDiscovery] for the decision. Returns null when neither service
+  /// offers one, which retries the whole attempt.
+  Future<(TelemetrySource, BluetoothCharacteristic)?> _selectTelemetry(
     BluetoothDevice device,
   ) async {
-    for (final service in await device.discoverServices()) {
-      if (service.uuid != serviceUuid) continue;
-      for (final c in service.characteristics) {
-        if (c.uuid == txCharacteristicUuid) return c;
+    final services = await device.discoverServices();
+
+    BluetoothCharacteristic? find(Guid service, Guid characteristic) {
+      for (final s in services) {
+        if (s.uuid != service) continue;
+        for (final c in s.characteristics) {
+          if (c.uuid == characteristic) return c;
+        }
+      }
+      return null;
+    }
+
+    final controlTelemetry = find(controlServiceUuid, controlTelemetryUuid);
+    final infoCharacteristic = find(controlServiceUuid, controlInfoUuid);
+
+    _info = null;
+    if (controlTelemetry != null && infoCharacteristic != null) {
+      try {
+        _info = ControlInfo.decode(await infoCharacteristic.read());
+      } catch (_) {
+        // Unreadable INFO is treated as no service at all, below.
       }
     }
-    return null;
+
+    final source = chooseAtDiscovery(
+      controlServicePresent: controlTelemetry != null,
+      infoReadable: _info != null,
+    );
+
+    if (source == TelemetrySource.control) {
+      return (TelemetrySource.control, controlTelemetry!);
+    }
+
+    _info = null;
+    final tx = find(serviceUuid, txCharacteristicUuid);
+    return tx == null ? null : (TelemetrySource.xctod, tx);
   }
 
   /// Backoff caps at 8 s: the pilot may be walking back to a controller that is
@@ -296,6 +359,35 @@ class FlyControllerLink {
       seconds: [1, 2, 4, 8][_attempt.clamp(1, 4) - 1],
     );
     Timer(delay, () => _attemptConnection(generation));
+  }
+
+  /// Re-runs discovery on the live connection, forced onto `$XCTOD`.
+  ///
+  /// Called once, and only before any frame has reached the screen — see
+  /// [shouldFallBackOnFrame]. After that the source is fixed for the
+  /// connection, because a flip would change which readings exist under a
+  /// pilot who is reading them.
+  Future<void> fallBackToXctod() async {
+    final device = _device;
+    if (device == null) return;
+
+    await _valueSub?.cancel();
+    _valueSub = null;
+    _info = null;
+
+    for (final s in await device.discoverServices()) {
+      if (s.uuid != serviceUuid) continue;
+      for (final c in s.characteristics) {
+        if (c.uuid != txCharacteristicUuid) continue;
+        await c.setNotifyValue(true);
+        _valueSub = c.onValueReceived.listen(
+          (bytes) => _payloadController.add(
+            TelemetryPayload(TelemetrySource.xctod, bytes),
+          ),
+        );
+        return;
+      }
+    }
   }
 
   Future<void> _teardown() async {

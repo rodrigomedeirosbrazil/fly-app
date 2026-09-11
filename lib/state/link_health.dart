@@ -1,5 +1,4 @@
 import '../protocol/telemetry_frame.dart';
-import '../protocol/xctod_parser.dart';
 
 /// Decides whether the telemetry on screen is still true.
 ///
@@ -16,13 +15,17 @@ class LinkHealth {
   TelemetryFrame? _last;
   int _rejected = 0;
 
-  /// Lines received that did not decode. Surfaced in the UI rather than
+  /// Payloads received that did not decode. Surfaced in the UI rather than
   /// silenced: on Android this is the symptom of an MTU that never grew.
   int get rejectedCount => _rejected;
 
-  /// Feeds one reassembled line. Returns true when it produced a usable frame.
-  bool onLine(String line, DateTime now) {
-    final frame = XctodParser.parse(line, receivedAt: now);
+  /// Feeds one decoded frame, or null when the payload was rejected.
+  ///
+  /// Decoding happens above this class now: two sources produce the same
+  /// model, and which decoder ran is not this class's business. Rejections are
+  /// counted and deliberately do **not** refresh the clock — a stream of
+  /// garbage has to age out exactly like silence.
+  bool onFrame(TelemetryFrame? frame, DateTime now) {
     if (frame == null) {
       _rejected++;
       return false;

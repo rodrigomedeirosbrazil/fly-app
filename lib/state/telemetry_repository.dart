@@ -3,9 +3,12 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../ble/fly_controller_link.dart';
+import '../protocol/control_telemetry_codec.dart';
 import '../protocol/line_assembler.dart';
 import '../protocol/telemetry_frame.dart';
+import '../protocol/xctod_parser.dart';
 import 'link_health.dart';
+import 'telemetry_source_policy.dart';
 
 /// Single source of truth for the UI.
 ///
@@ -34,7 +37,7 @@ class TelemetryRepository extends ChangeNotifier {
   final LineAssembler _assembler = LineAssembler();
 
   late final StreamSubscription<LinkStatus> _statusSub;
-  late final StreamSubscription<List<int>> _payloadSub;
+  late final StreamSubscription<TelemetryPayload> _payloadSub;
   late final Timer _ticker;
 
   LinkStatus _status = LinkStatus.idle;
@@ -69,11 +72,17 @@ class TelemetryRepository extends ChangeNotifier {
 
   Future<void> openLocationSettings() => _link.openLocationSettings();
 
+  /// True once a decoded frame has reached the UI. After that the telemetry
+  /// source is fixed for the connection.
+  bool _anyFrameRendered = false;
+
   void _onStatus(LinkStatus s) {
     _status = s;
     if (s == LinkStatus.disconnected || s == LinkStatus.idle) {
-      // A half-received line cannot be completed across a reconnection.
+      // A half-received line cannot be completed across a reconnection, and
+      // the next connection re-runs discovery from scratch.
       _assembler.reset();
+      _anyFrameRendered = false;
     }
     if (s == LinkStatus.idle) {
       // Only an explicit stop() forgets the last frame. A drop must keep it:
@@ -86,11 +95,38 @@ class TelemetryRepository extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _onPayload(List<int> bytes) {
+  void _onPayload(TelemetryPayload payload) {
     final now = _now();
-    for (final line in _assembler.add(bytes)) {
-      _health.onLine(line, now);
+
+    switch (payload.source) {
+      case TelemetrySource.xctod:
+        for (final line in _assembler.add(payload.bytes)) {
+          if (_health.onFrame(
+            XctodParser.parse(line, receivedAt: now),
+            now,
+          )) {
+            _anyFrameRendered = true;
+          }
+        }
+
+      case TelemetrySource.control:
+        final frame = ControlTelemetryCodec.decode(
+          payload.bytes,
+          receivedAt: now,
+        );
+        final decoded = _health.onFrame(frame, now);
+
+        if (shouldFallBackOnFrame(
+          decoded: decoded,
+          anyFrameRendered: _anyFrameRendered,
+        )) {
+          // A struct version this app cannot read fails on the very first
+          // frame or never, so nothing on screen changes underneath anyone.
+          unawaited(_link.fallBackToXctod());
+        }
+        if (decoded) _anyFrameRendered = true;
     }
+
     notifyListeners();
   }
 
