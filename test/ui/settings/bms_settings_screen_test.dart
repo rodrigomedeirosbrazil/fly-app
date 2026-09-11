@@ -61,7 +61,14 @@ class RecordingEditor implements ConfigEditor {
       const SaveOk();
 }
 
+/// Stands in for the controller's scanner. `next` is what the poll answers,
+/// so a test can hand the screen a real result list -- which is the only way
+/// to exercise the two rules that live in the results: an unidentified device
+/// must not move the type dropdown, and the count line must report the
+/// controller's total rather than the length of the truncated list.
 class _MockEditor implements ConfigEditor {
+  BmsScanState? next;
+
   @override
   bool get authenticated => true;
   @override
@@ -79,7 +86,7 @@ class _MockEditor implements ConfigEditor {
   @override
   Future<SaveOutcome> startBmsScan({String? pin}) async => const SaveOk();
   @override
-  Future<BmsScanState?> readBmsScan() async => null;
+  Future<BmsScanState?> readBmsScan() async => next;
   @override
   Future<SystemConfig?> readSystemConfig() async => null;
   @override
@@ -94,10 +101,12 @@ class _MockEditor implements ConfigEditor {
 void main() {
   late RecordingEditor editor;
   late BmsScanController scanController;
+  late _MockEditor scanEditor;
 
   setUp(() {
     editor = RecordingEditor();
-    scanController = BmsScanController(_MockEditor(),
+    scanEditor = _MockEditor();
+    scanController = BmsScanController(scanEditor,
         pollInterval: const Duration(milliseconds: 10));
   });
 
@@ -208,6 +217,99 @@ void main() {
     expect(editor.saves, hasLength(2));
     expect(editor.saves.last.bmsType, 2,
         reason: 'the re-save must carry the fields, not the original config');
+  });
+
+  /// Runs one scan to completion so [scanController] holds real results.
+  ///
+  /// The status is `complete`, so the first poll ends the scan and leaves no
+  /// timer running for pumpAndSettle to wait on.
+  Future<void> completeScan(
+    WidgetTester tester, {
+    required int total,
+    required List<List<int>> results,
+  }) async {
+    scanEditor.next = BmsScanState(
+      status: BmsScanStatus.complete,
+      total: total,
+      results: [
+        for (final r in results)
+          BmsScanResult(
+              mac: r.sublist(0, 6), rssi: r[6], detectedType: r[7]),
+      ],
+    );
+    await tester.runAsync(() async {
+      await scanController.start(pin: '1234');
+      while (scanController.status == BmsScanStatus.scanning) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+    });
+  }
+
+  testWidgets('tapping a result fills the address and the detected type',
+      (tester) async {
+    await completeScan(tester, total: 1, results: [
+      [0x11, 0x22, 0x33, 0x44, 0x55, 0x66, -62, 3],
+    ]);
+    await tester.pumpWidget(wrap(screen(config: const BmsConfig(
+        bmsType: 0, bmsMac: kUnsetMac))));
+
+    final tile = find.byKey(const Key('scan-result-0'));
+    await tester.ensureVisible(tile);
+    await tester.pumpAndSettle();
+    await tester.tap(tile);
+    await tester.pumpAndSettle();
+
+    await tapSave(tester);
+    expect(editor.saves.single.bmsMac, [0x11, 0x22, 0x33, 0x44, 0x55, 0x66]);
+    expect(editor.saves.single.bmsType, 3);
+  });
+
+  testWidgets('a result with no detected type leaves the dropdown alone',
+      (tester) async {
+    // The app never sends BMS_DETECT -- it can block the firmware past its
+    // 10 s watchdog and reboot the controller -- so an unidentified device is
+    // one the pilot names. Overwriting the type with 0 here would silently
+    // turn the BMS off.
+    await completeScan(tester, total: 1, results: [
+      [0x11, 0x22, 0x33, 0x44, 0x55, 0x66, -88, 0],
+    ]);
+    await tester.pumpWidget(wrap(screen()));  // stored type is 1 (JBD)
+
+    final tile = find.byKey(const Key('scan-result-0'));
+    await tester.ensureVisible(tile);
+    await tester.pumpAndSettle();
+    await tester.tap(tile);
+    await tester.pumpAndSettle();
+
+    await tapSave(tester);
+    expect(editor.saves.single.bmsMac, [0x11, 0x22, 0x33, 0x44, 0x55, 0x66]);
+    expect(editor.saves.single.bmsType, 1, reason: 'the stored type must survive');
+  });
+
+  testWidgets('the count line reports the controller total, not the list '
+      'length', (tester) async {
+    // The firmware truncates the reply to one BLE frame while `count` still
+    // carries the true total. Believing the list would under-report what the
+    // scan saw.
+    await completeScan(tester, total: 30, results: [
+      [0x11, 0x22, 0x33, 0x44, 0x55, 0x66, -50, 1],
+    ]);
+    await tester.pumpWidget(wrap(screen()));
+
+    final line = find.byKey(const Key('scan-truncated'));
+    await tester.ensureVisible(line);
+    await tester.pumpAndSettle();
+    expect(tester.widget<Text>(line).data, contains('30'));
+  });
+
+  testWidgets('a list that matches the count shows no truncation line',
+      (tester) async {
+    await completeScan(tester, total: 1, results: [
+      [0x11, 0x22, 0x33, 0x44, 0x55, 0x66, -50, 1],
+    ]);
+    await tester.pumpWidget(wrap(screen()));
+
+    expect(find.byKey(const Key('scan-truncated')), findsNothing);
   });
 
   group('layout', () {
