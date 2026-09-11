@@ -194,6 +194,30 @@ void main() {
     });
   });
 
+  group('the calibration reference, which only this app collects', () {
+    // The portal bounds what the pilot reads off the BMS at 10-65 V before
+    // computing a ratio from it. The firmware never sees this number -- it
+    // only receives the ratio -- so nothing downstream would catch a typo.
+    test('accepts a plausible pack voltage', () {
+      expect(validateCalibrationReference(10), SettingsError.none);
+      expect(validateCalibrationReference(51.2), SettingsError.none);
+      expect(validateCalibrationReference(65), SettingsError.none);
+    });
+
+    test('refuses a reading no 14S pack produces', () {
+      expect(validateCalibrationReference(9.99),
+          SettingsError.calibrationReferenceRange);
+      expect(validateCalibrationReference(65.01),
+          SettingsError.calibrationReferenceRange);
+      expect(validateCalibrationReference(0),
+          SettingsError.calibrationReferenceRange);
+    });
+
+    test('has a message like every other error', () {
+      expect(messageFor(SettingsError.calibrationReferenceRange), isNotNull);
+    });
+  });
+
   test('every error has a Portuguese message', () {
     for (final e in SettingsError.values) {
       final message = messageFor(e);

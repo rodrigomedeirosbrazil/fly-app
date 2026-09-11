@@ -30,6 +30,7 @@ enum SettingsError {
   voltageOrder,
   motorTempOrder,
   escTempOrder,
+  calibrationReferenceRange,
 }
 
 // ---------------------------------------------------------------------------
@@ -123,6 +124,15 @@ SettingsError validateThermalOrder({
   return SettingsError.none;
 }
 
+/// The pack voltage the pilot reads off the BMS, before a ratio is derived
+/// from it. The firmware never sees this number — it receives only the
+/// resulting ratio — so a typo here would be written as a plausible-looking
+/// calibration and caught by nothing. Bounds are the portal's.
+SettingsError validateCalibrationReference(double volts) =>
+    (volts < 10 || volts > 65)
+        ? SettingsError.calibrationReferenceRange
+        : SettingsError.none;
+
 // ---------------------------------------------------------------------------
 // What the form calls. Ranges first: an out-of-range value is the more
 // specific complaint, and reporting the ordering instead would send the pilot
@@ -195,4 +205,6 @@ String? messageFor(SettingsError error) => switch (error) {
       SettingsError.escTempOrder =>
         'O início da redução do ESC precisa ser menor que o máximo — '
             'iguais ou invertidos cortam a potência',
+      SettingsError.calibrationReferenceRange =>
+        'Tensão de referência: 10 a 65 V',
     };

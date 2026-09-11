@@ -5,11 +5,6 @@ import '../protocol/config_groups.dart';
 import '../protocol/telemetry_frame.dart';
 import 'widgets/dial.dart';
 
-/// Number of series cells. The firmware has no support for other pack sizes, so
-/// this is deliberately a constant and not a setting — the same choice the web
-/// telemetry page made. An estimate derived from it is marked with a tilde.
-const int _seriesCells = 14;
-
 /// The instrument.
 ///
 /// Card stack, fixed order: status, battery, instruments, throttle, drawer bar.
@@ -310,7 +305,7 @@ class _BatteryCardState extends State<_BatteryCard> {
   }
 
   /// Per-cell prefers the BMS minimum cell — a measurement. Falling back to
-  /// pack voltage over [_seriesCells] is a mean dressed up as a minimum, and
+  /// pack voltage over [kSeriesCells] is a mean dressed up as a minimum, and
   /// says so with a tilde.
   ({String text, String unit})? _perCellReading(TelemetryFrame f) {
     final min = f.cellMinMv;
@@ -319,7 +314,7 @@ class _BatteryCardState extends State<_BatteryCard> {
     }
     final v = f.voltage;
     if (v == null) return null;
-    return (text: '~${(v / _seriesCells).toStringAsFixed(2)}', unit: 'V/cél');
+    return (text: '~${(v / kSeriesCells).toStringAsFixed(2)}', unit: 'V/cél');
   }
 
   @override

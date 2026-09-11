@@ -24,6 +24,12 @@ Uint8List thermalBytes({
 }
 
 void main() {
+  test('the series cell count matches the firmware', () {
+    // BATTERY_CELL_COUNT in the firmware. Shared here because both the flight
+    // panel and the settings screens convert pack voltage to per-cell with it.
+    expect(kSeriesCells, 14);
+  });
+
   test('the group id matches the firmware enum', () {
     expect(ConfigGroup.power.id, 0);
     expect(ConfigGroup.thermal.id, 1);

@@ -1,5 +1,14 @@
 import 'dart:typed_data';
 
+/// Series cells in the pack, mirroring the firmware's `BATTERY_CELL_COUNT`.
+///
+/// The firmware has no support for other pack sizes, so this is a constant
+/// rather than a setting — the same choice the web portal made. It lives here
+/// rather than in a widget because the flight panel and the settings screens
+/// both convert pack voltage to per-cell with it, and a second copy would be
+/// a second hand-copied firmware constant to keep in sync.
+const int kSeriesCells = 14;
+
 /// The four configuration groups. `CFG_GET` and `CFG_SET` work on whole
 /// groups because values like a reduction start and its maximum are only
 /// meaningful validated as a pair.
