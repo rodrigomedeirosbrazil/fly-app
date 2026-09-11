@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:fly_app/protocol/bms_scan.dart';
 import 'package:fly_app/protocol/config_groups.dart';
 import 'package:fly_app/state/config_editor.dart';
 import 'package:fly_app/ui/settings/power_settings_screen.dart';
@@ -34,6 +35,33 @@ class RecordingEditor implements ConfigEditor {
 
   @override
   Future<SaveOutcome> saveThermal(ThermalConfig c, {String? pin}) async =>
+      const SaveOk();
+
+  @override
+  Future<SaveOutcome> saveBms(BmsConfig config, {String? pin}) async =>
+      const SaveOk();
+
+  @override
+  Future<SaveOutcome> saveSystem(SystemConfig config, {String? pin}) async =>
+      const SaveOk();
+
+  @override
+  Future<SaveOutcome> startBmsScan({String? pin}) async => const SaveOk();
+
+  @override
+  Future<BmsScanState?> readBmsScan() async => null;
+
+  @override
+  Future<SystemConfig?> readSystemConfig() async => null;
+
+  @override
+  Future<SaveOutcome> pairRemote({String? pin}) async => const SaveOk();
+
+  @override
+  Future<SaveOutcome> forgetRemote({String? pin}) async => const SaveOk();
+
+  @override
+  Future<SaveOutcome> previewBuzzer(int volume, {String? pin}) async =>
       const SaveOk();
 }
 

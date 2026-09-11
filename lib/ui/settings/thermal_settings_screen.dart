@@ -170,6 +170,8 @@ class _ThermalSettingsScreenState extends State<ThermalSettingsScreen> {
             'O controlador recusou o valor — o app e o firmware discordam sobre a faixa válida');
       case SaveUnsupported():
         _showSnackBar('Este firmware não aceita gravação');
+      case SaveBusy():
+        _showSnackBar('O controlador está ocupado');
       case SaveFailed():
         _showSnackBar('Não foi possível gravar');
     }

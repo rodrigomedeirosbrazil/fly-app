@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import '../protocol/bms_scan.dart';
 import '../protocol/config_groups.dart';
 import '../protocol/control_frame.dart';
 import 'control_session.dart';
@@ -7,6 +8,11 @@ import 'control_session.dart';
 const int _opAuth = 0x01;
 const int _opCfgGet = 0x10;
 const int _opCfgSet = 0x11;
+const int _opBmsScanStart = 0x21;
+const int _opBmsScanStatus = 0x22;
+const int _opRemotePair = 0x24;
+const int _opRemoteForget = 0x25;
+const int _opBuzzerPreview = 0x26;
 
 /// How many times an idempotent request is resent after a timeout.
 const int _attempts = 3;
@@ -19,9 +25,11 @@ sealed class SaveOutcome {
 /// Written. [power] or [thermal] carries what the controller reported when
 /// asked again, or null when that confirmation did not come back.
 class SaveOk extends SaveOutcome {
-  const SaveOk({this.power, this.thermal});
+  const SaveOk({this.power, this.thermal, this.bms, this.system});
   final PowerConfig? power;
   final ThermalConfig? thermal;
+  final BmsConfig? bms;
+  final SystemConfig? system;
 }
 
 /// No authenticated session. Prompt, then call again with a PIN.
@@ -56,6 +64,13 @@ class SaveUnsupported extends SaveOutcome {
   const SaveUnsupported();
 }
 
+/// The controller is already doing this. Only `BMS_SCAN_START` produces it:
+/// the scanner is a single resource, and a second start would be a second
+/// answer to a question already being asked.
+class SaveBusy extends SaveOutcome {
+  const SaveBusy();
+}
+
 /// Nothing came back, or the link went away.
 class SaveFailed extends SaveOutcome {
   const SaveFailed();
@@ -85,6 +100,111 @@ class ConfigEditor {
   Future<SaveOutcome> saveThermal(ThermalConfig config, {String? pin}) =>
       _save(ConfigGroup.thermal, config.encode(), pin);
 
+  Future<SaveOutcome> saveBms(BmsConfig config, {String? pin}) =>
+      _save(ConfigGroup.bms, config.encode(), pin);
+
+  Future<SaveOutcome> saveSystem(SystemConfig config, {String? pin}) =>
+      _save(ConfigGroup.system, config.encode(), pin);
+
+  /// Starts the controller's 5 s BLE scan for BMS devices.
+  ///
+  /// `ErrBusy` is a real answer, not a failure: the scanner is one resource
+  /// and a scan is already running.
+  Future<SaveOutcome> startBmsScan({String? pin}) =>
+      _authenticatedAction(op: _opBmsScanStart, payload: const [], pin: pin);
+
+  /// A plain `CFG_GET` of the System group, open like every read. The
+  /// pairing wait needs it: `remoteMac` turning non-zero is the only signal
+  /// that a remote was heard.
+  Future<SystemConfig?> readSystemConfig() async {
+    final result =
+        await _session.request(op: _opCfgGet, payload: [ConfigGroup.system.id]);
+    if (result is! ControlOk) return null;
+    return SystemConfig.decode(result.payload);
+  }
+
+  /// Reads the scan's progress and results.
+  ///
+  /// **Open**: `opRequiresAuth` exempts it and `opAllowedWhileArmed` allows
+  /// it, so it needs no PIN and answers while armed. Returns null when
+  /// nothing came back — an empty scan and an unanswered poll are different
+  /// things, and returning an empty state for the second would show the pilot
+  /// "nenhum dispositivo" for a link that is simply not replying.
+  Future<BmsScanState?> readBmsScan() async {
+    final result = await _session.request(op: _opBmsScanStatus, payload: const []);
+    if (result is! ControlOk) return null;
+    return BmsScanState.decode(result.payload);
+  }
+
+  /// Puts the controller into pairing mode.
+  ///
+  /// It answers `Ok` the moment the flag is set, which is **not** the moment a
+  /// remote is paired — `RemoteLink::onReceive` does that whenever the first
+  /// remote packet arrives, with no timeout and no way to cancel. The only
+  /// readback is `remoteMac` in the System group.
+  Future<SaveOutcome> pairRemote({String? pin}) =>
+      _authenticatedAction(op: _opRemotePair, payload: const [], pin: pin);
+
+  /// Clears the paired MAC in NVS.
+  ///
+  /// Nothing tells the running `RemoteLink` to drop its peer, so a remote
+  /// already talking may keep working until the controller restarts.
+  Future<SaveOutcome> forgetRemote({String? pin}) =>
+      _authenticatedAction(op: _opRemoteForget, payload: const [], pin: pin);
+
+  /// Sets the volume and plays the preview tone.
+  ///
+  /// Not retried: the firmware plays a sound each time, so a resend after a
+  /// timeout would beep twice. It is also the one control here whose failure
+  /// the pilot hears rather than reads.
+  Future<SaveOutcome> previewBuzzer(int volume, {String? pin}) {
+    if (volume < 0 || volume > 100) {
+      return Future.value(const SaveRejectedByController());
+    }
+    return _authenticatedAction(
+      op: _opBuzzerPreview,
+      payload: [volume],
+      pin: pin,
+      retry: false,
+    );
+  }
+
+  /// The shared body of every authenticated action.
+  ///
+  /// Identical refusal mapping to `_save`, deliberately: armed reported
+  /// before auth, `ErrBadOp` meaning this firmware cannot, `ErrAuth` meaning
+  /// the session is gone. A parallel mapping would be free to drift from the
+  /// one subsystem 3 got right.
+  Future<SaveOutcome> _authenticatedAction({
+    required int op,
+    required List<int> payload,
+    required String? pin,
+    bool retry = true,
+  }) async {
+    if (!_authenticated) {
+      if (pin == null) return const SaveNeedsPin();
+      final auth = await _authenticate(pin);
+      if (auth != null) return auth;
+    }
+
+    final result = retry
+        ? await _retrying(op: op, payload: payload)
+        : await _session.request(op: op, payload: payload);
+
+    return switch (result) {
+      ControlOk() => const SaveOk(),
+      ControlRefused(:final status) => switch (status) {
+          ControlStatus.errState => const SaveRefusedArmed(),
+          ControlStatus.errAuth => _lostSession(),
+          ControlStatus.errBadArg => const SaveRejectedByController(),
+          ControlStatus.errBadOp => const SaveUnsupported(),
+          ControlStatus.errBusy => const SaveBusy(),
+          _ => const SaveFailed(),
+        },
+      ControlTimeout() || ControlDropped() => const SaveFailed(),
+    };
+  }
+
   Future<SaveOutcome> _save(
     ConfigGroup group,
     Uint8List encoded,
@@ -113,6 +233,7 @@ class ConfigEditor {
           ControlStatus.errAuth => _lostSession(),
           ControlStatus.errBadArg => const SaveRejectedByController(),
           ControlStatus.errBadOp => const SaveUnsupported(),
+          ControlStatus.errBusy => const SaveBusy(),
           _ => const SaveFailed(),
         };
       case ControlTimeout():
@@ -139,6 +260,7 @@ class ConfigEditor {
         return switch (status) {
           ControlStatus.errState => const SaveRefusedArmed(),
           ControlStatus.errAuth => _lostSession(SaveWrongPin.new),
+          ControlStatus.errBusy => const SaveBusy(),
           _ => const SaveFailed(),
         };
       case ControlTimeout():
@@ -162,7 +284,9 @@ class ConfigEditor {
       ConfigGroup.power => SaveOk(power: PowerConfig.decode(result.payload)),
       ConfigGroup.thermal =>
         SaveOk(thermal: ThermalConfig.decode(result.payload)),
-      _ => const SaveOk(),
+      ConfigGroup.bms => SaveOk(bms: BmsConfig.decode(result.payload)),
+      ConfigGroup.system =>
+        SaveOk(system: SystemConfig.decode(result.payload)),
     };
   }
 
