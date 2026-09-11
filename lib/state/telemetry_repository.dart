@@ -86,6 +86,14 @@ class TelemetryRepository extends ChangeNotifier {
   PowerConfig? get powerConfig => _powerConfig;
   PowerConfig? _powerConfig;
 
+  /// The `Bms` group, fetched after the power one.
+  BmsConfig? get bmsConfig => _bmsConfig;
+  BmsConfig? _bmsConfig;
+
+  /// The `System` group, fetched after the BMS one.
+  SystemConfig? get systemConfig => _systemConfig;
+  SystemConfig? _systemConfig;
+
   Future<void> start() async {
     final blocked = await _link.blockingCondition();
     if (blocked != null) {
@@ -151,7 +159,7 @@ class TelemetryRepository extends ChangeNotifier {
     return result;
   }
 
-  /// Asks for the thermal and power groups once per connection.
+  /// Asks for all four config groups once per connection.
   ///
   /// Triggered by the first decoded binary frame rather than by connecting:
   /// at that point the source is settled and the service has demonstrably
@@ -178,6 +186,18 @@ class TelemetryRepository extends ChangeNotifier {
       _powerConfig = PowerConfig.decode(power.payload);
       notifyListeners();
     }
+
+    final bms = await _requestGroup(session, ConfigGroup.bms);
+    if (bms is ControlOk) {
+      _bmsConfig = BmsConfig.decode(bms.payload);
+      notifyListeners();
+    }
+
+    final system = await _requestGroup(session, ConfigGroup.system);
+    if (system is ControlOk) {
+      _systemConfig = SystemConfig.decode(system.payload);
+      notifyListeners();
+    }
   }
 
   void _onStatus(LinkStatus s) {
@@ -194,6 +214,8 @@ class TelemetryRepository extends ChangeNotifier {
       _thermalRequested = false;
       _thermalConfig = null;
       _powerConfig = null;
+      _bmsConfig = null;
+      _systemConfig = null;
     }
     if (s == LinkStatus.idle) {
       // Only an explicit stop() forgets the last frame. A drop must keep it:
