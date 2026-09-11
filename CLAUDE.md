@@ -45,6 +45,20 @@ success. Always `flutter build` first, or use `flutter run`. Check
 `stat -f "%Sm" build/ios/iphoneos/Runner.app/Runner` against your last edit if
 the device shows no change.
 
+**`flutter install` can hang indefinitely on a wireless device**, and so can
+`flutter devices` — both were observed sitting past a 10-minute timeout with
+the phone unlocked and reachable. `devicectl` talks to it directly and does
+not:
+
+```bash
+xcrun devicectl list devices
+xcrun devicectl device install app --device <udid> build/ios/iphoneos/Runner.app
+xcrun devicectl device process launch --device <udid> br.com.medeirostec.aerovolt
+```
+
+Still build with `flutter build ios --release` first — `devicectl` installs
+whatever is in `build/`, with the same staleness trap as `flutter install`.
+
 `flutter devices` lists connected hardware. An emulator or simulator is useless
 here — neither has a Bluetooth radio.
 
@@ -237,6 +251,124 @@ The dial's scale stays **fixed at 140 °C**; only the band is configured. The
 needle angle has to mean the same temperature on every aircraft and across a
 configuration change, or the pilot's sense of where it sits when things are
 fine stops transferring.
+
+### Writing needs a PIN, and the PIN is never stored
+
+`AUTH` (`0x01`) carries the PIN as raw characters. `BleControl::handleAuth`
+requires an **exact length match** before comparing, and **fails closed**: a
+wrong PIN clears whatever authentication the connection had already earned.
+
+The app asks for it on the **first save of a connection**, never on opening the
+settings screen — reads are open, so the screen shows current values without
+prompting, and the flight panel prompts for nothing ever. Nothing is persisted:
+no plaintext PIN on the device, none in a phone backup. The firmware clears
+`authenticated_` in `onCentralDisconnected()`, so per-connection is the shape
+it already expects.
+
+**`ErrState` must never produce a PIN prompt.** `gateRequest()` reports armed
+*before* auth precisely so a client does not ask for a password to do something
+that would be refused either way.
+
+`AUTH` and `CFG_SET` are **idempotent** — the same correct PIN, or the same
+payload, lands on the same state — so `ConfigEditor` retries them on a timeout.
+`PIN_CHANGE` is not, which is why the session itself never retries and each
+caller decides.
+
+### The app validates more than the firmware, on purpose
+
+`lib/protocol/settings_validation.dart` is the **fourth** hand-copied
+fly-controller contract here. Its mirrored half comes from
+`src/Settings/SettingsValidation.h`; its second half does not exist there.
+
+The firmware says why it has no ordering check: *"the portal has never had one,
+and adding it here would silently change what it accepts."* Sound for the
+firmware, bad for a pilot — `Power::calcMotorTempLimit` returns 0 outright when
+`reductionStart == maxTemp`, and `constrain(..., 0, 100)` pins it to 0 when
+start is above max. Either way power is cut from the reduction start upward, so
+`start 20 °C, max 10 °C` makes the motor unusable above 20 °C and that is found
+on takeoff.
+
+So the form refuses to produce it. **Do not "align" the two files by deleting
+the ordering rules.** The divergence is the point, and it covers only values
+nobody wants.
+
+**`ErrBadArg` is the only detector of real drift.** Nothing checks that the two
+copies agree, so a write the app accepted and the firmware refused means the
+mirrored ranges have moved apart. It is reported as that, not as a pilot error.
+
+### Settings is the only way out of the flight screen
+
+The entry sits in the "MAIS DADOS" drawer — already outside the card stack,
+already opened deliberately — and is **disabled with its reason** while armed
+or on a connection with no request channel, rather than hidden. Fixed presence,
+varying state, the same rule the status chips follow.
+
+A gate the pilot sees before acting beats an `ErrState` arriving after the tap.
+The screen itself also disables saving if the aircraft arms while it is open.
+
+After a successful write the app **re-reads the group** instead of trusting the
+values it just sent, because the band on the dials is drawn from them and
+assumed data is what this codebase refuses everywhere else. A failed re-read is
+still a success — the controller accepted the write; only the confirmation is
+missing.
+
+### A pushed route freezes unless its content listens
+
+`MaterialPageRoute`'s builder runs **once**. Anything read from the repository
+inside it is a snapshot, so the settings screens' content sits in a
+`ListenableBuilder` on `TelemetryRepository`.
+
+This shipped wrong once: `armed` was captured at push time, so arming the
+aircraft while the settings screen was open did not disable saving. The
+firmware still refused with `ErrState`, so nothing unsafe was written — but
+the gate the pilot could see did not move. **Every widget test passed**,
+because each pumped a fresh widget with the flag already set; they tested the
+widget, not the wiring. `test/ui/settings/settings_navigation_test.dart` pins
+the shape instead — both that saving is available when disarmed and that it
+disables when arming happens mid-screen.
+
+The same trap caught the PIN dialog: a pushed route runs its builder once, so
+the `TextEditingController` it created became stale as the user typed. When
+the dialog dismissed, `Navigator.pop` started the teardown and the controller
+disposed while the `TextField` was still mounted. The controller is now owned
+by the settings screen and outlives every dialog, because the route that
+borrowed it cannot outlive the screen that created it.
+
+### The settings screens mirror the portal
+
+Four areas, per-cell voltage entry with the pack total beside it, a dropdown of
+the pack sizes the portal offers, and a voltage divider that is **derived, not
+typed** — the formula comes from `src/WebServer/Pages/ConfigPowerPage.h`.
+A pilot who knows one surface should recognise the other.
+
+`kSeriesCells` is 14, mirroring the firmware's `BATTERY_CELL_COUNT`. Both the
+flight panel and the settings screens convert pack voltage to per-cell with
+it.
+
+Calibration goes inert when `frame.voltage` is null — the codec already nulls
+it unless the battery-voltage signal state is `Valid`, so "no trustworthy
+reading" is the frame's rule rather than a second one. There is no "reset to
+default": `BATTERY_DIVIDER_RATIO` is a compile-time constant per board and
+reaches neither `INFO` nor any config group, so the app cannot know it.
+
+### A number field that cannot be read is not a zero
+
+`TextInputType.number` is iOS's `numberPad`, which carries **no decimal
+separator**. Four settings fields are decimal, so that alone made `3,15`
+untypeable on an iPhone; they use `numberWithOptions(decimal: true)`.
+
+`parseSetting` reads both separators — the labels are written `3,15 V`, which
+is what a pilot types and what `double.parse` rejects — and returns **null**
+rather than zero when it cannot read the field. The old `?? 0` was the real
+hazard: `abc` in the motor reduction start became `0 °C`, which passes the
+0..150 range *and* the `start < max` ordering rule, and would have been
+written as a band cutting power from zero upward. That is the configuration
+the ordering rules exist to refuse, reached around them.
+
+The input filter is an allow-list of digits and separators, not a fixed-width
+mask — these fields have different lengths, and a mask would fix each one's
+shape in advance. It restricts the alphabet; the parse judges the format, and
+the parse is the half that covers paste, hardware keyboards and `1.2.3`.
 
 ### The Dart enum order does not match the firmware's
 

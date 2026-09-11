@@ -43,7 +43,9 @@ class Dial extends StatelessWidget {
   final double max;
   final String unit;
 
-  /// Small caption inside the ring, under the number (the battery's "BATERIA").
+  /// Small caption inside the ring, under the number (the battery's
+  /// "BATERIA"). The unit is not repeated here -- it already sits beside the
+  /// number, and a second copy made the ring read "68 % BATERIA %".
   final String? label;
 
   /// Caption under the whole dial (the thermals' "MOTOR" / "ESC").
@@ -94,7 +96,7 @@ class Dial extends StatelessWidget {
                               unit: v == null ? null : unit, side: side),
                           if (label != null)
                             Text(
-                              '$label $unit',
+                              label!,
                               maxLines: 1,
                               softWrap: false,
                               style: TextStyle(

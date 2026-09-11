@@ -48,7 +48,8 @@ void main() {
     ));
 
     expect(find.text('68'), findsOneWidget);
-    expect(find.text('BATERIA %'), findsOneWidget);
+    expect(find.text('BATERIA'), findsOneWidget);
+    expect(find.text('BATERIA %'), findsNothing);
     expect(find.text('0'), findsOneWidget);
     expect(find.text('100'), findsOneWidget);
   });

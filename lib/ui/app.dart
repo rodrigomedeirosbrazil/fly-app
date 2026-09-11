@@ -4,6 +4,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import '../state/telemetry_repository.dart';
 import 'connection_screen.dart';
 import 'flight_screen.dart';
+import 'settings/settings_navigation.dart';
 
 class FlyApp extends StatefulWidget {
   const FlyApp({super.key});
@@ -76,6 +77,9 @@ class _FlyAppState extends State<FlyApp> {
             stale: _repo.isStale,
             firmwareVersion: _repo.firmwareVersion,
             thermalConfig: _repo.thermalConfig,
+            onOpenSettings: _repo.session == null
+                ? null
+                : () => openSettings(context, _repo),
           );
         },
       ),

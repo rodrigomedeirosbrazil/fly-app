@@ -47,6 +47,14 @@ band. Writes, the PIN session, config editing, the action opcodes and buzzer
 mirroring are still open — and the firmware already serves all of them, so
 from here the app is the lagging side of phase 2.
 
+**Configuration writes are done** (2026-09-11). The `Power` and `Thermal`
+groups can be changed from the app, authenticated per connection with the
+controller's PIN. `Bms` and `System` wait on subsystem 4, which produces the
+MAC addresses they carry.
+
+This is the first piece of the web portal with a real alternative, and
+therefore the first step toward phase 4.
+
 A binary telemetry characteristic (roughly 200 B of CSV becomes ~40 B, and it
 can carry fields the sentence has no room for), plus a command characteristic
 and a config characteristic. `Xctod` stays up for XCTrack.
@@ -121,6 +129,11 @@ Three things this did **not** measure, and none of them are hypothetical:
 `worktree-ble-control-service`. Nothing in the binary path has run on a
 controller until it is.
 
+**Does a write survive a power cycle?** Nothing has ever written to this
+controller from the app. A `CFG_SET` returning `Ok` means the firmware accepted
+it and the app confirms by re-reading, but neither proves it reached NVS rather
+than RAM. Power-cycle the controller and check.
+
 **Does the radio hold with the app connected?** Untested with XCTrack connected
 at the same time, and untested with the ESP-NOW remote throttle also active —
 that last one is the worst case for the single antenna. If XCTrack can be
@@ -142,6 +155,13 @@ way with the hardware on hand. The Galaxy A12 turned out to be on **API 31**,
 so it takes the modern permission path and never executes the API ≤ 30 branch.
 That branch is covered by a table test and by nothing else. Confirming it
 needs an Android 7–11 device.
+
+**The default voltage divider ratio is unreachable over BLE.**
+`Settings::getDefaultVoltageDividerRatio()` returns `BATTERY_DIVIDER_RATIO`, a
+compile-time constant per board, and it appears in neither `INFO` nor any
+config group. The app can calibrate but cannot offer the portal's "Resetar
+para Padrão". Exposing it would mean a byte in `INFO`, which is a protocol
+change for a button.
 
 **Does phase 2 extend the NUS service or add a second one?**
 
