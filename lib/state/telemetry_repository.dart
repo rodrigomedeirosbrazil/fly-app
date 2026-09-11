@@ -3,11 +3,13 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../ble/fly_controller_link.dart';
+import '../protocol/config_groups.dart';
 import '../protocol/control_info.dart';
 import '../protocol/control_telemetry_codec.dart';
 import '../protocol/line_assembler.dart';
 import '../protocol/telemetry_frame.dart';
 import '../protocol/xctod_parser.dart';
+import 'control_session.dart';
 import 'link_health.dart';
 import 'telemetry_source_policy.dart';
 
@@ -93,6 +95,52 @@ class TelemetryRepository extends ChangeNotifier {
   /// source is fixed for the connection.
   bool _anyFrameRendered = false;
 
+  ControlSession? _session;
+
+  /// This pilot's configured thermal thresholds, or null when they are not
+  /// known: the sentence path, firmware that refuses `CFG_GET`, or a fetch
+  /// that never came back.
+  ///
+  /// Deliberately not cached across connections. The app does not distinguish
+  /// one controller from another and the pilot can change these from the web
+  /// portal, so a remembered threshold would draw a red band at the wrong
+  /// temperature — worse than no band, because a band looks like information.
+  ThermalConfig? get thermalConfig => _thermalConfig;
+  ThermalConfig? _thermalConfig;
+
+  bool _thermalRequested = false;
+
+  /// Asks for the thermal group once per connection.
+  ///
+  /// Triggered by the first decoded binary frame rather than by connecting:
+  /// at that point the source is settled and the service has demonstrably
+  /// produced something.
+  ///
+  /// Retries only a timeout, and only because `CFG_GET` is a read and
+  /// repeating it costs nothing. A refusal or a dropped link stops at once —
+  /// there is nothing to wait for. Failure is silent and the dials simply
+  /// render as they did before this existed.
+  Future<void> _fetchThermalConfig(ControlSession session) async {
+    for (var attempt = 0; attempt < 3; attempt++) {
+      final result = await session.request(
+        op: 0x10, // CFG_GET
+        payload: [ConfigGroup.thermal.id],
+      );
+
+      switch (result) {
+        case ControlOk(:final payload):
+          _thermalConfig = ThermalConfig.decode(payload);
+          notifyListeners();
+          return;
+        case ControlRefused():
+        case ControlDropped():
+          return;
+        case ControlTimeout():
+          break; // breaks the switch; the for loop tries again
+      }
+    }
+  }
+
   void _onStatus(LinkStatus s) {
     _status = s;
     if (s == LinkStatus.disconnected || s == LinkStatus.idle) {
@@ -100,6 +148,12 @@ class TelemetryRepository extends ChangeNotifier {
       // the next connection re-runs discovery from scratch.
       _assembler.reset();
       _anyFrameRendered = false;
+      // Per connection, like the firmware's own auth state. A reply arriving
+      // after a reconnect must not reach a request from the previous one.
+      _session?.dispose();
+      _session = null;
+      _thermalRequested = false;
+      _thermalConfig = null;
     }
     if (s == LinkStatus.idle) {
       // Only an explicit stop() forgets the last frame. A drop must keep it:
@@ -138,7 +192,17 @@ class TelemetryRepository extends ChangeNotifier {
           // frame or never, so nothing on screen changes underneath anyone.
           unawaited(_link.fallBackToXctod());
         }
-        if (decoded) _anyFrameRendered = true;
+        if (decoded) {
+          _anyFrameRendered = true;
+          if (!_thermalRequested && _link.canSendCommands) {
+            _thermalRequested = true;
+            final session = _session ??= ControlSession(
+              _link.sendCommand,
+              incoming: _link.responses,
+            );
+            unawaited(_fetchThermalConfig(session));
+          }
+        }
     }
 
     notifyListeners();
@@ -149,6 +213,7 @@ class TelemetryRepository extends ChangeNotifier {
     _ticker.cancel();
     _statusSub.cancel();
     _payloadSub.cancel();
+    _session?.dispose();
     _link.dispose();
     super.dispose();
   }
