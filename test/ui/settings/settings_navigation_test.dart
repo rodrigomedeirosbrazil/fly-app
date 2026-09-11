@@ -131,4 +131,91 @@ void main() {
 
     expect(find.byKey(const Key('save-thermal')), findsOneWidget);
   });
+
+  testWidgets('the bms screen keeps seeing the aircraft arm', (tester) async {
+    link.emit(LinkStatus.connected);
+    link.feedBinary(binarySample(armed: false));
+    await tester.pumpAndSettle();
+
+    // Wait for and reply to CFG_GET requests for configs.
+    await tester.pump(const Duration(milliseconds: 50));
+    if (link.commands.isNotEmpty) link.replyThermal(0);
+    await tester.runAsync(() => pumpEventQueue());
+    await tester.pumpAndSettle();
+
+    await tester.pump(const Duration(milliseconds: 50));
+    if (link.commands.length > 1) link.replyPower(1);
+    await tester.runAsync(() => pumpEventQueue());
+    await tester.pumpAndSettle();
+
+    await tester.pump(const Duration(milliseconds: 50));
+    if (link.commands.length > 2) link.replyBms(2);
+    await tester.runAsync(() => pumpEventQueue());
+    await tester.pumpAndSettle();
+
+    await tester.pump(const Duration(milliseconds: 50));
+    if (link.commands.length > 3) link.replySystem(3);
+    await tester.runAsync(() => pumpEventQueue());
+    await tester.pumpAndSettle();
+
+    await pumpHost(tester);
+    await tester.tap(find.text('abrir'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('BMS'));
+    await tester.pumpAndSettle();
+
+    final save = find.byKey(const Key('save-bms'));
+    expect(tester.widget<ElevatedButton>(save).onPressed, isNotNull,
+        reason: 'disarmed with a config loaded, saving is available');
+
+    link.feedBinary(binarySample(armed: true));
+    await tester.pumpAndSettle();
+
+    expect(tester.widget<ElevatedButton>(save).onPressed, isNull,
+        reason: 'the route must follow the repository, not a snapshot');
+  });
+
+  testWidgets('the system screen keeps seeing the aircraft arm',
+      (tester) async {
+    link.emit(LinkStatus.connected);
+    link.feedBinary(binarySample(armed: false));
+    await tester.pumpAndSettle();
+
+    // Wait for and reply to CFG_GET requests for configs.
+    await tester.pump(const Duration(milliseconds: 50));
+    if (link.commands.isNotEmpty) link.replyThermal(0);
+    await tester.runAsync(() => pumpEventQueue());
+    await tester.pumpAndSettle();
+
+    await tester.pump(const Duration(milliseconds: 50));
+    if (link.commands.length > 1) link.replyPower(1);
+    await tester.runAsync(() => pumpEventQueue());
+    await tester.pumpAndSettle();
+
+    await tester.pump(const Duration(milliseconds: 50));
+    if (link.commands.length > 2) link.replyBms(2);
+    await tester.runAsync(() => pumpEventQueue());
+    await tester.pumpAndSettle();
+
+    await tester.pump(const Duration(milliseconds: 50));
+    if (link.commands.length > 3) link.replySystem(3);
+    await tester.runAsync(() => pumpEventQueue());
+    await tester.pumpAndSettle();
+
+    await pumpHost(tester);
+    await tester.tap(find.text('abrir'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Sistema'));
+    await tester.pumpAndSettle();
+
+    final save = find.byKey(const Key('save-system'));
+    expect(tester.widget<ElevatedButton>(save).onPressed, isNotNull,
+        reason: 'disarmed with a config loaded, saving is available');
+
+    link.feedBinary(binarySample(armed: true));
+    await tester.pumpAndSettle();
+
+    expect(tester.widget<ElevatedButton>(save).onPressed, isNull,
+        reason: 'the route must follow the repository, not a snapshot');
+  });
 }

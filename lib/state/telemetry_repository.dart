@@ -82,6 +82,10 @@ class TelemetryRepository extends ChangeNotifier {
   bool get selectableMotorTempSource =>
       _link.info?.hasSelectableMotorTempSource ?? false;
 
+  /// Whether the controller supports remote pairing. False when INFO was never
+  /// read.
+  bool get hasRemoteLink => _link.info?.hasRemoteLink ?? false;
+
   /// The `Power` group, fetched alongside the thermal one.
   PowerConfig? get powerConfig => _powerConfig;
   PowerConfig? _powerConfig;

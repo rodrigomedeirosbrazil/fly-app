@@ -78,6 +78,27 @@ class FakeLink extends FlyControllerLink {
     _responses.add([req[0], req[1], status, payload.length, ...payload]);
   }
 
+  /// Replies to the request at [index] with a full BMS group.
+  void replyBms(int index, {int status = 0}) {
+    final req = commands[index];
+    final d = Uint8List(7);
+    d[0] = 0; // bmsType: none
+    // bmsMac: all zeros (unset)
+    final payload = status == 0 ? d : Uint8List(0);
+    _responses.add([req[0], req[1], status, payload.length, ...payload]);
+  }
+
+  /// Replies to the request at [index] with a full System group.
+  void replySystem(int index, {int status = 0}) {
+    final req = commands[index];
+    final d = Uint8List(8);
+    d[0] = 50; // buzzerVolume
+    d[1] = 0; // throttleSource: wired
+    // remoteMac: all zeros (unset)
+    final payload = status == 0 ? d : Uint8List(0);
+    _responses.add([req[0], req[1], status, payload.length, ...payload]);
+  }
+
   /// Replies with a status and no payload.
   void replyStatus(int index, int status) {
     final req = commands[index];

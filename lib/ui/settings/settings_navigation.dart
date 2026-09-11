@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 
+import '../../state/bms_scan_controller.dart';
 import '../../state/config_editor.dart';
 import '../../state/control_session.dart';
+import '../../state/remote_pairing_controller.dart';
 import '../../state/telemetry_repository.dart';
+import 'bms_settings_screen.dart';
 import 'power_settings_screen.dart';
 import 'settings_index_screen.dart';
+import 'system_settings_screen.dart';
 import 'thermal_settings_screen.dart';
 
 /// Opens the settings index, and from it the two editable groups.
@@ -46,6 +50,8 @@ void openSettings(BuildContext context, TelemetryRepository repo) {
             selectableMotorTempSource: repo.selectableMotorTempSource,
           ),
         ),
+        onOpenBms: () => _pushBms(indexContext, repo),
+        onOpenSystem: () => _pushSystem(indexContext, repo),
       ),
     ),
   );
@@ -67,4 +73,119 @@ void _push(
       ),
     ),
   );
+}
+
+void _pushBms(BuildContext context, TelemetryRepository repo) {
+  final session = repo.session;
+  if (session == null) return;
+
+  Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => _BmsScreenWrapper(
+        session: session,
+        repo: repo,
+      ),
+    ),
+  );
+}
+
+void _pushSystem(BuildContext context, TelemetryRepository repo) {
+  final session = repo.session;
+  if (session == null) return;
+
+  Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => _SystemScreenWrapper(
+        session: session,
+        repo: repo,
+      ),
+    ),
+  );
+}
+
+class _BmsScreenWrapper extends StatefulWidget {
+  const _BmsScreenWrapper({
+    required this.session,
+    required this.repo,
+  });
+
+  final ControlSession session;
+  final TelemetryRepository repo;
+
+  @override
+  State<_BmsScreenWrapper> createState() => _BmsScreenWrapperState();
+}
+
+class _BmsScreenWrapperState extends State<_BmsScreenWrapper> {
+  late final BmsScanController _scanController;
+
+  @override
+  void initState() {
+    super.initState();
+    _scanController = BmsScanController(ConfigEditor(widget.session));
+  }
+
+  @override
+  void dispose() {
+    _scanController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: widget.repo,
+      builder: (context, _) => BmsSettingsScreen(
+        editor: ConfigEditor(widget.session),
+        scanController: _scanController,
+        config: widget.repo.bmsConfig,
+        armed: widget.repo.frame?.isArmed ?? false,
+        bmsConnected: widget.repo.frame?.bmsConnected,
+        bmsConfigured: widget.repo.frame?.bmsConfigured,
+      ),
+    );
+  }
+}
+
+class _SystemScreenWrapper extends StatefulWidget {
+  const _SystemScreenWrapper({
+    required this.session,
+    required this.repo,
+  });
+
+  final ControlSession session;
+  final TelemetryRepository repo;
+
+  @override
+  State<_SystemScreenWrapper> createState() => _SystemScreenWrapperState();
+}
+
+class _SystemScreenWrapperState extends State<_SystemScreenWrapper> {
+  late final RemotePairingController _pairingController;
+
+  @override
+  void initState() {
+    super.initState();
+    _pairingController = RemotePairingController(ConfigEditor(widget.session));
+  }
+
+  @override
+  void dispose() {
+    _pairingController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: widget.repo,
+      builder: (context, _) => SystemSettingsScreen(
+        editor: ConfigEditor(widget.session),
+        pairingController: _pairingController,
+        config: widget.repo.systemConfig,
+        armed: widget.repo.frame?.isArmed ?? false,
+        hasRemoteLink: widget.repo.hasRemoteLink,
+      ),
+    );
+  }
 }
