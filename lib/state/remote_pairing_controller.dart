@@ -69,35 +69,38 @@ class RemotePairingController extends ChangeNotifier {
     _ticks++;
 
     final config = await _editor.readSystemConfig();
-    if (config == null) {
-      // A missed tick is not a failure — keep waiting.
-      return;
-    }
 
-    if (!isUnsetMac(config.remoteMac)) {
-      // Remote paired!
+    // A missed tick is not a failure: the read is a plain CFG_GET and a
+    // single unanswered one says nothing about the remote. Keep waiting --
+    // but keep counting, because the deadline below is the only thing that
+    // ends this wait. Returning here without reaching it left a pairing that
+    // ran forever whenever the reads stopped answering, which is the one
+    // condition under which the pilot most needs to be told.
+    if (config != null && !isUnsetMac(config.remoteMac)) {
       _state = PairingState.paired;
       _pairedMac = config.remoteMac;
       _stillListening = false;
-      _timer?.cancel();
-      _timer = null;
+      _stopTimer();
       notifyListeners();
       return;
     }
 
-    // Check if we've hit the deadline
     if (_ticks * pollInterval.inMilliseconds >= deadline.inMilliseconds) {
+      // The controller is still listening. Nothing here tells it to stop,
+      // because the protocol has no opcode that does.
       _state = PairingState.gaveUp;
-      _timer?.cancel();
-      _timer = null;
+      _stopTimer();
       notifyListeners();
-      return;
     }
   }
 
-  void cancel() {
+  void _stopTimer() {
     _timer?.cancel();
     _timer = null;
+  }
+
+  void cancel() {
+    _stopTimer();
     _state = PairingState.idle;
     notifyListeners();
   }

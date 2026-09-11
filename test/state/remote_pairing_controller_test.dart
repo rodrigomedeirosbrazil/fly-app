@@ -93,4 +93,29 @@ void main() {
     expect(c.refusal, isA<SaveRefusedArmed>());
     expect(c.state, PairingState.refused);
   });
+
+  test('a read that never answers still gives up at the deadline', () async {
+    // The System read is a plain CFG_GET, and a quiet link answers none of
+    // them. Treating an unanswered poll as "keep waiting" without counting it
+    // left the pilot on a spinner with no end -- exactly when something is
+    // already wrong.
+    final session = FakeSession();  // nothing queued: every read times out
+    final editor = ConfigEditor(session);
+    session.queueOk();              // AUTH
+    session.queueOk();              // REMOTE_PAIR
+    final c = RemotePairingController(
+      editor,
+      pollInterval: const Duration(milliseconds: 5),
+      deadline: const Duration(milliseconds: 25),
+    );
+
+    await c.start(pin: '1234');
+    for (var i = 0; i < 40 && c.state == PairingState.waiting; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+    }
+
+    expect(c.state, PairingState.gaveUp);
+    expect(c.stillListening, isTrue);
+    c.dispose();
+  });
 }

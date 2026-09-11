@@ -57,7 +57,13 @@ class RecordingEditor implements ConfigEditor {
   Future<BmsScanState?> readBmsScan() async => null;
 
   @override
-  Future<SystemConfig?> readSystemConfig() async => null;
+  /// What the pairing poll sees. `remoteMac` turning non-zero is the ONLY
+  /// readback pairing has -- REMOTE_PAIR answers Ok the instant it raises a
+  /// flag -- so a test cannot reach the paired state without this.
+  SystemConfig? systemReply;
+
+  @override
+  Future<SystemConfig?> readSystemConfig() async => systemReply;
 
   @override
   Future<SaveOutcome> pairRemote({String? pin}) async => const SaveOk();
@@ -158,23 +164,62 @@ void main() {
     await tester.pumpAndSettle();
   });
 
+  testWidgets('pairing resolves when the MAC appears', (tester) async {
+    await tester.pumpWidget(wrap(screen(hasRemote: true)));
+
+    await tester.tap(find.byKey(const Key('pair-remote')));
+    await tester.pump();
+    expect(find.byType(AlertDialog), findsOneWidget);
+
+    // The remote is switched on: the controller writes its MAC, and the next
+    // poll of the System group is what tells the app.
+    editor.systemReply = const SystemConfig(
+      buzzerVolume: 70,
+      throttleSource: 1,
+      remoteMac: [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF],
+    );
+
+    // Periodic timers keep pumpAndSettle from ever settling.
+    for (var i = 0; i < 6; i++) {
+      await tester.pump(const Duration(milliseconds: 15));
+    }
+
+    expect(find.text('Remote pareado'), findsOneWidget);
+    expect(pairingController.state, PairingState.paired);
+    expect(pairingController.stillListening, isFalse);
+  });
+
   testWidgets('giving up says the controller is still listening',
       (tester) async {
+    // The firmware has no pairing timeout and no cancel opcode, so the
+    // deadline is this app's alone. Saying "cancelled" would be a lie the
+    // pilot acts on: the next remote powered on nearby still gets paired.
     await tester.pumpWidget(wrap(screen(hasRemote: true)));
 
     await tester.tap(find.byKey(const Key('pair-remote')));
     await tester.pump();
 
-    // Dialog should be shown
-    expect(find.byType(AlertDialog), findsOneWidget);
+    // No remote answers. Run past the 100 ms deadline this test configured.
+    for (var i = 0; i < 12; i++) {
+      await tester.pump(const Duration(milliseconds: 15));
+    }
 
-    // Manually cancel from the dialog (simulating timeout)
+    expect(pairingController.state, PairingState.gaveUp);
+    expect(pairingController.stillListening, isTrue);
+    expect(find.textContaining('continua aguardando'), findsOneWidget);
+  });
+
+  testWidgets('cancelling says the same thing, because it does the same thing',
+      (tester) async {
+    await tester.pumpWidget(wrap(screen(hasRemote: true)));
+
+    await tester.tap(find.byKey(const Key('pair-remote')));
+    await tester.pump();
     await tester.tap(find.text('Cancelar'));
     await tester.pumpAndSettle();
 
-    // After cancelling, a second dialog should show with the "still listening" message
-    // For now, just verify we're back in the main screen
-    expect(find.byKey(const Key('pair-remote')), findsOneWidget);
+    expect(find.textContaining('continua aguardando'), findsOneWidget);
+    expect(pairingController.stillListening, isTrue);
   });
 
   testWidgets('forgetting warns that a running remote may survive it',
