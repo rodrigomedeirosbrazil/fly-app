@@ -74,6 +74,7 @@ class _FlyAppState extends State<FlyApp> {
             frame: frame,
             stale: _repo.isStale,
             firmwareVersion: _repo.firmwareVersion,
+            thermalConfig: _repo.thermalConfig,
           );
         },
       ),
