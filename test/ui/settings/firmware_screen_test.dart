@@ -17,6 +17,9 @@ class SilentTransport implements DfuTransport {
   final writes = <List<int>>[];
 
   @override
+  int get maxWriteBytes => 512;
+
+  @override
   Future<ControlResult> request({
     required int op,
     List<int> payload = const [],

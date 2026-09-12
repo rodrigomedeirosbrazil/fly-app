@@ -118,6 +118,31 @@ class FlyControllerLink {
   bool get canUpdateFirmware => _dfu != null;
   BluetoothCharacteristic? _dfu;
 
+  /// The largest single write **this phone** will accept on the data
+  /// characteristic.
+  ///
+  /// **Not the same limit as the controller's `chunkSize`**, and conflating
+  /// the two cost a whole test round. The controller reports its own ATT MTU
+  /// minus 3 — what it can receive. This is what the local platform will
+  /// send: `flutter_blue_plus` caps a write at `MIN(the OS maximum, 512)` on
+  /// both iOS and Android, and rejects anything longer outright, before a
+  /// byte leaves the phone.
+  ///
+  /// It shipped wrong because on this iPhone the two numbers agreed for a
+  /// while. One connection negotiated an ATT MTU of 517, the controller
+  /// reported 514, the app built a 514-byte packet, and the plugin refused it
+  /// for being two bytes over its own cap. The transfer failed at 0% with
+  /// every packet, and the app called it a lost connection.
+  ///
+  /// `mtuNow` is the plugin's own accounting of that cap — on iOS it is
+  /// literally `MIN(maximumWriteValueLength, 512) + 3` — so this is the same
+  /// number the write is checked against, not a guess at it.
+  int get maxDfuWriteBytes {
+    final device = _device;
+    if (device == null) return 20; // the 23-byte ATT default, minus overhead
+    return device.mtuNow - 3;
+  }
+
   /// Writes one `CMD` frame.
   ///
   /// Throws when there is no command characteristic, which

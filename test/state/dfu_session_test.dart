@@ -75,6 +75,11 @@ class FakeDfuTransport implements DfuTransport {
     return _requestQueue.removeAt(0);
   }
 
+  /// What the phone would accept in one write. 512 is the cap
+  /// `flutter_blue_plus` enforces on both platforms.
+  @override
+  int maxWriteBytes = 512;
+
   @override
   Future<void> writeData(List<int> bytes) async {
     writeDataLog.add(bytes);
@@ -872,6 +877,60 @@ void main() {
 
       expect(session.outcome, isA<DfuCommitted>());
       expect(session.state, DfuTransferState.committed);
+    });
+  });
+
+  group('the packet size has two limits', () {
+    /// Runs a transfer and returns the length of the first data packet.
+    Future<int> firstPacketLength(FakeDfuTransport transport,
+        {required int controllerChunk}) async {
+      transport.queueOk();
+      transport.queueDfuStatus(
+        state: dfu_protocol.DfuState.receiving,
+        received: 0,
+        chunkSize: controllerChunk,
+      );
+      transport.queueDfuStatus(
+        state: dfu_protocol.DfuState.receiving,
+        received: 4096,
+        chunkSize: controllerChunk,
+      );
+      transport.queueDfuStatus(
+        state: dfu_protocol.DfuState.receiving,
+        received: 4096,
+        chunkSize: controllerChunk,
+      );
+      final session = DfuSession(transport,
+          pollInterval: const Duration(milliseconds: 5),
+          packetGap: Duration.zero);
+      addTearDown(session.dispose);
+      await session.start(Uint8List(4096)..[0] = 0xE9);
+      return transport.writeDataLog.first.length;
+    }
+
+    test('the phone\'s limit wins when the controller asks for more', () async {
+      // Exactly what came back from the aircraft: the controller negotiated
+      // an ATT MTU of 517 and reported 514 usable bytes. The app built a
+      // 514-byte packet, and flutter_blue_plus refused it for being two bytes
+      // over its own 512 cap -- before a single byte left the phone. The
+      // transfer failed at 0%, and the app called it a lost connection.
+      final transport = FakeDfuTransport()..maxWriteBytes = 512;
+
+      final length = await firstPacketLength(transport, controllerChunk: 514);
+
+      expect(length, lessThanOrEqualTo(512));
+      expect(length, 512);
+    });
+
+    test('the controller\'s limit wins when it is the smaller one', () async {
+      // The other direction, and the one that held for every earlier test:
+      // a phone that would take 512 must still not send more than the
+      // controller can receive in one write.
+      final transport = FakeDfuTransport()..maxWriteBytes = 512;
+
+      final length = await firstPacketLength(transport, controllerChunk: 244);
+
+      expect(length, 244);
     });
   });
 

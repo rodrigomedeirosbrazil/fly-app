@@ -41,6 +41,9 @@ class _DfuTransportImpl implements DfuTransport {
 
   @override
   Future<void> writeData(List<int> bytes) => _link.writeDfuData(bytes);
+
+  @override
+  int get maxWriteBytes => _link.maxDfuWriteBytes;
 }
 
 /// Single source of truth for the UI.

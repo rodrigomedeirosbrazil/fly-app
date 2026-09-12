@@ -174,6 +174,17 @@ abstract class DfuTransport {
 
   /// A write **without response** on the data characteristic.
   Future<void> writeData(List<int> bytes);
+
+  /// The largest single write this phone will accept.
+  ///
+  /// The other half of the packet size, and the half the session used to
+  /// assume. `DFU_STATUS.chunkSize` is what the *controller* can receive; this
+  /// is what the *local* platform will send, and the smaller of the two is the
+  /// only safe packet. They are independent — an ATT MTU the controller
+  /// negotiated up does not raise the plugin's own 512-byte cap — and when
+  /// the controller's number won, every write was refused before it left the
+  /// phone.
+  int get maxWriteBytes;
 }
 
 /// Drives a firmware update over BLE, restarting from acknowledged bytes.
@@ -317,10 +328,23 @@ class DfuSession extends ChangeNotifier {
     if (status == null) return;
     if (!_checkControllerState(status)) return;
 
-    _note('chunkSize ${status.chunkSize} '
-        '(${payloadPerPacket(status.chunkSize)} B por pacote)');
+    // The packet is bounded by BOTH ends, and only the smaller one is safe.
+    final packetBytes = math.min(status.chunkSize, _transport.maxWriteBytes);
+    _note('chunkSize ${status.chunkSize}, limite do telefone '
+        '${_transport.maxWriteBytes} -> pacote $packetBytes B');
 
-    await _streamData(image, status.chunkSize);
+    if (packetBytes <= 4) {
+      // Nothing would fit beside the offset header. Reported rather than
+      // thrown: payloadPerPacket throws, and a crash here would reach the
+      // pilot as a frozen screen.
+      _note('pacote pequeno demais para o cabeçalho de offset');
+      _outcome = const DfuFailed(DfuFailureReason.malformed);
+      _state = DfuTransferState.failed;
+      notifyListeners();
+      return;
+    }
+
+    await _streamData(image, packetBytes);
   }
 
   /// Judges the state the controller reports, and stops the transfer when it
@@ -395,8 +419,8 @@ class DfuSession extends ChangeNotifier {
   /// can waste, it paces the writes — the round trip of the poll is time the
   /// controller spends draining — and it moves the progress bar with what
   /// actually arrived.
-  Future<void> _streamData(Uint8List image, int chunkSize) async {
-    final payloadSize = payloadPerPacket(chunkSize);
+  Future<void> _streamData(Uint8List image, int packetBytes) async {
+    final payloadSize = payloadPerPacket(packetBytes);
 
     while (_bytesAcknowledged < image.length) {
       if (_state != DfuTransferState.sending) return;
@@ -413,7 +437,13 @@ class DfuSession extends ChangeNotifier {
             offset: offset,
             bytes: image.sublist(offset, offset + take),
           ));
-        } catch (_) {
+        } catch (error) {
+          // The text, not just the class. A write can be refused for being
+          // longer than the platform allows, which is not a lost link at all
+          // — and reported as one it sent a round of diagnosis at the radio.
+          // The size is now bounded before the first packet, so this should
+          // be a real disconnection; if it is not, the trail says so.
+          _note('escrita em $offset B falhou: $error');
           _outcome = const DfuLost(DfuFailure.linkLost);
           _state = DfuTransferState.failed;
           notifyListeners();

@@ -586,6 +586,31 @@ case, correct in every case.
 controller that merely answered slowly is worse than a reported failure. Same
 reasoning as `PIN_CHANGE`, and the opposite of `AUTH` and `CFG_SET`.
 
+### The packet has two limits, and only the smaller one is safe
+
+`DFU_STATUS.chunkSize` is what the **controller** can receive in one write —
+its negotiated ATT MTU minus 3. `FlyControllerLink.maxDfuWriteBytes` is what
+**this phone** will send: `flutter_blue_plus` caps a write at
+`MIN(the OS maximum, 512)` on both platforms and **rejects anything longer
+outright**, before a byte leaves the phone. The packet is the minimum of the
+two.
+
+They are independent, which is the part that shipped wrong. The app used the
+controller's number alone, and the two agreed for as long as the MTU stayed
+low. Then one connection negotiated 517, the controller reported 514, the app
+built a 514-byte packet, and the plugin refused every one of them for being
+two bytes over its own cap. The transfer failed at 0% having sent nothing —
+and the app reported it as a lost connection, because the refusal arrives as
+a thrown exception from the write.
+
+`mtuNow - 3` is the plugin's own accounting of that cap, not a guess at it:
+on iOS `getMtu` is literally `MIN(maximumWriteValueLength, 512) + 3`. So the
+app is checked against the same number the write is.
+
+**The MTU is not stable across connections.** The same phone and the same
+controller reported 247 on one connection and 517 on the next, so anything
+derived from it has to be read per transfer rather than assumed.
+
 ### `received` is half the status, and the half that cannot say why
 
 `DFU_STATUS` carries a **state** beside the byte count, and the app read only

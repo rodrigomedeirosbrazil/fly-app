@@ -283,5 +283,8 @@ class _NoOpTransport implements DfuTransport {
   Future<void> writeData(List<int> bytes) async {}
 
   @override
+  int get maxWriteBytes => 20;
+
+  @override
   Future<bool> authenticate(String pin) async => false;
 }
