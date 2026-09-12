@@ -7,12 +7,14 @@ class SettingsIndexScreen extends StatelessWidget {
     required this.onOpenThermal,
     required this.onOpenBms,
     required this.onOpenSystem,
+    required this.onOpenFirmware,
   });
 
   final VoidCallback onOpenPower;
   final VoidCallback onOpenThermal;
   final VoidCallback onOpenBms;
   final VoidCallback onOpenSystem;
+  final VoidCallback onOpenFirmware;
 
   @override
   Widget build(BuildContext context) {
@@ -49,6 +51,13 @@ class SettingsIndexScreen extends StatelessWidget {
             title: 'Sistema',
             description: 'Volume do buzzer e origem do acelerador.',
             onTap: onOpenSystem,
+          ),
+          const SizedBox(height: 12),
+          _SettingsCard(
+            label: 'FIRMWARE',
+            title: 'Atualizar',
+            description: 'Enviar novo firmware para o controlador.',
+            onTap: onOpenFirmware,
           ),
         ],
       ),
