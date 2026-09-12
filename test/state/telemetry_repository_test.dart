@@ -432,4 +432,38 @@ void main() {
           reason: 'only op 0x80 is a beep, whatever the payload decodes to');
     });
   });
+
+  test('turning sound on confirms the speaker works', () async {
+    final player = FakePlayer();
+    final link = FakeLink();
+    final repo = TelemetryRepository(
+      link: link,
+      clock: DateTime.now,
+      mirror: BuzzerMirror(player),
+    );
+    addTearDown(repo.dispose);
+
+    await repo.setMuted(true);
+    player.calls.clear();
+
+    await repo.setMuted(false);
+
+    expect(player.calls, isNotEmpty,
+        reason: 'without this the only way to test the audio is to arm');
+  });
+
+  test('turning sound off makes no sound', () async {
+    final player = FakePlayer();
+    final link = FakeLink();
+    final repo = TelemetryRepository(
+      link: link,
+      clock: DateTime.now,
+      mirror: BuzzerMirror(player),
+    );
+    addTearDown(repo.dispose);
+
+    await repo.setMuted(true);
+
+    expect(player.calls.where((c) => c.startsWith('play')), isEmpty);
+  });
 }

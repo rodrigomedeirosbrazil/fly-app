@@ -479,10 +479,28 @@ disinformation. Unmuting replays nothing for the same reason — though a
 
 ### The app must mix, never interrupt
 
-The audio session is `ambient` + `mixWithOthers` on iOS and requests **no
-audio focus** on Android. A paramotor pilot may be flying by XCTrack's vario,
-and an app that seized the session to beep would silence the instrument they
-are actually using. That is a requirement, not a preference.
+The audio session is **`playback` + `mixWithOthers`** on iOS and requests
+**no audio focus** on Android. Two separate requirements, and only that pair
+satisfies both:
+
+- **It must be audible on a silenced phone.** `ambient` was the first choice
+  and it shipped mute: the plugin's own documentation says ambient is
+  "Silenced by the Ring/Silent switch = Yes", and a pilot's phone is on
+  silent, in a pocket, under a motor. `playback` ignores the switch.
+- **It must not interrupt.** A pilot may be flying by XCTrack's vario, and an
+  app that seized the session to beep would silence the instrument they are
+  actually using. `mixWithOthers` is the override that stops `playback` doing
+  that.
+
+**No test protects this.** Nothing instantiates `AudioPlayersTonePlayer` —
+that is the device seam, deliberately untested — so the category is guarded by
+this paragraph and the comment in the file, and a change to it can only be
+caught on a phone with the ring switch off.
+
+Turning sound on plays a short confirmation tone, because otherwise the only
+way to find out whether the phone can make one is to arm the aircraft. It
+goes through the event path, so it pauses and resumes a running state tone
+exactly as a real beep would.
 
 The tone is a square wave built in memory at half amplitude — square because
 that is what the controller's piezo makes and the point is that the two sound

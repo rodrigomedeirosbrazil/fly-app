@@ -100,6 +100,9 @@ class TelemetryRepository extends ChangeNotifier {
   Future<void> setMuted(bool value) async {
     await _mirror.setMuted(value);
     notifyListeners();
+    // Turning sound on answers "does this work?" immediately, rather than
+    // leaving the pilot to arm the aircraft to find out.
+    if (!value) await _mirror.confirmAudible();
   }
 
   /// Whether the controller reports a selectable motor temperature source.

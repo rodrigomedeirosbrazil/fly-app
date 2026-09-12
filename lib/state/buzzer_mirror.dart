@@ -110,6 +110,28 @@ class BuzzerMirror {
     }
   }
 
+  /// A short tone, so the phone can be checked without arming the aircraft.
+  ///
+  /// Hearing the mirror otherwise requires the controller to do something
+  /// worth beeping about, which on the ground means arming it. That made a
+  /// silent phone indistinguishable from a phone with nothing to play — and
+  /// the first build was silent, because the audio session respected the
+  /// iPhone's Ring/Silent switch.
+  ///
+  /// **Not a replay.** It is the same two notes every time, carrying nothing
+  /// about what the controller has been doing, and it goes through the event
+  /// path so a running state tone is paused and resumed exactly as a real
+  /// event would be.
+  Future<void> confirmAudible() => handle(const BeepEvent(
+        seq: 0,
+        frequency: 2000,
+        onMs: 90,
+        offMs: 60,
+        reps: 2,
+        layer: BeepLayer.event,
+        active: true,
+      ));
+
   Future<void> dispose() => _player.dispose();
 }
 

@@ -288,4 +288,47 @@ void main() {
     // Should resume the state, not replay the event
     expect(player.calls, ['loop 800/100/100']);
   });
+
+  test('the confirmation tone plays, and is the same every time', () async {
+    final player = FakePlayer();
+    final mirror = BuzzerMirror(player);
+
+    await mirror.confirmAudible();
+    await mirror.confirmAudible();
+
+    expect(player.calls, ['play 2000/90/60 x2', 'play 2000/90/60 x2'],
+        reason: 'it reports the speaker, not the aircraft');
+  });
+
+  test('the confirmation pauses and resumes a running state', () async {
+    // It goes through the event path deliberately, so it cannot leave a state
+    // tone stopped -- which a separate "just play something" shortcut could.
+    final player = FakePlayer();
+    final mirror = BuzzerMirror(player);
+
+    await mirror.handle(const BeepEvent(
+        seq: 1,
+        frequency: 800,
+        onMs: 100,
+        offMs: 100,
+        reps: 0,
+        layer: BeepLayer.state,
+        active: true));
+    player.calls.clear();
+
+    await mirror.confirmAudible();
+
+    expect(player.calls, ['stop', 'play 2000/90/60 x2', 'loop 800/100/100']);
+  });
+
+  test('muted, the confirmation says nothing', () async {
+    final player = FakePlayer();
+    final mirror = BuzzerMirror(player);
+    await mirror.setMuted(true);
+    player.calls.clear();
+
+    await mirror.confirmAudible();
+
+    expect(player.calls, isEmpty);
+  });
 }

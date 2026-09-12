@@ -104,7 +104,16 @@ class AudioPlayersTonePlayer implements TonePlayer {
 
   static final AudioContext _mixing = AudioContext(
     iOS: AudioContextIOS(
-      category: AVAudioSessionCategory.ambient,
+      // `playback`, NOT `ambient`. The plugin's own documentation is explicit:
+      // ambient is "Silenced by the Ring/Silent switch = Yes". A pilot's phone
+      // is on silent, in a pocket, under a motor -- so ambient meant no sound
+      // at all, which is exactly what the first build did.
+      //
+      // playback ignores the switch, and `mixWithOthers` is the override that
+      // stops it interrupting other audio. Both properties are needed and
+      // only this pair gives both: a warning has to be audible on a silenced
+      // phone, and it must not silence the vario the pilot is flying by.
+      category: AVAudioSessionCategory.playback,
       options: const {AVAudioSessionOptions.mixWithOthers},
     ),
     android: AudioContextAndroid(
