@@ -282,44 +282,50 @@ void main() {
     });
 
     test('progress never exceeds what the controller acknowledged', () async {
+      // THE POINT OF THIS TEST.
+      //
+      // The data characteristic is written WITHOUT RESPONSE, so bytes handed
+      // to the OS run ahead of bytes that arrived. Progress taken from what
+      // was sent reads 100% on a transfer that lost a third of itself, and
+      // the pilot commits a firmware the controller never fully received.
+      //
+      // So the controller here is given the whole image and never
+      // acknowledges more than half. Progress must stay at half.
       final transport = FakeDfuTransport();
       final session = DfuSession(
         transport,
-        pollInterval: const Duration(milliseconds: 10),
+        pollInterval: const Duration(milliseconds: 5),
+        maxRestarts: 2,
       );
 
       final image = Uint8List(1000);
       image[0] = 0xE9;
 
-      // DFU_BEGIN ok
-      transport.queueOk();
+      transport.queueOk(); // DFU_BEGIN
+      // Every status says 500 of 1000, however many times it is asked.
+      for (var i = 0; i < 12; i++) {
+        transport.queueDfuStatus(
+          state: dfu_protocol.DfuState.receiving,
+          received: 500,
+          chunkSize: 244,
+        );
+      }
 
-      // First status
-      transport.queueDfuStatus(
-        state: dfu_protocol.DfuState.receiving,
-        received: 0,
-        chunkSize: 244,
-      );
-
-      // After data send: controller only received half
-      transport.queueDfuStatus(
-        state: dfu_protocol.DfuState.receiving,
-        received: 500,
-        chunkSize: 244,
-      );
-
-      // Ready
-      transport.queueDfuStatus(
-        state: dfu_protocol.DfuState.ready,
-        received: 1000,
-        chunkSize: 244,
-      );
+      final samples = <double>[];
+      session.addListener(() => samples.add(session.progress));
 
       await session.start(image);
 
-      // Progress should never exceed what controller acknowledged
-      expect(session.progress, lessThanOrEqualTo(1.0));
-      expect(session.bytesAcknowledged, 1000);
+      final written = transport.writeDataLog
+          .fold<int>(0, (sum, p) => sum + p.length - 4);
+      expect(written, greaterThanOrEqualTo(image.length),
+          reason: 'the whole image was handed to the transport');
+
+      expect(session.progress, closeTo(0.5, 1e-9),
+          reason: 'the controller only ever confirmed half of it');
+      expect(samples.every((p) => p <= 0.5 + 1e-9), isTrue,
+          reason: 'no sample may claim more than was acknowledged');
+      expect(session.bytesAcknowledged, 500);
     });
 
     test('DFU_BEGIN is not retried', () async {
