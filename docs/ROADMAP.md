@@ -88,21 +88,33 @@ buzzer mirroring.
 **Blocked on flash.** The likely payment is porting Bluedroid → **NimBLE**
 (`Xctod` plus the three BMS backends), worth roughly 100–200 KB and some RAM.
 
-### Phase 3 — firmware update over BLE
+### Phase 3 — firmware update over BLE · **next**
 
 A DFU characteristic writing into `esp_ota_write()`, using the dual-slot scheme
 that already exists. Additive in flash terms.
+
+Moved ahead of everything else by the pilot (2026-09-11): it is the capability
+they want most, and unlike log download it removes a reason to open the portal
+at all.
 
 The alternative considered and set aside: handing off to the existing WiFi AP,
 which would be ~10 s instead of ~60–120 s and cost almost no firmware, but
 needs `NEHotspotConfiguration` on iOS (an Apple entitlement), drops the phone's
 internet, and contradicts the brief that access is over Bluetooth.
 
-### Phase 4 — retire the web portal
+### Phase 4 — retire the web portal · **deferred, on purpose**
 
-Frees 200–400 KB (ESPAsyncWebServer + ElegantOTA + the gzipped assets). This is
-what makes the flash arithmetic work overall: phase 4 returns more than phases
-2–3 spend. The catch is that the debt has to be paid before it is earned.
+**Not planned work.** The pilot's decision (2026-09-11): the portal stays until
+the app has been flown enough to trust, and retiring it is a later call made on
+evidence rather than a milestone to aim at.
+
+**Log download is out with it.** The `0x40–0x4F` opcode range and the
+`D4CF0006-…` characteristic stay reserved and unimplemented on both sides.
+
+Kept here because the flash arithmetic still depends on it: retiring the portal
+frees 200–400 KB (ESPAsyncWebServer + ElegantOTA + the gzipped assets), which
+is more than phases 2–3 spend. The debt is simply carried longer than the
+original plan assumed.
 
 ## Decisions on record
 
