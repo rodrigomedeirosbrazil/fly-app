@@ -232,7 +232,7 @@ void main() {
       await tester.pumpWidget(wrap(screen(sensorVolts: null)));
       await type(tester, 'bms-reference', '51.20');
       expect(
-        tester.widget<ElevatedButton>(find.byKey(const Key('calibrate')))
+        tester.widget<OutlinedButton>(find.byKey(const Key('calibrate')))
             .onPressed,
         isNull,
       );
@@ -267,7 +267,7 @@ void main() {
       await type(tester, 'bms-reference', '5');
 
       expect(
-        tester.widget<ElevatedButton>(find.byKey(const Key('calibrate')))
+        tester.widget<OutlinedButton>(find.byKey(const Key('calibrate')))
             .onPressed,
         isNull,
       );
@@ -287,13 +287,13 @@ void main() {
       await tester.pumpWidget(wrap(screen()));
       await type(tester, 'min-voltage-cell', '4.15');
 
-      expect(tester.widget<ElevatedButton>(save()).onPressed, isNull);
+      expect(tester.widget<FilledButton>(save()).onPressed, isNull);
       expect(find.textContaining('menor que a máxima'), findsOneWidget);
     });
 
     testWidgets('armed makes it inert and says so', (tester) async {
       await tester.pumpWidget(wrap(screen(armed: true)));
-      expect(tester.widget<ElevatedButton>(save()).onPressed, isNull);
+      expect(tester.widget<FilledButton>(save()).onPressed, isNull);
       expect(find.textContaining('armada'), findsWidgets);
     });
   });
