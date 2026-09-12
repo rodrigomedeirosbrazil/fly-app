@@ -368,4 +368,34 @@ void main() {
       expect(reads, isEmpty);
     });
   });
+
+  group('a lost session is told apart from never having had one', () {
+    test('the first save of a connection just asks', () async {
+      final outcome = await editor.saveThermal(thermalPayload);
+
+      expect(outcome, isA<SaveNeedsPin>());
+      expect((outcome as SaveNeedsPin).sessionLost, isFalse);
+    });
+
+    test('ErrAuth after authenticating reports the session as lost', () async {
+      // The controller clears authenticated_ in onCentralDisconnected(), and
+      // that callback fires on the BLE server's disconnect -- which the
+      // firmware also reaches when its own BMS client link changes. So a
+      // pilot who authenticated a minute ago can be asked again, and a silent
+      // second prompt reads as the app having lost the PIN it was given.
+      session.queueOk();                                        // AUTH
+      session.queueOk();                                        // CFG_SET
+      session.queueOk(thermalBytes());                          // CFG_GET
+      await editor.saveThermal(thermalPayload, pin: '1234');
+      expect(editor.authenticated, isTrue);
+
+      session.queue(const ControlRefused(ControlStatus.errAuth));
+
+      final outcome = await editor.saveThermal(thermalPayload);
+
+      expect(outcome, isA<SaveNeedsPin>());
+      expect((outcome as SaveNeedsPin).sessionLost, isTrue);
+      expect(editor.authenticated, isFalse);
+    });
+  });
 }

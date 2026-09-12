@@ -104,7 +104,10 @@ class _BmsSettingsScreenState extends State<BmsSettingsScreen> {
           _typeController.text = bms.bmsType.toString();
           _macController.text = formatMac(bms.bmsMac) ?? '';
         }
-      case SaveNeedsPin():
+      case SaveNeedsPin(:final sessionLost):
+        if (sessionLost) {
+          _showSnackBar('O controlador encerrou a sessão. Digite o PIN de novo.');
+        }
         _askPin(_saveWithPin);
       case SaveWrongPin():
         _showSnackBar('PIN incorreto');
@@ -210,6 +213,13 @@ class _BmsSettingsScreenState extends State<BmsSettingsScreen> {
         widget.armed ||
         bmsError != SettingsError.none;
 
+    // Gated on the SAVED type, not the dropdown. The controller tears down
+    // its BMS client link and calls scan->start() in the same loop iteration,
+    // and a BLE disconnect is asynchronous -- so with a BMS configured the
+    // scan reliably loses that race and finds nothing. Choosing "Nenhum" in
+    // the dropdown is not enough; the controller has to have been told.
+    final scanPossible = (widget.config?.bmsType ?? 0) == 0;
+
     final refusalMessage = widget.scanController.refusal != null
         ? _messageForOutcome(widget.scanController.refusal!)
         : null;
@@ -265,23 +275,37 @@ class _BmsSettingsScreenState extends State<BmsSettingsScreen> {
                     SettingsCard(
                       title: 'BUSCA',
                       children: [
-                        OutlinedButton(
-                          key: const Key('scan-bms'),
-                          onPressed: widget.armed ||
-                                  widget.scanController.isPolling ||
-                                  widget.config == null
-                              ? null
-                              : _startScan,
-                          child: const Text('Buscar BMS'),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'A busca leva 5 segundos. Não desconecte durante a busca.',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        if (scanPossible) ...[
+                          OutlinedButton(
+                            key: const Key('scan-bms'),
+                            onPressed: widget.armed ||
+                                    widget.scanController.isPolling ||
+                                    widget.config == null
+                                ? null
+                                : _startScan,
+                            child: const Text('Buscar BMS'),
                           ),
-                        ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'A busca leva 5 segundos. Não desconecte durante a busca.',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color:
+                                  Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ] else
+                          Text(
+                            key: const Key('scan-blocked'),
+                            'Para buscar, escolha "Nenhum" em Tipo de BMS e '
+                            'salve. O controlador não consegue buscar '
+                            'enquanto está ligado a um BMS.',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color:
+                                  Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                          ),
                         if (widget.scanController.status ==
                             BmsScanStatus.scanning) ...[
                           const SizedBox(height: 16),

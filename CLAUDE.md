@@ -391,6 +391,23 @@ The test that pins it is `bms_settings_screen_test.dart`'s "a result with no
 detected type leaves the dropdown alone". Overwriting the type with 0 would
 look like a selection and silently turn the BMS off.
 
+### The scan is offered only with no BMS configured
+
+`startWebScan()` disconnects the BMS client and calls `scan->start()` in the
+same loop iteration. A BLE disconnect is asynchronous, so with a BMS
+configured the scan reliably loses that race and finds nothing — confirmed on
+the aircraft, where the workaround was to set the type to Nenhum, save, and
+only then scan.
+
+So the button appears only when the **saved** type is 0. The dropdown reading
+"Nenhum" is not enough: the controller still holds the BMS link until the
+write lands, which is what `bms_settings_screen_test.dart`'s "the gate is the
+saved type, not the dropdown" pins. Offering a button that cannot work is
+worse than not offering it.
+
+Manual entry stays available in both states — a BMS that is asleep never
+advertises, and without it that pilot is back at the portal.
+
 ### A scan's count is not the length of its list
 
 `BMS_SCAN_STATUS` returns `[status u8][count u8]` then eight bytes per result,

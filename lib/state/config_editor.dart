@@ -34,7 +34,17 @@ class SaveOk extends SaveOutcome {
 
 /// No authenticated session. Prompt, then call again with a PIN.
 class SaveNeedsPin extends SaveOutcome {
-  const SaveNeedsPin();
+  const SaveNeedsPin({this.sessionLost = false});
+
+  /// True when the connection *had* authenticated and the controller has
+  /// since forgotten it — `ErrAuth` on a request that should have passed.
+  ///
+  /// Worth telling apart, because the two feel completely different to a
+  /// pilot. The first prompt of a connection is expected. A second one, after
+  /// saving something a minute ago, looks like the app losing the PIN — so it
+  /// says that the controller dropped the session instead of asking again in
+  /// silence.
+  final bool sessionLost;
 }
 
 /// The PIN was wrong. The firmware has already cleared the session, so there
@@ -321,12 +331,21 @@ class ConfigEditor {
     return outcome;
   }
 
-  SaveOutcome _lostSession([SaveOutcome Function() make = SaveNeedsPin.new]) {
+  SaveOutcome _lostSession(
+      [SaveOutcome Function() make = _needsPinAfterLoss]) {
     // The firmware fails closed: a bad PIN clears whatever this connection had
     // already earned, so the app must not believe it is still authenticated.
+    final hadSession = _authenticated;
     _authenticated = false;
+    // Only report a *lost* session when there was one to lose.
+    if (!hadSession && identical(make, _needsPinAfterLoss)) {
+      return const SaveNeedsPin();
+    }
     return make();
   }
+
+  static SaveOutcome _needsPinAfterLoss() =>
+      const SaveNeedsPin(sessionLost: true);
 
   /// Sends a request, resending only on a timeout.
   ///

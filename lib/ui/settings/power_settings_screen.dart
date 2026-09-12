@@ -277,7 +277,10 @@ class _PowerSettingsScreenState extends State<PowerSettingsScreen> {
                 (power.capacityMah / 1000).toString();
           }
         }
-      case SaveNeedsPin():
+      case SaveNeedsPin(:final sessionLost):
+        if (sessionLost) {
+          _showSnackBar('O controlador encerrou a sessão. Digite o PIN de novo.');
+        }
         _showPinDialog();
       case SaveWrongPin():
         _showSnackBar('PIN incorreto');

@@ -160,7 +160,10 @@ class _ThermalSettingsScreenState extends State<ThermalSettingsScreen> {
           _escMaxController.text = thermal.escMaxC.toStringAsFixed(0);
           _motorSourceController.text = thermal.motorTempSource.toString();
         }
-      case SaveNeedsPin():
+      case SaveNeedsPin(:final sessionLost):
+        if (sessionLost) {
+          _showSnackBar('O controlador encerrou a sessão. Digite o PIN de novo.');
+        }
         _showPinDialog();
       case SaveWrongPin():
         _showSnackBar('PIN incorreto');

@@ -12,6 +12,10 @@ const bmsConfig = BmsConfig(
   bmsMac: [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF],
 );
 
+/// A controller with no BMS configured. Scanning is only offered in this
+/// state, because the firmware cannot scan while it holds a BMS link.
+const noBmsConfig = BmsConfig(bmsType: 0, bmsMac: kUnsetMac);
+
 Widget wrap(Widget child) => MaterialApp(home: child);
 
 class RecordingEditor implements ConfigEditor {
@@ -192,7 +196,7 @@ void main() {
   });
 
   testWidgets('armed makes save and the scan inert', (tester) async {
-    await tester.pumpWidget(wrap(screen(armed: true)));
+    await tester.pumpWidget(wrap(screen(armed: true, config: noBmsConfig)));
 
     expect(tester.widget<FilledButton>(save()).onPressed, isNull);
     expect(tester.widget<OutlinedButton>(scanButton()).onPressed, isNull);
@@ -266,8 +270,7 @@ void main() {
     await completeScan(tester, total: 1, results: [
       [0x11, 0x22, 0x33, 0x44, 0x55, 0x66, -62, 3],
     ]);
-    await tester.pumpWidget(wrap(screen(config: const BmsConfig(
-        bmsType: 0, bmsMac: kUnsetMac))));
+    await tester.pumpWidget(wrap(screen(config: noBmsConfig)));
 
     final tile = find.byKey(const Key('scan-result-0'));
     await tester.ensureVisible(tile);
@@ -338,7 +341,7 @@ void main() {
     // print it as a refusal -- the pilot tapped "Buscar BMS" and was told the
     // PIN was missing, with nowhere to type it.
     scanEditor.scanOutcome = const SaveNeedsPin();
-    await tester.pumpWidget(wrap(screen()));
+    await tester.pumpWidget(wrap(screen(config: noBmsConfig)));
 
     await tester.tap(find.byKey(const Key('scan-bms')));
     await tester.pumpAndSettle();
@@ -357,7 +360,7 @@ void main() {
 
   testWidgets('a scan on an authenticated connection never prompts',
       (tester) async {
-    await tester.pumpWidget(wrap(screen()));
+    await tester.pumpWidget(wrap(screen(config: noBmsConfig)));
 
     await tester.tap(find.byKey(const Key('scan-bms')));
     await tester.pumpAndSettle();
@@ -395,6 +398,40 @@ void main() {
     await tester.pumpWidget(wrap(screen()));
 
     expect(find.byKey(const Key('scan-empty')), findsOneWidget);
+  });
+
+  testWidgets('a configured BMS hides the scan and says why', (tester) async {
+    // The pilot found this before the app did: with a BMS configured the
+    // controller's scan finds nothing, every time. It disconnects its BMS
+    // client and calls scan->start() in the same loop iteration, and a BLE
+    // disconnect is asynchronous. Offering a button that cannot work is
+    // worse than not offering it.
+    await tester.pumpWidget(wrap(screen()));  // bmsType 1
+
+    expect(find.byKey(const Key('scan-bms')), findsNothing);
+    expect(tester.widget<Text>(find.byKey(const Key('scan-blocked'))).data,
+        contains('Nenhum'));
+  });
+
+  testWidgets('the gate is the saved type, not the dropdown', (tester) async {
+    // Choosing "Nenhum" is not enough: the controller still holds the BMS
+    // link until the write lands. The button appears when the controller
+    // says it has no BMS, not when the form does.
+    await tester.pumpWidget(wrap(screen()));  // saved type is JBD
+
+    await tester.tap(find.byKey(const Key('bms-type')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Nenhum').last);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('scan-bms')), findsNothing);
+  });
+
+  testWidgets('no BMS configured offers the scan', (tester) async {
+    await tester.pumpWidget(wrap(screen(config: noBmsConfig)));
+
+    expect(find.byKey(const Key('scan-bms')), findsOneWidget);
+    expect(find.byKey(const Key('scan-blocked')), findsNothing);
   });
 
   group('layout', () {

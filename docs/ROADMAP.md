@@ -185,6 +185,16 @@ the number matters before it is planned.
 
 ## Known issues in fly-controller
 
+**Changing the BMS type appears to clear the app's authentication.** Reported
+from the aircraft: after authenticating, setting the type to Nenhum asked for
+the PIN, and selecting a BMS again asked once more. `authenticated_` is only
+cleared in `BleControl::onCentralDisconnected()`, which `BleServerHost`'s
+`BLEServerCallbacks::onDisconnect` calls — so something in the BMS client's
+connect/disconnect is reaching the *server's* disconnect callback. Worth
+confirming with a log line in that callback: if it fires when no phone
+disconnected, the callback is being invoked for the client role and the auth
+reset belongs behind a check on which connection actually went away.
+
 **A BMS scan races the BMS link it just tore down.** `startWebScan()` calls
 `setEnabled(false)` on the three backends — which reaches
 `pClient_->disconnect()` — and then `scan->start()` in the same loop

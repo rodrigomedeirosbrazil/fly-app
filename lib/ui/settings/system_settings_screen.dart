@@ -94,7 +94,10 @@ class _SystemSettingsScreenState extends State<SystemSettingsScreen> {
             _throttleSource = system.throttleSource;
           });
         }
-      case SaveNeedsPin():
+      case SaveNeedsPin(:final sessionLost):
+        if (sessionLost) {
+          _showSnackBar('O controlador encerrou a sessão. Digite o PIN de novo.');
+        }
         _askPin(_saveWithPin);
       case SaveWrongPin():
         _showSnackBar('PIN incorreto');
