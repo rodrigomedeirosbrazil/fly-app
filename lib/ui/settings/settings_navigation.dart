@@ -238,18 +238,23 @@ class _FirmwareScreenWrapperState extends State<_FirmwareScreenWrapper> {
     super.dispose();
   }
 
+  /// Opens the system picker and reads the chosen file.
+  ///
+  /// `FileType.any`, not `custom` with `['bin']`: iOS filters by UTI and has
+  /// no type registered for a bare `.bin`, so a custom filter there shows a
+  /// browser in which the firmware cannot be selected at all.
+  ///
+  /// `readAsBytes()` rather than `PlatformFile.bytes`: on mobile the picker
+  /// returns a path and leaves `bytes` null unless asked, and the deprecated
+  /// `withData` flag is the old way of asking.
+  ///
+  /// **Nothing is caught here.** An earlier version wrapped the whole thing
+  /// in `catch (_) { return null; }`, which made a failed pick
+  /// indistinguishable from a cancelled one — the same silence that cost two
+  /// rounds on the audio. The screen reports what went wrong.
   Future<Uint8List?> _pickFile() async {
-    try {
-      final picker = FilePicker as dynamic;
-      final result = await picker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['bin'],
-      );
-      return result?.files.firstOrNull?.bytes;
-    } catch (_) {
-      // FilePicker.platform may not be available on this platform
-      return null;
-    }
+    final file = await FilePicker.pickFile(type: FileType.any);
+    return file == null ? null : await file.readAsBytes();
   }
 
   @override

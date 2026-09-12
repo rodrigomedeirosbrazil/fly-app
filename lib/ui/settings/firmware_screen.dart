@@ -45,13 +45,24 @@ class _FirmwareSettingsScreenState extends State<FirmwareSettingsScreen> {
 
   void _onSessionChanged() => setState(() {});
 
+  /// What the last pick failed with, or null. A pick that throws and a pick
+  /// the pilot cancelled look identical from here unless one of them says so.
+  String? _pickError;
+
   Future<void> _pickFile() async {
-    final image = await widget.pickFile();
+    Uint8List? image;
+    try {
+      image = await widget.pickFile();
+    } catch (e) {
+      if (mounted) setState(() => _pickError = e.toString());
+      return;
+    }
     if (image == null || !mounted) return;
 
     setState(() {
+      _pickError = null;
       _chosenImage = image;
-      _inspection = inspectImage(image);
+      _inspection = inspectImage(image!);
     });
   }
 
@@ -127,6 +138,17 @@ class _FirmwareSettingsScreenState extends State<FirmwareSettingsScreen> {
                               isDisabled ? null : _pickFile,
                           child: const Text('Escolher arquivo .bin'),
                         ),
+                        if (_pickError != null) ...[
+                          const SizedBox(height: 12),
+                          Text(
+                            key: const Key('pick-error'),
+                            'Não foi possível abrir o arquivo: $_pickError',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Theme.of(context).colorScheme.error,
+                            ),
+                          ),
+                        ],
                         if (_chosenImage != null) ...[
                           const SizedBox(height: 16),
                           if (_inspection?.sizeBytes != null)
