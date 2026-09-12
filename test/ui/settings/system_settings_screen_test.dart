@@ -241,7 +241,7 @@ void main() {
   testWidgets('armed makes every control inert', (tester) async {
     await tester.pumpWidget(wrap(screen(armed: true, hasRemote: true)));
 
-    expect(tester.widget<ElevatedButton>(save()).onPressed, isNull);
+    expect(tester.widget<FilledButton>(save()).onPressed, isNull);
     expect(tester.widget<Slider>(buzzerSlider()).onChangeEnd, isNull);
 
     final throttleDropdown = find.byKey(const Key('throttle-source'));
@@ -251,13 +251,13 @@ void main() {
     );
 
     expect(
-      tester.widget<ElevatedButton>(
+      tester.widget<OutlinedButton>(
         find.byKey(const Key('pair-remote')),
       ).onPressed,
       isNull,
     );
     expect(
-      tester.widget<ElevatedButton>(
+      tester.widget<OutlinedButton>(
         find.byKey(const Key('forget-remote')),
       ).onPressed,
       isNull,
@@ -267,7 +267,7 @@ void main() {
   testWidgets('no config means nothing to edit and nothing to overwrite',
       (tester) async {
     await tester.pumpWidget(wrap(screen(config: null)));
-    expect(tester.widget<ElevatedButton>(save()).onPressed, isNull);
+    expect(tester.widget<FilledButton>(save()).onPressed, isNull);
   });
 
   testWidgets('the PIN round trip carries what is on screen', (tester) async {

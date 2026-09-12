@@ -7,6 +7,8 @@ import '../../protocol/mac_address.dart';
 import '../../protocol/settings_validation.dart';
 import '../../state/config_editor.dart';
 import '../../state/remote_pairing_controller.dart';
+import '../widgets/status_chip.dart';
+import 'settings_card.dart';
 
 class SystemSettingsScreen extends StatefulWidget {
   const SystemSettingsScreen({
@@ -372,6 +374,8 @@ class _SystemSettingsScreenState extends State<SystemSettingsScreen> {
   Widget build(BuildContext context) {
     final systemError = _validateSystem();
     final systemErrorMessage = messageFor(systemError);
+    final remoteMac = widget.config?.remoteMac ?? kUnsetMac;
+    final isPaired = formatMac(remoteMac) != null;
 
     final saveDisabled = widget.config == null ||
         widget.armed ||
@@ -381,150 +385,190 @@ class _SystemSettingsScreenState extends State<SystemSettingsScreen> {
       appBar: AppBar(
         title: const Text('Sistema'),
       ),
-      body: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            children: [
-              // Buzzer volume slider
-              Column(
+      body: Column(
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  SettingsCard(
+                    title: 'BUZZER',
                     children: [
-                      const Text('Volume do buzzer'),
-                      Text(
-                        _buzzerVolume.toString(),
-                        key: const Key('buzzer-value'),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            'Volume',
+                            style: settingsSectionLabel(context),
+                          ),
+                          Text(
+                            _buzzerVolume.toString(),
+                            key: const Key('buzzer-value'),
+                            style: settingsSectionLabel(context),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
-                  Slider(
-                    key: const Key('buzzer-volume'),
-                    value: _buzzerVolume.toDouble(),
-                    min: 0,
-                    max: 100,
-                    divisions: 20,
-                    onChangeEnd: widget.armed
-                        ? null
-                        : (value) {
+                      const SizedBox(height: 12),
+                      Slider(
+                        key: const Key('buzzer-volume'),
+                        value: _buzzerVolume.toDouble(),
+                        min: 0,
+                        max: 100,
+                        divisions: 20,
+                        onChangeEnd: widget.armed
+                            ? null
+                            : (value) {
                           setState(() {
                             _buzzerVolume = value.toInt();
                           });
                           _previewBuzzer(_buzzerVolume);
                         },
-                    onChanged: widget.armed
-                        ? null
-                        : (value) {
+                        onChanged: widget.armed
+                            ? null
+                            : (value) {
                           setState(() {
                             _buzzerVolume = value.toInt();
                           });
                         },
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              // Throttle source dropdown
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Origem do acelerador'),
-                  const SizedBox(height: 8),
-                  DropdownButton<int>(
-                    key: const Key('throttle-source'),
-                    value: _throttleSource,
-                    isExpanded: true,
-                    items: const [
-                      DropdownMenuItem(
-                        value: 0,
-                        child: Text('Cabeado'),
-                      ),
-                      DropdownMenuItem(
-                        value: 1,
-                        child: Text('Sem fio (ESP-NOW)'),
                       ),
                     ],
-                    onChanged: widget.armed
-                        ? null
-                        : (value) {
-                            if (value != null) {
-                              setState(() {
-                                _throttleSource = value;
-                              });
-                            }
-                          },
                   ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              if (systemErrorMessage != null)
-                Text(
-                  systemErrorMessage,
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.error,
-                    fontSize: 12,
+                  SettingsCard(
+                    title: 'ACELERADOR',
+                    children: [
+                      DropdownButton<int>(
+                        key: const Key('throttle-source'),
+                        value: _throttleSource,
+                        isExpanded: true,
+                        items: const [
+                          DropdownMenuItem(
+                            value: 0,
+                            child: Text('Cabeado'),
+                          ),
+                          DropdownMenuItem(
+                            value: 1,
+                            child: Text('Sem fio (ESP-NOW)'),
+                          ),
+                        ],
+                        onChanged: widget.armed
+                            ? null
+                            : (value) {
+                                if (value != null) {
+                                  setState(() {
+                                    _throttleSource = value;
+                                  });
+                                }
+                              },
+                      ),
+                    ],
                   ),
-                ),
-              if (systemErrorMessage != null) const SizedBox(height: 12),
-              if (widget.armed)
-                Text(
-                  'Não é possível gravar enquanto a aeronave está armada',
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.error,
-                    fontSize: 12,
-                  ),
-                ),
-              if (widget.armed) const SizedBox(height: 12),
-              ElevatedButton(
-                key: const Key('save-system'),
-                onPressed: saveDisabled ? null : _saveSystem,
-                child: const Text('Salvar'),
-              ),
-              const SizedBox(height: 24),
-              // Remote section
-              if (widget.hasRemoteLink) ...[
-                const Divider(),
-                const SizedBox(height: 16),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Remote',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      formatMac(widget.config?.remoteMac ?? kUnsetMac) ??
-                          'não pareado',
-                      key: const Key('remote-mac'),
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
+                  if (widget.hasRemoteLink)
+                    SettingsCard(
+                      title: 'REMOTE',
                       children: [
-                        Expanded(
-                          child: ElevatedButton(
-                            key: const Key('pair-remote'),
-                            onPressed: widget.armed ? null : _showPairingDialog,
-                            child: const Text('Parear remote'),
+                        Text('ENDEREÇO', style: settingsSectionLabel(context)),
+                        const SizedBox(height: 6),
+                        if (isPaired)
+                          Text(
+                            key: const Key('remote-mac'),
+                            formatMac(remoteMac) ?? 'não pareado',
+                            style: settingsIdentifier(context),
+                          )
+                        else
+                          StatusChip(
+                            key: const Key('remote-mac'),
+                            text: 'NÃO PAREADO',
+                            color: Theme.of(context).colorScheme.outline,
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: ElevatedButton(
-                            key: const Key('forget-remote'),
-                            onPressed: widget.armed ? null : _showForgetDialog,
-                            child: const Text('Esquecer remote'),
-                          ),
+                        const SizedBox(height: 16),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton(
+                                key: const Key('pair-remote'),
+                                onPressed: widget.armed ? null : _showPairingDialog,
+                                child: const Text('Parear remote'),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: OutlinedButton(
+                                key: const Key('forget-remote'),
+                                onPressed: widget.armed ? null : _showForgetDialog,
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Theme.of(context).colorScheme.error,
+                                  side: BorderSide(
+                                    color: Theme.of(context).colorScheme.error,
+                                  ),
+                                ),
+                                child: const Text('Esquecer remote'),
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
-                  ],
-                ),
-              ],
-            ],
+                ],
+              ),
+            ),
           ),
+          _SaveFooter(
+            messages: [
+              ?systemErrorMessage,
+              if (widget.armed)
+                'Não é possível gravar enquanto a aeronave está armada',
+            ],
+            child: FilledButton(
+              key: const Key('save-system'),
+              onPressed: saveDisabled ? null : _saveSystem,
+              child: const Text('Salvar'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The one action that writes to the aircraft, anchored where the thumb is,
+/// with whatever is stopping it directly above.
+///
+/// It used to be a small pill in the middle of the page with a screenful of
+/// nothing under it, carrying the same weight as the disclosure toggle two
+/// lines up.
+class _SaveFooter extends StatelessWidget {
+  const _SaveFooter({required this.messages, required this.child});
+
+  final List<String> messages;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        border: Border(
+          top: BorderSide(color: theme.colorScheme.outlineVariant),
         ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final m in messages)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                m,
+                style: TextStyle(color: theme.colorScheme.error, fontSize: 12),
+              ),
+            ),
+          child,
+        ],
       ),
     );
   }
