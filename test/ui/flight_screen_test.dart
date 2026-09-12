@@ -300,7 +300,6 @@ void main() {
 
       expect(find.text('34:17:36'), findsOneWidget); // hour meter
       expect(find.text('33 mV'), findsOneWidget);
-      expect(find.text('OK · PARADO · OK'), findsOneWidget);
     });
 
     testWidgets('a sentence-fed frame dashes them instead of showing zeros',
@@ -310,11 +309,18 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Horímetro'), findsOneWidget);
-      // Exactly the five rows only the binary service can fill: hour meter,
-      // cell delta, sensor states, uptime, firmware. An exact count is the
-      // point -- findsAtLeast would still pass if a row the sentence DOES
-      // carry silently started dashing.
-      expect(find.text('–'), findsNWidgets(5));
+      // Exactly the four rows only the binary service can fill: hour meter,
+      // cell delta, uptime, firmware. An exact count is the point --
+      // findsAtLeast would still pass if a row the sentence DOES carry
+      // silently started dashing.
+      //
+      // Four, not five: the sensor-state readout is gone. The states are
+      // still decoded and still drive hide-don't-print-zero everywhere; only
+      // this readout of them was removed. The build stamp does not count
+      // either -- that row hides when absent rather than dashing, because on
+      // firmware that predates the field it is a reading that does not
+      // exist.
+      expect(find.text('–'), findsNWidgets(4));
     });
 
     testWidgets('the settings entry is present and live when disarmed',

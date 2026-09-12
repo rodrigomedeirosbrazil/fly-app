@@ -82,4 +82,61 @@ void main() {
     final info = ControlInfo.decode(bytes(protocolVersion: 7))!;
     expect(info.protocolVersion, 7);
   });
+
+  group('the build stamp rides on the end, under the append rule', () {
+    /// A payload carrying the appended build stamp.
+    Uint8List withStamp({
+      String date = 'Sep 12 2026',
+      String time = '12:46:03',
+      int? length,
+    }) {
+      final out = Uint8List(ControlInfo.kLengthWithBuildStamp);
+      out.setRange(0, 28, bytes());
+      out.setRange(28, 28 + date.length, date.codeUnits);
+      out.setRange(40, 40 + time.length, time.codeUnits);
+      return length == null ? out : out.sublist(0, length);
+    }
+
+    test('it is read when the firmware sends it', () {
+      final info = ControlInfo.decode(withStamp())!;
+
+      expect(info.buildDate, 'Sep 12 2026');
+      expect(info.buildTime, '12:46:03');
+      // The fields ahead of it must not have moved.
+      expect(info.appVersion, '1.2.3');
+      expect(info.protocolVersion, 1);
+    });
+
+    test('firmware that does not send it still decodes', () {
+      // Every controller built before the field existed. 28 bytes is the
+      // minimum, not the size -- treating the absence as a malformed payload
+      // would drop the whole control service back to `$XCTOD` over a support
+      // line.
+      final info = ControlInfo.decode(bytes())!;
+
+      expect(info.buildDate, isNull);
+      expect(info.buildTime, isNull);
+      expect(info.appVersion, '1.2.3');
+    });
+
+    test('a stamp the firmware left blank is absent, not empty', () {
+      // The field is there and unfilled. Reported as nothing to show rather
+      // than as a blank line the pilot reads as a failed fetch.
+      final info = ControlInfo.decode(withStamp(date: '', time: ''))!;
+
+      expect(info.buildDate, isNull);
+      expect(info.buildTime, isNull);
+    });
+
+    test('a payload that stops mid-stamp keeps what it completed', () {
+      // Truncated between the two fields. The date is whole and the time is
+      // not there at all, which is exactly what a partial read looks like --
+      // and neither invalidates the 28 bytes ahead of them.
+      final info = ControlInfo.decode(withStamp(length: 40))!;
+
+      expect(info.buildDate, 'Sep 12 2026');
+      expect(info.buildTime, isNull);
+      expect(info.appVersion, '1.2.3');
+    });
+  });
 }

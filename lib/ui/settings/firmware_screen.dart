@@ -215,6 +215,25 @@ class _FirmwareSettingsScreenState extends State<FirmwareSettingsScreen> {
                           widget.repo.firmwareVersion ?? 'desconhecido',
                           style: settingsIdentifier(context),
                         ),
+                        // The build stamp is what actually answers "is this
+                        // the image I flashed?" on this screen. CI stamps
+                        // APP_VERSION with the release tag and every local
+                        // build reports `dev`, so the version alone cannot
+                        // tell two images a week apart apart -- which is the
+                        // question a pilot has at the moment they are about
+                        // to replace it.
+                        if (widget.repo.firmwareBuild != null) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            'Build: ${widget.repo.firmwareBuild}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant,
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                     SettingsCard(

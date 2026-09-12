@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:fly_app/ble/fly_controller_link.dart';
+import 'package:fly_app/protocol/control_info.dart';
 import 'package:fly_app/state/telemetry_source_policy.dart';
 
 /// A minimal valid binary frame: struct version 1, armed/disarmed, all three
@@ -53,6 +54,15 @@ class FakeLink extends FlyControllerLink {
 
   @override
   bool get canUpdateFirmware => supportsDfu;
+
+  /// What INFO reported, or null for the `$XCTOD` path where it was never
+  /// read. The real link fills this at discovery from the characteristic;
+  /// here it is set directly, so the repository's support-line getters have
+  /// a seam at all.
+  ControlInfo? fakeInfo;
+
+  @override
+  ControlInfo? get info => fakeInfo;
 
   @override
   Future<void> sendCommand(List<int> bytes) async {

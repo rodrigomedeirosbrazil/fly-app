@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fly_app/audio/tone_player.dart';
 import 'package:fly_app/ble/fly_controller_link.dart';
 import 'package:fly_app/protocol/config_groups.dart';
+import 'package:fly_app/protocol/control_info.dart';
 import 'package:fly_app/state/buzzer_mirror.dart';
 import 'package:fly_app/state/telemetry_repository.dart';
 
@@ -497,5 +498,91 @@ void main() {
     expect(link.canUpdateFirmware, isTrue);
     expect(repo.dfuTransport, isNotNull,
         reason: 'transport is available when characteristic exists');
+  });
+
+  group('the firmware support line', () {
+    ControlInfo controllerInfo({
+      String appVersion = '2.4.1',
+      String? buildDate,
+      String? buildTime,
+    }) =>
+        ControlInfo(
+          protocolVersion: 1,
+          controllerType: ControllerType.tmotor,
+          capabilities: 0,
+          appVersion: appVersion,
+          buildDate: buildDate,
+          buildTime: buildTime,
+        );
+
+    test('version and controller type read as one line', () {
+      final link = FakeLink()..fakeInfo = controllerInfo();
+      final repo = TelemetryRepository(
+          link: link, mirror: BuzzerMirror(FakePlayer()));
+      addTearDown(repo.dispose);
+
+      expect(repo.firmwareVersion, '2.4.1 · Tmotor');
+    });
+
+    test('an empty version does not open the line with a separator', () {
+      // char[24] NUL-padded, so a firmware that never filled it decodes to
+      // the empty string. " · Tmotor" reads as a rendering fault rather than
+      // as a missing reading.
+      final link = FakeLink()..fakeInfo = controllerInfo(appVersion: '');
+      final repo = TelemetryRepository(
+          link: link, mirror: BuzzerMirror(FakePlayer()));
+      addTearDown(repo.dispose);
+
+      expect(repo.firmwareVersion, 'Tmotor');
+    });
+
+    test('the build stamp joins date and time', () {
+      final link = FakeLink()
+        ..fakeInfo = controllerInfo(
+          buildDate: 'Sep 12 2026',
+          buildTime: '12:46:03',
+        );
+      final repo = TelemetryRepository(
+          link: link, mirror: BuzzerMirror(FakePlayer()));
+      addTearDown(repo.dispose);
+
+      expect(repo.firmwareBuild, 'Sep 12 2026 12:46:03');
+    });
+
+    test('firmware that sends no build stamp reports none', () {
+      // Every controller built before the field existed. Null is what hides
+      // the row; a dash there would read as a date that failed to load.
+      final link = FakeLink()..fakeInfo = controllerInfo();
+      final repo = TelemetryRepository(
+          link: link, mirror: BuzzerMirror(FakePlayer()));
+      addTearDown(repo.dispose);
+
+      expect(repo.firmwareBuild, isNull);
+      expect(repo.firmwareVersion, isNotNull);
+    });
+
+    test('a time with no date is not a build stamp', () {
+      // The date is the part that answers "which build is this". A firmware
+      // that left the date blank and filled the time would otherwise produce
+      // a line opening with a space -- the same fault the empty appVersion
+      // guard exists for, one field further along.
+      final link = FakeLink()
+        ..fakeInfo = controllerInfo(buildTime: '12:46:03');
+      final repo = TelemetryRepository(
+          link: link, mirror: BuzzerMirror(FakePlayer()));
+      addTearDown(repo.dispose);
+
+      expect(repo.firmwareBuild, isNull);
+    });
+
+    test('both are null with no INFO at all', () {
+      // The `$XCTOD` path never reads it.
+      final repo = TelemetryRepository(
+          link: FakeLink(), mirror: BuzzerMirror(FakePlayer()));
+      addTearDown(repo.dispose);
+
+      expect(repo.firmwareVersion, isNull);
+      expect(repo.firmwareBuild, isNull);
+    });
   });
 }
