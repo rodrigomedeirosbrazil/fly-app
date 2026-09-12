@@ -61,6 +61,19 @@ Two things the app refuses to do, both recorded in `CLAUDE.md`: it never sends
 the controller, and it never claims to cancel a pairing, because the protocol
 has no opcode that does.
 
+**Buzzer mirroring is done** (2026-09-11), and with it **phase 2's telemetry
+is complete**. Every reading the binary service carries now reaches the pilot,
+and nothing on the "deliberately absent" list is absent.
+
+Latency is unmeasured and will be audible: a beep travels a 1 Hz firmware
+loop, a BLE notification, a decode and an audio session before it sounds. Fine
+for a warning, useless for anything the pilot times.
+
+What phase 2 still does not send is `SET_TIME` (`0x27`), `PIN_CHANGE` (`0x28`)
+and the two Tmotor direction opcodes — none of them telemetry, and
+`PIN_CHANGE` alone deserves care because it is the one write that is **not
+idempotent**, so it cannot use the retry every other write here depends on.
+
 This is the first piece of the web portal with a real alternative, and
 therefore the first step toward phase 4.
 
@@ -75,21 +88,33 @@ buzzer mirroring.
 **Blocked on flash.** The likely payment is porting Bluedroid → **NimBLE**
 (`Xctod` plus the three BMS backends), worth roughly 100–200 KB and some RAM.
 
-### Phase 3 — firmware update over BLE
+### Phase 3 — firmware update over BLE · **next**
 
 A DFU characteristic writing into `esp_ota_write()`, using the dual-slot scheme
 that already exists. Additive in flash terms.
+
+Moved ahead of everything else by the pilot (2026-09-11): it is the capability
+they want most, and unlike log download it removes a reason to open the portal
+at all.
 
 The alternative considered and set aside: handing off to the existing WiFi AP,
 which would be ~10 s instead of ~60–120 s and cost almost no firmware, but
 needs `NEHotspotConfiguration` on iOS (an Apple entitlement), drops the phone's
 internet, and contradicts the brief that access is over Bluetooth.
 
-### Phase 4 — retire the web portal
+### Phase 4 — retire the web portal · **deferred, on purpose**
 
-Frees 200–400 KB (ESPAsyncWebServer + ElegantOTA + the gzipped assets). This is
-what makes the flash arithmetic work overall: phase 4 returns more than phases
-2–3 spend. The catch is that the debt has to be paid before it is earned.
+**Not planned work.** The pilot's decision (2026-09-11): the portal stays until
+the app has been flown enough to trust, and retiring it is a later call made on
+evidence rather than a milestone to aim at.
+
+**Log download is out with it.** The `0x40–0x4F` opcode range and the
+`D4CF0006-…` characteristic stay reserved and unimplemented on both sides.
+
+Kept here because the flash arithmetic still depends on it: retiring the portal
+frees 200–400 KB (ESPAsyncWebServer + ElegantOTA + the gzipped assets), which
+is more than phases 2–3 spend. The debt is simply carried longer than the
+original plan assumed.
 
 ## Decisions on record
 
@@ -194,6 +219,18 @@ connect/disconnect is reaching the *server's* disconnect callback. Worth
 confirming with a log line in that callback: if it fires when no phone
 disconnected, the callback is being invoked for the client role and the auth
 reset belongs behind a check on which connection actually went away.
+
+**The buzzer's gesture tones cannot be mirrored faithfully.** `Sound::handle()`
+pushes a beep event when a state starts and nothing when `main.cpp` retunes it
+via `setStateFreq()` on each on→off edge — so a BLE client is told 1800 Hz once
+and never hears the arm-charge sweep. The app works around it by recomputing
+the pitch from `armCharge`/`powerScale`, which duplicates `main.cpp`'s
+arithmetic and steps at 1 Hz instead of ~10 Hz.
+
+The clean fix is a **`uint16 stateFreqHz` appended to `ControlTelemetry`**: the
+append rule already covers it, no version bump, and it removes a hand-copied
+formula from fly-app. Pushing a beep event per retune would work too but
+floods the eight-slot ring at ten events a second.
 
 **A BMS scan races the BMS link it just tore down.** `startWebScan()` calls
 `setEnabled(false)` on the three backends — which reaches

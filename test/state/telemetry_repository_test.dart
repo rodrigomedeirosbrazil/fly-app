@@ -1,12 +1,46 @@
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:fly_app/audio/tone_player.dart';
 import 'package:fly_app/ble/fly_controller_link.dart';
 import 'package:fly_app/protocol/config_groups.dart';
+import 'package:fly_app/state/buzzer_mirror.dart';
 import 'package:fly_app/state/telemetry_repository.dart';
 
 import 'fake_link.dart';
 
 const sample =
     r'$XCTOD,87,91,50.400,1.5,42,1234,100,61,can,4200,30,54,ARMED,38,3712,3745';
+
+class FakePlayer implements TonePlayer {
+  final calls = <String>[];
+
+  @override
+  Future<void> playPattern({
+    required int frequency,
+    required int onMs,
+    required int offMs,
+    required int reps,
+  }) async =>
+      calls.add('play $frequency/$onMs/$offMs x$reps');
+
+  @override
+  Future<void> startLoop({
+    required int frequency,
+    required int onMs,
+    required int offMs,
+  }) async =>
+      calls.add('loop $frequency/$onMs/$offMs');
+
+  @override
+  Future<void> stopLoop() async => calls.add('stop');
+
+  @override
+  Future<void> silence() async => calls.add('silence');
+
+  @override
+  Future<void> dispose() async {}
+}
 
 void main() {
   late DateTime now;
@@ -16,7 +50,10 @@ void main() {
   setUp(() {
     now = DateTime.utc(2026, 9, 10, 12);
     link = FakeLink();
-    repo = TelemetryRepository(link: link, clock: () => now);
+    // Inject a fake player so the test doesn't try to initialize audio
+    final fakePlayer = FakePlayer();
+    final mirror = BuzzerMirror(fakePlayer);
+    repo = TelemetryRepository(link: link, clock: () => now, mirror: mirror);
   });
 
   tearDown(() => repo.dispose());
@@ -301,7 +338,13 @@ void main() {
     test('a disconnect drops it, because the PIN does not survive one',
         () async {
       final link = FakeLink();
-      final repo = TelemetryRepository(link: link, clock: DateTime.now);
+      final fakePlayer = FakePlayer();
+      final mirror = BuzzerMirror(fakePlayer);
+      final repo = TelemetryRepository(
+        link: link,
+        clock: DateTime.now,
+        mirror: mirror,
+      );
       addTearDown(repo.dispose);
 
       link.emit(LinkStatus.connected);
@@ -317,5 +360,110 @@ void main() {
 
       expect(repo.editor, isNull);
     });
+  });
+
+  group('buzzer mirror', () {
+    test('an EVT_BEEP reaches the mirror', () async {
+      final player = FakePlayer();
+      final mirror = BuzzerMirror(player);
+      link = FakeLink();
+      repo = TelemetryRepository(
+        link: link,
+        clock: () => now,
+        mirror: mirror,
+      );
+
+      link.emit(LinkStatus.connected);
+      link.feedBinary(binarySample());
+      await pumpEventQueue();
+
+      // Build a 13-byte beep payload
+      final d = ByteData(13);
+      d.setUint32(0, 7, Endian.little); // seq
+      d.setUint16(4, 2000, Endian.little); // frequency
+      d.setUint16(6, 120, Endian.little); // onMs
+      d.setUint16(8, 80, Endian.little); // offMs
+      d.setUint8(10, 3); // reps
+      d.setUint8(11, 0); // layer: event
+      d.setUint8(12, 1); // active
+
+      // Push an RSP with op 0x80 (EVT_BEEP), seq 0 (unsolicited), and the payload
+      link.pushResponse([0x80, 0, 0, 13, ...d.buffer.asUint8List()]);
+      await pumpEventQueue();
+
+      expect(player.calls, isNotEmpty);
+      expect(player.calls.first, contains('2000'));
+    });
+
+    test('an unsolicited event this build does not know is ignored', () async {
+      final player = FakePlayer();
+      final mirror = BuzzerMirror(player);
+      link = FakeLink();
+      repo = TelemetryRepository(
+        link: link,
+        clock: () => now,
+        mirror: mirror,
+      );
+
+      link.emit(LinkStatus.connected);
+      link.feedBinary(binarySample());
+      await pumpEventQueue();
+
+      // An UNSOLICITED event (seq 0) under an opcode this build does not
+      // know, carrying a full 13-byte payload.
+      //
+      // Both details matter. A seq other than 0 never reaches _onEvent at all
+      // -- ControlSession routes it to the pending request instead -- and a
+      // short payload is rejected by BeepEvent.decode on length alone. Get
+      // either wrong and the test passes with the opcode check deleted, which
+      // is what the first version of it did.
+      final d = ByteData(13);
+      d.setUint32(0, 1, Endian.little);
+      d.setUint16(4, 2000, Endian.little);
+      d.setUint16(6, 100, Endian.little);
+      d.setUint16(8, 50, Endian.little);
+      d.setUint8(10, 2);
+      d.setUint8(11, 0);
+      d.setUint8(12, 1);
+      link.pushResponse([0x10, 0, 0, 13, ...d.buffer.asUint8List()]);
+      await pumpEventQueue();
+
+      expect(player.calls, isEmpty,
+          reason: 'only op 0x80 is a beep, whatever the payload decodes to');
+    });
+  });
+
+  test('turning sound on confirms the speaker works', () async {
+    final player = FakePlayer();
+    final link = FakeLink();
+    final repo = TelemetryRepository(
+      link: link,
+      clock: DateTime.now,
+      mirror: BuzzerMirror(player),
+    );
+    addTearDown(repo.dispose);
+
+    await repo.setMuted(true);
+    player.calls.clear();
+
+    await repo.setMuted(false);
+
+    expect(player.calls, isNotEmpty,
+        reason: 'without this the only way to test the audio is to arm');
+  });
+
+  test('turning sound off makes no sound', () async {
+    final player = FakePlayer();
+    final link = FakeLink();
+    final repo = TelemetryRepository(
+      link: link,
+      clock: DateTime.now,
+      mirror: BuzzerMirror(player),
+    );
+    addTearDown(repo.dispose);
+
+    await repo.setMuted(true);
+
+    expect(player.calls.where((c) => c.startsWith('play')), isEmpty);
   });
 }

@@ -2,14 +2,17 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../audio/tone_player.dart';
 import '../ble/fly_controller_link.dart';
+import '../protocol/beep_event.dart';
 import '../protocol/config_groups.dart';
-import '../protocol/control_info.dart';
 import '../protocol/control_frame.dart';
+import '../protocol/control_info.dart';
 import '../protocol/control_telemetry_codec.dart';
 import '../protocol/line_assembler.dart';
 import '../protocol/telemetry_frame.dart';
 import '../protocol/xctod_parser.dart';
+import 'buzzer_mirror.dart';
 import 'config_editor.dart';
 import 'control_session.dart';
 import 'link_health.dart';
@@ -24,9 +27,22 @@ class TelemetryRepository extends ChangeNotifier {
     FlyControllerLink? link,
     LinkHealth? health,
     DateTime Function()? clock,
-  })  : _link = link ?? FlyControllerLink(),
+    BuzzerMirror? mirror,
+  })  :
+        // prefer_initializing_formals suggests `this._mirror`, which does not
+        // compile: a named parameter cannot carry a private name. Same
+        // situation as ControlSession's `_send`.
+        // ignore: prefer_initializing_formals
+        _mirror = mirror,
+        _link = link ?? FlyControllerLink(),
         _health = health ?? LinkHealth(),
         _now = clock ?? DateTime.now {
+    // Built here rather than in the initialiser list so the player can report
+    // failures back: a beep that fails silently is indistinguishable from a
+    // controller with nothing to say, which is how this subsystem reached
+    // hardware inaudible twice.
+    _mirror ??= BuzzerMirror(AudioPlayersTonePlayer(onError: _onAudioError));
+
     _statusSub = _link.status.listen(_onStatus);
     _payloadSub = _link.payloads.listen(_onPayload);
     // Staleness has to be re-evaluated even when nothing arrives — that is
@@ -39,11 +55,24 @@ class TelemetryRepository extends ChangeNotifier {
   final FlyControllerLink _link;
   final LinkHealth _health;
   final DateTime Function() _now;
+  BuzzerMirror? _mirror;
+
+  /// What the speaker last refused to do, or null. Shown in the drawer beside
+  /// the sound control, because the pilot is the only one who can tell a
+  /// silent app from a quiet aircraft.
+  String? get audioError => _audioError;
+  String? _audioError;
+
+  void _onAudioError(Object error) {
+    _audioError = error.toString();
+    notifyListeners();
+  }
   final LineAssembler _assembler = LineAssembler();
 
   late final StreamSubscription<LinkStatus> _statusSub;
   late final StreamSubscription<TelemetryPayload> _payloadSub;
   late final Timer _ticker;
+  StreamSubscription<ControlResponse>? _eventsSub;
 
   LinkStatus _status = LinkStatus.idle;
   LinkStatus get status => _status;
@@ -85,6 +114,19 @@ class TelemetryRepository extends ChangeNotifier {
   /// and even the scan and the save button on the *same* screen, hold a
   /// separate flag: the pilot was asked for the PIN again on each one.
   ConfigEditor? get editor => _editor;
+
+  /// Whether the buzzer is muted.
+  bool get muted => _mirror?.muted ?? false;
+
+  /// Mute or unmute the buzzer.
+  Future<void> setMuted(bool value) async {
+    await _mirror!.setMuted(value);
+    notifyListeners();
+    // Turning sound on answers "does this work?" immediately, rather than
+    // leaving the pilot to arm the aircraft to find out.
+    if (!value) _audioError = null;
+      await _mirror!.confirmAudible();
+  }
 
   /// Whether the controller reports a selectable motor temperature source.
   /// False when INFO was never read.
@@ -228,6 +270,32 @@ class TelemetryRepository extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Unsolicited `RSP` frames. Only `EVT_BEEP` means anything to this app so
+  /// far; anything else is ignored rather than logged, because newer firmware
+  /// is allowed to send events this build has never heard of.
+  void _onEvent(ControlResponse response) {
+    if (response.op != kOpEvtBeep) return;
+    final beep = BeepEvent.decode(response.payload);
+    if (beep == null) return;
+    unawaited(_mirror!.handle(beep));
+  }
+
+  /// Sweeps the mirrored gesture tone with the aircraft's own scalar.
+  ///
+  /// The firmware pushes a beep event when a state *starts* and never when it
+  /// retunes, so the mirror would hold the base 1800 Hz for an arm charge the
+  /// pilot hears climbing. The scalars are in every frame; the arithmetic is
+  /// the firmware's, in `buzzer_mirror.dart`.
+  void _retuneGesture() {
+    final f = frame;
+    if (f == null) return;
+    unawaited(_mirror!.retuneState(gestureFrequencyFor(
+      isArmed: f.isArmed,
+      armCharge: f.armCharge,
+      powerScale: f.powerScale,
+    )));
+  }
+
   void _onStatus(LinkStatus s) {
     _status = s;
     if (s == LinkStatus.disconnected || s == LinkStatus.idle) {
@@ -241,6 +309,8 @@ class TelemetryRepository extends ChangeNotifier {
       _session = null;
       // With the session, because the PIN it holds is per connection.
       _editor = null;
+      _eventsSub?.cancel();
+      _eventsSub = null;
       _thermalRequested = false;
       _thermalConfig = null;
       _powerConfig = null;
@@ -286,12 +356,14 @@ class TelemetryRepository extends ChangeNotifier {
         }
         if (decoded) {
           _anyFrameRendered = true;
+          _retuneGesture();
           if (!_thermalRequested && _link.canSendCommands) {
             _thermalRequested = true;
             final session = _session ??= ControlSession(
               _link.sendCommand,
               incoming: _link.responses,
             );
+            _eventsSub ??= session.events.listen(_onEvent);
             _editor ??= ConfigEditor(session, onGroupRead: _applyGroupRead);
             unawaited(_fetchConfig(session));
           }
@@ -306,7 +378,9 @@ class TelemetryRepository extends ChangeNotifier {
     _ticker.cancel();
     _statusSub.cancel();
     _payloadSub.cancel();
+    _eventsSub?.cancel();
     _session?.dispose();
+    _mirror?.dispose();
     _link.dispose();
     super.dispose();
   }

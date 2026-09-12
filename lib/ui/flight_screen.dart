@@ -25,6 +25,9 @@ class FlightScreen extends StatefulWidget {
     this.firmwareVersion,
     this.thermalConfig,
     this.onOpenSettings,
+    this.muted = false,
+    this.audioError,
+    this.onSetMuted,
   });
 
   final TelemetryFrame? frame;
@@ -42,6 +45,15 @@ class FlightScreen extends StatefulWidget {
   /// channel — the `$XCTOD` path, or a controller without the control
   /// service.
   final VoidCallback? onOpenSettings;
+
+  /// Whether the buzzer is muted.
+  final bool muted;
+
+  /// What the phone's speaker last refused to do, or null.
+  final String? audioError;
+
+  /// Called when the mute state changes.
+  final Future<void> Function(bool)? onSetMuted;
 
   @override
   State<FlightScreen> createState() => _FlightScreenState();
@@ -97,6 +109,9 @@ class _FlightScreenState extends State<FlightScreen> {
                   firmwareVersion: widget.firmwareVersion,
                   onOpenSettings: widget.onOpenSettings,
                   armed: f?.isArmed ?? false,
+                  muted: widget.muted,
+                  audioError: widget.audioError,
+                  onSetMuted: widget.onSetMuted,
                 ),
             ],
           ),
@@ -145,10 +160,10 @@ class _StatusRow extends StatelessWidget {
   /// The short codes the firmware already uses for disarm reasons, so the two
   /// chips in this row speak the same vocabulary.
   static String _causes(Set<LimitCause> causes) => [
-        if (causes.contains(LimitCause.battery)) 'BAT',
-        if (causes.contains(LimitCause.motorTemp)) 'MOT',
-        if (causes.contains(LimitCause.escTemp)) 'ESC',
-      ].join(' ');
+    if (causes.contains(LimitCause.battery)) 'BAT',
+    if (causes.contains(LimitCause.motorTemp)) 'MOT',
+    if (causes.contains(LimitCause.escTemp)) 'ESC',
+  ].join(' ');
 
   @override
   Widget build(BuildContext context) {
@@ -350,7 +365,9 @@ class _BatteryCardState extends State<_BatteryCard> {
                 // voltage centre, rather than reserving space for a dash.
                 if (f?.currentA != null) ...[
                   VerticalDivider(
-                      width: 1, color: theme.colorScheme.outlineVariant),
+                    width: 1,
+                    color: theme.colorScheme.outlineVariant,
+                  ),
                   Expanded(
                     child: _Reading(
                       label: 'CORRENTE',
@@ -513,7 +530,11 @@ class _InstrumentRow extends StatelessWidget {
 /// scale. Sized like the dials beside it: a fixed point size looks right on the
 /// phone it was written on and wraps on a narrower one.
 class _Readout extends StatelessWidget {
-  const _Readout({required this.label, required this.value, required this.unit});
+  const _Readout({
+    required this.label,
+    required this.value,
+    required this.unit,
+  });
 
   final String label;
   final String value;
@@ -663,13 +684,16 @@ class _DrawerBar extends StatelessWidget {
 /// Six fields arrive in every frame that the panel has no room for. They are
 /// reachable but overlaid, so the BMS connecting or dropping cannot re-lay out
 /// the numbers the pilot is reading.
-class _SecondaryData extends StatelessWidget {
+class _SecondaryData extends StatefulWidget {
   const _SecondaryData({
     required this.frame,
     required this.onClose,
     this.firmwareVersion,
     this.onOpenSettings,
     required this.armed,
+    required this.muted,
+    this.audioError,
+    this.onSetMuted,
   });
 
   final TelemetryFrame? frame;
@@ -677,6 +701,25 @@ class _SecondaryData extends StatelessWidget {
   final String? firmwareVersion;
   final VoidCallback? onOpenSettings;
   final bool armed;
+  final bool muted;
+  final String? audioError;
+  final Future<void> Function(bool)? onSetMuted;
+
+  @override
+  State<_SecondaryData> createState() => _SecondaryDataState();
+}
+
+class _SecondaryDataState extends State<_SecondaryData> {
+  // No local copy of `muted`. The repository owns it and notifies, and
+  // app.dart's AnimatedBuilder rebuilds this whole subtree — a second copy
+  // here would be free to drift from the one the mirror is actually obeying,
+  // which is the failure this codebase refuses everywhere else.
+  Future<void> _setMuted(bool value) =>
+      widget.onSetMuted?.call(value) ?? Future<void>.value();
+
+  TelemetryFrame? get frame => widget.frame;
+
+  bool get armed => widget.armed;
 
   /// An unavailable reading is a dash. Same rule as the panel.
   static String _or(Object? value, String suffix) =>
@@ -689,10 +732,10 @@ class _SecondaryData extends StatelessWidget {
   }
 
   String get _source => switch (frame?.motorTempSource) {
-        MotorTempSource.can => 'CAN',
-        MotorTempSource.ntc => 'NTC',
-        _ => '–',
-      };
+    MotorTempSource.can => 'CAN',
+    MotorTempSource.ntc => 'NTC',
+    _ => '–',
+  };
 
   /// `h:mm:ss`, for counters that run to hundreds of hours.
   static String _hours(Duration? d) {
@@ -707,12 +750,12 @@ class _SecondaryData extends StatelessWidget {
   /// zero is a legitimate reading, so the state is the only thing that
   /// answers this.
   static String _signal(SignalState? s) => switch (s) {
-        SignalState.valid => 'OK',
-        SignalState.stale => 'PARADO',
-        SignalState.invalid => 'INVÁLIDO',
-        SignalState.absent => 'AUSENTE',
-        null => '–',
-      };
+    SignalState.valid => 'OK',
+    SignalState.stale => 'PARADO',
+    SignalState.invalid => 'INVÁLIDO',
+    SignalState.absent => 'AUSENTE',
+    null => '–',
+  };
 
   String get _signals {
     final f = frame;
@@ -737,12 +780,12 @@ class _SecondaryData extends StatelessWidget {
       ('Delta de células', _or(f?.cellDeltaMv, ' mV')),
       ('Sensores (mot · esc · bat)', _signals),
       ('Tempo ligado', _hours(f?.uptimeSec)),
-      ('Firmware', firmwareVersion ?? '–'),
+      ('Firmware', widget.firmwareVersion ?? '–'),
     ];
 
     return Positioned.fill(
       child: GestureDetector(
-        onTap: onClose,
+        onTap: widget.onClose,
         child: ColoredBox(
           color: Colors.black54,
           child: Column(
@@ -766,7 +809,7 @@ class _SecondaryData extends StatelessWidget {
                         message: 'Fechar',
                         child: IconButton(
                           icon: const Icon(Icons.keyboard_arrow_down),
-                          onPressed: onClose,
+                          onPressed: widget.onClose,
                         ),
                       ),
                       // Proportional, not a point constant: the sheet's
@@ -785,8 +828,9 @@ class _SecondaryData extends StatelessWidget {
                             children: [
                               for (final (label, value) in rows)
                                 Padding(
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 7),
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 7,
+                                  ),
                                   child: Row(
                                     children: [
                                       Expanded(
@@ -796,7 +840,8 @@ class _SecondaryData extends StatelessWidget {
                                           overflow: TextOverflow.ellipsis,
                                           style: TextStyle(
                                             color: theme
-                                                .colorScheme.onSurfaceVariant,
+                                                .colorScheme
+                                                .onSurfaceVariant,
                                           ),
                                         ),
                                       ),
@@ -807,7 +852,7 @@ class _SecondaryData extends StatelessWidget {
                                         style: const TextStyle(
                                           fontWeight: FontWeight.w700,
                                           fontFeatures: [
-                                            FontFeature.tabularFigures()
+                                            FontFeature.tabularFigures(),
                                           ],
                                         ),
                                       ),
@@ -815,17 +860,24 @@ class _SecondaryData extends StatelessWidget {
                                   ),
                                 ),
                               const SizedBox(height: 8),
+                              _MuteControl(
+                                key: const Key('mute-buzzer'),
+                                muted: widget.muted,
+                                audioError: widget.audioError,
+                                onSetMuted: _setMuted,
+                              ),
+                              const SizedBox(height: 8),
                               _SettingsEntry(
                                 // Disabled rather than hidden: presence is fixed and
                                 // only the state changes, the same rule the status
                                 // chips follow. A gate the pilot can see beats an
                                 // ErrState arriving after the tap.
-                                onTap: armed ? null : onOpenSettings,
+                                onTap: armed ? null : widget.onOpenSettings,
                                 reason: armed
                                     ? 'Indisponível com a aeronave armada'
-                                    : onOpenSettings == null
-                                        ? 'Indisponível nesta conexão'
-                                        : null,
+                                    : widget.onOpenSettings == null
+                                    ? 'Indisponível nesta conexão'
+                                    : null,
                               ),
                             ],
                           ),
@@ -895,6 +947,91 @@ class _SettingsEntry extends StatelessWidget {
               ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Mute control for the buzzer. Toggles sound on and off.
+class _MuteControl extends StatelessWidget {
+  const _MuteControl({
+    super.key,
+    required this.muted,
+    required this.onSetMuted,
+    this.audioError,
+  });
+
+  final bool muted;
+  final Future<void> Function(bool)? onSetMuted;
+
+  /// What the speaker last refused to do. Named rather than swallowed: the
+  /// pilot is the only one who can tell a silent app from a quiet aircraft,
+  /// and this subsystem reached hardware inaudible twice without a word.
+  final String? audioError;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                muted ? Icons.volume_off : Icons.volume_up,
+                size: 20,
+                color: theme.colorScheme.onSurface,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'SOM DO CONTROLADOR',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 13,
+                    letterSpacing: 1.5,
+                    fontWeight: FontWeight.w700,
+                    color: theme.colorScheme.onSurface,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Switch(
+                value: !muted,
+                onChanged: (value) => onSetMuted?.call(!value),
+              ),
+              const SizedBox(width: 4),
+              SizedBox(
+                width: 70,
+                child: Text(
+                  muted ? 'DESLIGADO' : 'LIGADO',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (audioError != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                'Falha no som: $audioError',
+                key: const Key('audio-error'),
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 11, color: theme.colorScheme.error),
+              ),
+            ),
+        ],
       ),
     );
   }

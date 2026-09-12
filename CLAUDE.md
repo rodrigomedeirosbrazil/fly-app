@@ -71,6 +71,7 @@ here — neither has a Bluetooth radio.
 | `wakelock_plus` | 1.8.0 | Screen stays on in flight |
 | `shared_preferences` | 2.5.5 | Remembers the pack/per-cell voltage mode |
 | `flutter_svg` | 2.3.0 | Renders the tintable Aerovolt logo |
+| `audioplayers` | 6.8.1 | Mirrors the controller's buzzer. **See below.** |
 | `flutter_launcher_icons` | 0.14.4 | **Dev only.** Generates the icon sets |
 
 Plugins resolve through **Swift Package Manager**, not CocoaPods — Flutter 3.47
@@ -445,6 +446,107 @@ under which the pilot most needs to be told.
 a remote already talking may keep working until the controller restarts. The
 screen says that instead of promising more.
 
+### The buzzer's two layers compose, they do not queue
+
+`EVT_BEEP` (`0x80`) arrives on `RSP` with `seq = 0`, which is the *request*
+sequence reserved for unsolicited events — the 13-byte payload carries the
+sound ring's own `seq`, in a different space. `lib/protocol/beep_event.dart`
+is the **fifth** hand-copied fly-controller contract here.
+
+`BuzzerMirror` implements the policy, and the reference implementation is the
+firmware's own telemetry page (`bzPlayQueue` in `TelemetryPage.h`):
+
+- **Layer 1 is a state** — a looping tone on until stopped. Its events are
+  *transitions*, so **a repeated `active: true` for a state already running is
+  ignored.** Restarting the loop mid-cycle is the difference between a steady
+  arm-charge tone and a stutter, and it is invisible to any test that only
+  counts calls.
+- **Layer 0 is an event** — a finite pattern. If a state is looping, it is
+  **paused, the event plays, and the state resumes with its original
+  pattern**. Playing both is two tones at once, which is not what the pilot
+  hears standing beside the aircraft. The resume is timed rather than
+  sample-accurate; the portal accepts the same imprecision.
+- **`reps: 0` means continuous, and is capped at `kContinuousCap`.** Layer 0
+  carries no stop event, so a literal reading leaves the phone sounding after
+  the link drops — worse than a missed beep.
+- **An unknown layer is ignored**, the same degrade-don't-throw rule
+  `DisarmReason` follows.
+
+**There is no backfill.** The firmware sends no backlog and this app invents
+none: a low-battery warning from ten minutes ago, played now, is
+disinformation. Unmuting replays nothing for the same reason — though a
+*state* resumes, because it describes a condition the aircraft is still in.
+
+### The gesture tones sweep, and the app has to derive that itself
+
+The arm-charge and disarm-ramp tones climb in pitch. The firmware pushes a
+beep event when a state **starts** — carrying the base 1800 Hz — and pushes
+nothing when `main.cpp` retunes it on every on→off edge. So a client that
+plays exactly what it is sent holds a flat tone while the aircraft sweeps,
+which is what the first build did.
+
+`gestureFrequencyFor` in `buzzer_mirror.dart` recomputes it from `armCharge`
+and `powerScale`, which are in every telemetry frame, using the firmware's own
+line: `1800 + scalar * (2500 - 1800) / 100`, from `main.cpp` and `config.h`.
+**The sixth hand-copied fly-controller contract here**, and the only one that
+is arithmetic rather than layout.
+
+Retuning restarts the loop, and that is *not* the stutter the repeated
+transition guard prevents: the pitch genuinely changed, and the firmware does
+the same thing — `ToneTransition::Retune` is `toneOff(); toneOn(newFreq)`. An
+unchanged frequency is ignored, which is what stops a 1 Hz caller restarting
+the loop every second.
+
+It steps at 1 Hz where the aircraft steps roughly ten times faster, so the
+sweep is coarser than the real one. **The smooth fix belongs in the
+firmware**: append the state frequency to the telemetry struct, which the
+append rule allows without a version bump. Recorded in `ROADMAP.md`.
+
+### A pattern is one buffer, not a timed sequence
+
+`buildPatternWav` bakes every repetition and every gap into a single WAV, and
+a state loop is one cycle played with `ReleaseMode.loop`. Playing one tone per
+repetition with a Dart delay between carried the plugin's per-play latency
+into every gap — on iOS that includes a temp-file write — so patterns ran
+slower and looser than the piezo they mirror. The gaps are now
+sample-accurate.
+
+### The app must mix, never interrupt
+
+The audio session is **`playback` + `mixWithOthers`** on iOS and requests
+**no audio focus** on Android. Two separate requirements, and only that pair
+satisfies both:
+
+- **It must be audible on a silenced phone.** `ambient` was the first choice
+  and it shipped mute: the plugin's own documentation says ambient is
+  "Silenced by the Ring/Silent switch = Yes", and a pilot's phone is on
+  silent, in a pocket, under a motor. `playback` ignores the switch.
+- **It must not interrupt.** A pilot may be flying by XCTrack's vario, and an
+  app that seized the session to beep would silence the instrument they are
+  actually using. `mixWithOthers` is the override that stops `playback` doing
+  that.
+
+**No test protects this.** Nothing instantiates `AudioPlayersTonePlayer` —
+that is the device seam, deliberately untested — so the category is guarded by
+this paragraph and the comment in the file, and a change to it can only be
+caught on a phone with the ring switch off.
+
+Turning sound on plays a short confirmation tone, because otherwise the only
+way to find out whether the phone can make one is to arm the aircraft. It
+goes through the event path, so it pauses and resumes a running state tone
+exactly as a real beep would.
+
+The tone is a square wave built in memory at half amplitude — square because
+that is what the controller's piezo makes and the point is that the two sound
+like one instrument; half amplitude because a phone speaker clips a
+full-scale square into a rasp. `buildSquareWaveWav` returns **empty** for
+anything unplayable rather than a header describing samples that are not
+there.
+
+Mute lives in the "MAIS DADOS" drawer, defaults to sound on, and is **not
+persisted** — per-connection UI state, like everything else in that drawer.
+The repository owns the flag; the screen must not keep a copy.
+
 ### The Dart enum order does not match the firmware's
 
 `MotorTempSource` is declared `{can, ntc, none}` here; the firmware's
@@ -460,6 +562,7 @@ lib/
 ├── protocol/   xctod_frame.dart · xctod_parser.dart · line_assembler.dart
 ├── state/      link_health.dart · telemetry_repository.dart
 │               ble_permission_policy.dart
+├── audio/      tone_player.dart
 ├── ble/        fly_controller_link.dart · android_host.dart
 └── ui/         app.dart · connection_screen.dart · flight_screen.dart
                 widgets/dial.dart
@@ -472,8 +575,10 @@ The layering is the point, and it is worth preserving:
   `package:flutter`. They are the Dart analogue of the firmware's host-testable
   headers (`ThrottleSignalLogic.h`, `PowerAlertLogic.h`): pure decision logic,
   fully tested in milliseconds with no device attached. Do not break this.
-- **`ble/`** is the only file that touches a radio. Everything above it is
-  testable precisely because that is true.
+- **`ble/`** is the only file that touches a radio, and **`audio/`** the only
+  one that makes a sound. Everything above them is testable precisely because
+  that is true — `BuzzerMirror` takes an abstract `TonePlayer`, so every rule
+  about layers and transitions is table-tested with no sound card.
 - **`state/telemetry_repository.dart`** is glue with no rules of its own.
 - **`ui/`** reads state and never touches BLE.
 
@@ -755,8 +860,8 @@ available only when the binary service is present:
 - **Flight clock** (`sessionSec`) — **done**, shown in the status row
 - **Which limiter is acting** (`limitCauses`) — **done**, named on the chip
 - **The red reduction band** on the thermal dials — **done**, from `CFG_GET`
+- **Buzzer mirroring** — **done**, subsystem 5
 
-Still absent:
-
-- **Buzzer mirroring** — needs `EVT_BEEP` playback off the `RSP` event stream,
-  which `ControlSession` already separates and discards. Phase 2, subsystem 5.
+Nothing on that list is absent any more. What phase 2 still does not carry is
+`SET_TIME`, `PIN_CHANGE` and the two Tmotor direction opcodes, none of which
+is telemetry.

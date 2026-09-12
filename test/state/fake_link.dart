@@ -105,6 +105,11 @@ class FakeLink extends FlyControllerLink {
     _responses.add([req[0], req[1], status, 0]);
   }
 
+  /// Pushes a raw response frame for testing unsolicited events.
+  void pushResponse(List<int> frame) {
+    _responses.add(frame);
+  }
+
   /// Set before calling start() to simulate a precondition the pilot has to
   /// fix: a refused permission, Bluetooth off, or location off.
   LinkStatus? blocking;

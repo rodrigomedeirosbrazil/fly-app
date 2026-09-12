@@ -136,6 +136,9 @@ class _FlyAppState extends State<FlyApp> {
             stale: _repo.isStale,
             firmwareVersion: _repo.firmwareVersion,
             thermalConfig: _repo.thermalConfig,
+            muted: _repo.muted,
+              audioError: _repo.audioError,
+            onSetMuted: _repo.setMuted,
             onOpenSettings: _repo.session == null
                 ? null
                 : () => openSettings(context, _repo),
