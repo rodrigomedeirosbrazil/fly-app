@@ -73,6 +73,16 @@ enum DfuFailureReason {
   malformed,
 }
 
+/// The controller refused to start in its current state.
+///
+/// **Not the same as armed**, though both arrive as `ErrState`. The firmware
+/// returns it when `Update.begin()` fails, which in practice means a previous
+/// transfer is still open. Reporting it as "a aeronave está armada" sent the
+/// pilot looking for a switch that was already off.
+class DfuNotReady extends DfuOutcome {
+  const DfuNotReady();
+}
+
 /// No authenticated session. Prompt, then call [DfuSession.start] with a PIN.
 class DfuNeedsPin extends DfuOutcome {
   const DfuNeedsPin();
@@ -185,6 +195,16 @@ class DfuSession extends ChangeNotifier {
       notifyListeners();
       return;
     }
+
+    // Clear anything a previous attempt left open, and ignore the answer.
+    //
+    // A failed transfer leaves the controller's Update session live, and
+    // `Update.begin()` then refuses the next one with ErrState -- which
+    // survives closing the app, because the state is on the controller. The
+    // pilot has no way to reset it and no reason to know it exists. ABORT is
+    // safe at any point, including when nothing is in progress, so starting
+    // every attempt with one makes a retry mean what the pilot expects.
+    await _transport.request(op: opDfuAbort);
 
     _state = DfuTransferState.sending;
     _progress = 0;
@@ -391,7 +411,11 @@ class DfuSession extends ChangeNotifier {
     return switch (result) {
       ControlOk() => null,
       ControlRefused(:final status) => switch (status) {
-          ControlStatus.errState => const DfuRefusedArmed(),
+          // NOT armed, though gateRequest() also uses ErrState for that: the
+          // screen gates armed before anything reaches here, and the DFU
+          // handlers return the same status for a refused Update.begin().
+          // Claiming "armed" sent the pilot looking for a switch already off.
+          ControlStatus.errState => const DfuNotReady(),
           ControlStatus.errBadOp => const DfuUnsupported(),
           ControlStatus.errAuth => const DfuNeedsPin(),
           ControlStatus.errBadArg =>

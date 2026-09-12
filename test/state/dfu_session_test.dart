@@ -65,6 +65,10 @@ class FakeDfuTransport implements DfuTransport {
     List<int> payload = const [],
   }) async {
     requestLog.add((op: op, payload: payload));
+    // ABORT always answers Ok and consumes nothing queued: the session sends
+    // one before every attempt to clear a session a previous failure left
+    // open, and making each test account for it would bury what it is about.
+    if (op == dfu_protocol.opDfuAbort) return const ControlOk([]);
     if (_requestQueue.isEmpty) {
       return const ControlTimeout();
     }
@@ -367,7 +371,7 @@ void main() {
           reason: 'DFU_BEGIN should not be retried on timeout');
     });
 
-    test('armed is reported without asking for a PIN', () async {
+    test('a refused start is not reported as armed', () async {
       final transport = FakeDfuTransport();
       final session = DfuSession(
         transport,
@@ -382,7 +386,12 @@ void main() {
 
       await session.start(image);
 
-      expect(session.outcome, isA<DfuRefusedArmed>());
+      // ErrState is NOT armed here. gateRequest() uses it for armed, but the
+      // DFU handlers return the same status when Update.begin() refuses --
+      // which is what a transfer left open by a previous failure looks like.
+      // The screen gates armed before anything reaches this class, so
+      // claiming it here sent the pilot looking for a switch already off.
+      expect(session.outcome, isA<DfuNotReady>());
       expect(session.state, DfuTransferState.failed);
     });
 
@@ -549,7 +558,7 @@ void main() {
       for (final (status, matcher) in [
         (ControlStatus.errBadArg, isA<DfuFailed>()),
         (ControlStatus.errBusy, isA<DfuFailed>()),
-        (ControlStatus.errState, isA<DfuRefusedArmed>()),
+        (ControlStatus.errState, isA<DfuNotReady>()),
         (ControlStatus.errBadOp, isA<DfuUnsupported>()),
       ]) {
         final transport = FakeDfuTransport()..queueRefused(status);
@@ -681,6 +690,44 @@ void main() {
       for (var i = 1; i < offsets.length; i++) {
         expect(offsets[i], greaterThan(offsets[i - 1]));
       }
+    });
+  });
+
+  group('recovering from a stuck controller', () {
+    test('every attempt clears whatever the last one left open', () async {
+      // THE BUG THIS COVERS.
+      //
+      // A failed transfer leaves the controller's Update session live, and
+      // the next DFU_BEGIN is refused with ErrState. The state is on the
+      // controller, so closing and reopening the app changed nothing -- the
+      // pilot was stuck with no way to reset it and no reason to know it
+      // existed. ABORT is safe when nothing is in progress, so it costs one
+      // request and makes "try again" mean what it looks like.
+      final transport = FakeDfuTransport();
+      final session = DfuSession(transport,
+          pollInterval: const Duration(milliseconds: 5));
+      addTearDown(session.dispose);
+
+      transport.queueOk();  // DFU_BEGIN
+
+      await session.start(Uint8List(256)..[0] = 0xE9);
+
+      expect(transport.requestLog.first.op, dfu_protocol.opDfuAbort,
+          reason: 'the abort goes first, before anything can be refused');
+      expect(transport.requestLog[1].op, dfu_protocol.opDfuBegin);
+    });
+
+    test('a rejected image aborts nothing, because nothing was started',
+        () async {
+      final transport = FakeDfuTransport();
+      final session = DfuSession(transport,
+          pollInterval: const Duration(milliseconds: 5));
+      addTearDown(session.dispose);
+
+      await session.start(Uint8List(256));  // no 0xE9
+
+      expect(session.outcome, isA<DfuRejectedImage>());
+      expect(transport.requestLog, isEmpty);
     });
   });
 }

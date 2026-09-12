@@ -131,8 +131,10 @@ class _FirmwareSettingsScreenState extends State<FirmwareSettingsScreen> {
             ImageProblem.tooLarge =>
               'O arquivo é maior que o espaço disponível no controlador',
           },
-        DfuRefusedArmed() =>
-          'Recusado: a aeronave está armada',
+        DfuRefusedArmed() => 'Recusado: a aeronave está armada',
+        DfuNotReady() =>
+          'O controlador recusou iniciar. Uma transferência anterior pode ter '
+              'ficado aberta — tente enviar de novo.',
         DfuUnsupported() => 'Este firmware não aceita atualização pelo app',
         DfuFailed(:final reason) => switch (reason) {
             DfuFailureReason.noAnswer =>
