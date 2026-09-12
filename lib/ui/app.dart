@@ -55,6 +55,65 @@ class _FlyAppState extends State<FlyApp> {
           outlineVariant: Color(0xFF272D38), // dividers
         ),
         useMaterial3: true,
+
+        // Buttons are chrome, and chrome is neutral here.
+        //
+        // Material 3's defaults put the label in `primary` on a container
+        // barely lighter than the page, so on this palette every button
+        // rendered as green text on almost nothing -- a primary action and a
+        // disclosure toggle looked identical, and both competed with the one
+        // green that means something: the gauge. All four scheme colours are
+        // spoken for by data (green gauge, blue throttle, red armed, amber
+        // reduction), so the buttons take none of them.
+        //
+        // The weights are what carry meaning instead: filled for the one
+        // action per screen that writes to the aircraft, outlined for a
+        // secondary action, text for a disclosure. A destructive action asks
+        // for `error` explicitly at its call site.
+        filledButtonTheme: FilledButtonThemeData(
+          style: ButtonStyle(
+            minimumSize: const WidgetStatePropertyAll(Size.fromHeight(48)),
+            shape: WidgetStatePropertyAll(
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            textStyle: const WidgetStatePropertyAll(
+              TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+            ),
+            backgroundColor: WidgetStateProperty.resolveWith((states) =>
+                states.contains(WidgetState.disabled)
+                    ? const Color(0xFF1C222B)
+                    : const Color(0xFF272D38)),
+            foregroundColor: WidgetStateProperty.resolveWith((states) =>
+                states.contains(WidgetState.disabled)
+                    ? const Color(0xFF6E7681)
+                    : const Color(0xFFE6EDF3)),
+          ),
+        ),
+        outlinedButtonTheme: OutlinedButtonThemeData(
+          style: ButtonStyle(
+            minimumSize: const WidgetStatePropertyAll(Size.fromHeight(46)),
+            shape: WidgetStatePropertyAll(
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            side: WidgetStateProperty.resolveWith((states) => BorderSide(
+                  color: states.contains(WidgetState.disabled)
+                      ? const Color(0xFF272D38)
+                      : const Color(0xFF6E7681),
+                )),
+            foregroundColor: WidgetStateProperty.resolveWith((states) =>
+                states.contains(WidgetState.disabled)
+                    ? const Color(0xFF6E7681)
+                    : const Color(0xFFE6EDF3)),
+          ),
+        ),
+        textButtonTheme: TextButtonThemeData(
+          style: ButtonStyle(
+            foregroundColor: WidgetStateProperty.resolveWith((states) =>
+                states.contains(WidgetState.disabled)
+                    ? const Color(0xFF6E7681)
+                    : const Color(0xFF8B949E)),
+          ),
+        ),
       ),
       home: AnimatedBuilder(
         animation: _repo,

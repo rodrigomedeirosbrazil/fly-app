@@ -163,7 +163,7 @@ void main() {
     await tester.pump();
 
     // Save should now be enabled (type is 0, but MAC is set)
-    expect(tester.widget<ElevatedButton>(save()).onPressed, isNotNull);
+    expect(tester.widget<FilledButton>(save()).onPressed, isNotNull);
   });
 
   testWidgets('a type with no address makes save inert, with the reason',
@@ -171,15 +171,15 @@ void main() {
     const configWithType = BmsConfig(bmsType: 2, bmsMac: kUnsetMac);
     await tester.pumpWidget(wrap(screen(config: configWithType)));
 
-    expect(tester.widget<ElevatedButton>(save()).onPressed, isNull);
+    expect(tester.widget<FilledButton>(save()).onPressed, isNull);
     expect(find.textContaining('endereço do BMS'), findsOneWidget);
   });
 
   testWidgets('armed makes save and the scan inert', (tester) async {
     await tester.pumpWidget(wrap(screen(armed: true)));
 
-    expect(tester.widget<ElevatedButton>(save()).onPressed, isNull);
-    expect(tester.widget<ElevatedButton>(scanButton()).onPressed, isNull);
+    expect(tester.widget<FilledButton>(save()).onPressed, isNull);
+    expect(tester.widget<OutlinedButton>(scanButton()).onPressed, isNull);
     expect(find.textContaining('armada'), findsWidgets);
   });
 
@@ -194,7 +194,7 @@ void main() {
     await tester.enterText(find.byKey(const Key('manual-mac')), 'AA:BB:CC');
     await tester.pump();
 
-    expect(tester.widget<ElevatedButton>(save()).onPressed, isNull);
+    expect(tester.widget<FilledButton>(save()).onPressed, isNull);
   });
 
   testWidgets('the PIN round trip carries what is on screen', (tester) async {

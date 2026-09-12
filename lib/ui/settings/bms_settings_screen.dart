@@ -6,6 +6,8 @@ import '../../protocol/mac_address.dart';
 import '../../protocol/settings_validation.dart';
 import '../../state/bms_scan_controller.dart';
 import '../../state/config_editor.dart';
+import '../widgets/status_chip.dart';
+import 'settings_card.dart';
 
 class BmsSettingsScreen extends StatefulWidget {
   const BmsSettingsScreen({
@@ -196,201 +198,173 @@ class _BmsSettingsScreenState extends State<BmsSettingsScreen> {
       ),
       body: ListenableBuilder(
         listenable: widget.scanController,
-        builder: (context, _) => SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // 1. Type dropdown
-                const Text('Tipo de BMS'),
-                const SizedBox(height: 8),
-                DropdownButton<int>(
-                  key: const Key('bms-type'),
-                  value: bmsType,
-                  items: kBmsTypeNames.entries
-                      .map((e) => DropdownMenuItem(
-                            value: e.key,
-                            child: Text(e.value),
-                          ))
-                      .toList(),
-                  onChanged: (value) {
-                    if (value != null) {
-                      setState(() {
-                        _typeController.text = value.toString();
-                      });
-                    }
-                  },
-                ),
-                const SizedBox(height: 16),
-
-                // 2. Current address
-                const Text('Endereço'),
-                const SizedBox(height: 8),
-                Text(
-                  key: const Key('bms-mac'),
-                  formatMac(parseMac(_macController.text) ?? kUnsetMac) ??
-                      'não configurado',
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-                const SizedBox(height: 16),
-
-                // 3. Scan button
-                ElevatedButton(
-                  key: const Key('scan-bms'),
-                  onPressed:
-                      widget.armed || widget.scanController.isPolling || widget.config == null
-                          ? null
-                          : () => widget.scanController.start(),
-                  child: const Text('Buscar BMS'),
-                ),
-                if (widget.scanController.isPolling)
-                  const Padding(
-                    padding: EdgeInsets.only(top: 8.0),
-                    child: Text(
-                      'A busca leva 5 segundos. Não desconecte durante a busca.',
-                      style: TextStyle(fontSize: 12),
+        builder: (context, _) => Column(
+          children: [
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SettingsCard(
+                      title: 'DISPOSITIVO',
+                      children: [
+                        DropdownButton<int>(
+                          key: const Key('bms-type'),
+                          value: bmsType,
+                          isExpanded: true,
+                          items: kBmsTypeNames.entries
+                              .map((e) => DropdownMenuItem(
+                                    value: e.key,
+                                    child: Text(e.value),
+                                  ))
+                              .toList(),
+                          onChanged: widget.armed
+                              ? null
+                              : (value) {
+                                  if (value != null) {
+                                    setState(() {
+                                      _typeController.text = value.toString();
+                                    });
+                                  }
+                                },
+                        ),
+                        const SizedBox(height: 16),
+                        Text('ENDEREÇO', style: settingsSectionLabel(context)),
+                        const SizedBox(height: 6),
+                        Text(
+                          key: const Key('bms-mac'),
+                          formatMac(parseMac(_macController.text) ?? kUnsetMac) ??
+                              'não configurado',
+                          style: settingsIdentifier(context),
+                        ),
+                      ],
                     ),
-                  ),
-                const SizedBox(height: 16),
-
-                // 4. Scanning indicator
-                if (widget.scanController.status == BmsScanStatus.scanning)
-                  Row(
-                    children: [
-                      const CircularProgressIndicator(),
-                      const SizedBox(width: 16),
-                      const Text('Buscando dispositivos BLE próximos…'),
-                    ],
-                  ),
-                if (widget.scanController.status == BmsScanStatus.scanning)
-                  const SizedBox(height: 16),
-
-                // 5. Results
-                if (widget.scanController.results.isNotEmpty)
-                  ...widget.scanController.results.asMap().entries.map(
-                    (e) {
-                      final index = e.key;
-                      final result = e.value;
-                      final typeLabel = result.detectedType != 0
-                          ? kBmsTypeNames[result.detectedType] ?? ''
-                          : null;
-
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 8.0),
-                        child: ListTile(
-                          key: Key('scan-result-$index'),
-                          title: Text(formatMac(result.mac) ?? '?'),
-                          subtitle: Row(
+                    SettingsCard(
+                      title: 'BUSCA',
+                      children: [
+                        OutlinedButton(
+                          key: const Key('scan-bms'),
+                          onPressed: widget.armed ||
+                                  widget.scanController.isPolling ||
+                                  widget.config == null
+                              ? null
+                              : () => widget.scanController.start(),
+                          child: const Text('Buscar BMS'),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'A busca leva 5 segundos. Não desconecte durante a busca.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        if (widget.scanController.status ==
+                            BmsScanStatus.scanning) ...[
+                          const SizedBox(height: 16),
+                          Row(
                             children: [
-                              Text('${result.rssi} dBm'),
-                              if (typeLabel != null) ...[
-                                const SizedBox(width: 8),
-                                Text(typeLabel),
-                              ],
+                              const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              ),
+                              const SizedBox(width: 12),
+                              Text(
+                                'Buscando dispositivos BLE próximos…',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
+                                ),
+                              ),
                             ],
                           ),
-                          onTap: () => _onScanResultTapped(result),
+                        ],
+                        if (widget.scanController.results.isNotEmpty) ...[
+                          const SizedBox(height: 12),
+                          ...widget.scanController.results
+                              .asMap()
+                              .entries
+                              .map((e) => _ResultTile(
+                                    index: e.key,
+                                    result: e.value,
+                                    onTap: () => _onScanResultTapped(e.value),
+                                  )),
+                        ],
+                        if (widget.scanController.truncated) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            key: const Key('scan-truncated'),
+                            'Mostrando ${widget.scanController.results.length} de ${widget.scanController.total} dispositivos',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color:
+                                  Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 4),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton(
+                            key: const Key('manual-mac-toggle'),
+                            onPressed: () => setState(
+                                () => _showManualMac = !_showManualMac),
+                            child: const Text('Digitar manualmente'),
+                          ),
                         ),
-                      );
-                    },
-                  ),
-
-                // 6. Truncation message
-                if (widget.scanController.truncated)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 16.0),
-                    child: Text(
-                      key: const Key('scan-truncated'),
-                      'Mostrando ${widget.scanController.results.length} de ${widget.scanController.total} dispositivos',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Theme.of(context).colorScheme.secondary,
-                      ),
+                        if (_showManualMac)
+                          TextField(
+                            key: const Key('manual-mac'),
+                            controller: _macController,
+                            decoration: const InputDecoration(
+                              labelText: 'Endereço MAC (AA:BB:CC:DD:EE:FF)',
+                              border: OutlineInputBorder(),
+                            ),
+                            onChanged: (value) => setState(() {}),
+                          ),
+                      ],
                     ),
-                  ),
-
-                // 7. Manual entry
-                TextButton(
-                  key: const Key('manual-mac-toggle'),
-                  onPressed: () => setState(() => _showManualMac = !_showManualMac),
-                  child: const Text('Digitar manualmente'),
+                    SettingsCard(
+                      title: 'ESTADO',
+                      children: [
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: StatusChip(
+                            text: _bmsLinkStatus().toUpperCase(),
+                            color: (widget.bmsConnected ?? false)
+                                ? Theme.of(context).colorScheme.primary
+                                : Theme.of(context).colorScheme.outline,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
-                if (_showManualMac)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8.0, bottom: 16.0),
-                    child: TextField(
-                      key: const Key('manual-mac'),
-                      controller: _macController,
-                      decoration: const InputDecoration(
-                        labelText: 'Endereço MAC (AA:BB:CC:DD:EE:FF)',
-                        border: OutlineInputBorder(),
-                      ),
-                      onChanged: (value) => setState(() {}),
-                    ),
-                  ),
-
-                // 8. Link state
-                const SizedBox(height: 16),
-                Text(
-                  _bmsLinkStatus(),
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Theme.of(context).colorScheme.secondary,
-                  ),
-                ),
-                const SizedBox(height: 16),
-
-                // Validation message
-                if (bmsErrorMessage != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12.0),
-                    child: Text(
-                      bmsErrorMessage,
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.error,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
-
-                // Refusal message
-                if (refusalMessage != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12.0),
-                    child: Text(
-                      refusalMessage,
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.error,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
-
-                if (widget.armed)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12.0),
-                    child: Text(
-                      'Não é possível gravar enquanto a aeronave está armada',
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.error,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
-
-                // 9. Save button
-                ElevatedButton(
-                  key: const Key('save-bms'),
-                  onPressed: bmsDisabled ? null : _saveBms,
-                  child: const Text('Salvar'),
-                ),
-              ],
+              ),
             ),
-          ),
+            _SaveFooter(
+              messages: [
+                ?bmsErrorMessage,
+                ?refusalMessage,
+                if (widget.armed)
+                  'Não é possível gravar enquanto a aeronave está armada',
+              ],
+              child: FilledButton(
+                key: const Key('save-bms'),
+                onPressed: bmsDisabled ? null : _saveBms,
+                child: const Text('Salvar'),
+              ),
+            ),
+          ],
         ),
       ),
     );
+
   }
 
   String _bmsLinkStatus() {
@@ -411,5 +385,108 @@ class _BmsSettingsScreenState extends State<BmsSettingsScreen> {
       SaveFailed() => 'Não foi possível gravar',
       _ => null,
     };
+  }
+}
+
+/// One device the scan found: its address, how strong it is, and the type it
+/// announced — or nothing where it announced none, because this app never
+/// asks the controller to find out.
+class _ResultTile extends StatelessWidget {
+  const _ResultTile({
+    required this.index,
+    required this.result,
+    required this.onTap,
+  });
+
+  final int index;
+  final BmsScanResult result;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final typeLabel =
+        result.detectedType != 0 ? kBmsTypeNames[result.detectedType] : null;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: InkWell(
+        key: Key('scan-result-$index'),
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surfaceContainerHigh,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(formatMac(result.mac) ?? '?',
+                        style: settingsIdentifier(context).copyWith(fontSize: 15)),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${result.rssi} dBm',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (typeLabel != null)
+                StatusChip(text: typeLabel, color: theme.colorScheme.onSurfaceVariant),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The one action that writes to the aircraft, anchored where the thumb is,
+/// with whatever is stopping it directly above.
+///
+/// It used to be a small pill in the middle of the page with a screenful of
+/// nothing under it, carrying the same weight as the disclosure toggle two
+/// lines up.
+class _SaveFooter extends StatelessWidget {
+  const _SaveFooter({required this.messages, required this.child});
+
+  final List<String> messages;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        border: Border(
+          top: BorderSide(color: theme.colorScheme.outlineVariant),
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final m in messages)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                m,
+                style: TextStyle(color: theme.colorScheme.error, fontSize: 12),
+              ),
+            ),
+          child,
+        ],
+      ),
+    );
   }
 }

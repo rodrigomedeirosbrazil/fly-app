@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../protocol/config_groups.dart';
 import '../protocol/telemetry_frame.dart';
 import 'widgets/dial.dart';
+import 'widgets/status_chip.dart';
 
 /// The instrument.
 ///
@@ -230,6 +231,8 @@ class _StatusRow extends StatelessWidget {
   }
 }
 
+/// Kept as a name local to this file; the implementation lives in
+/// `widgets/status_chip.dart` so the settings screens use the same one.
 class _Chip extends StatelessWidget {
   const _Chip({required this.text, required this.color});
 
@@ -237,27 +240,7 @@ class _Chip extends StatelessWidget {
   final Color color;
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.18),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Text(
-        text,
-        maxLines: 1,
-        softWrap: false,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          color: color,
-          fontSize: 13,
-          fontWeight: FontWeight.w700,
-          letterSpacing: 1.2,
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => StatusChip(text: text, color: color);
 }
 
 /// The dominant card: state of charge as a large dial, with pack voltage and
