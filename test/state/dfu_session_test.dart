@@ -853,7 +853,12 @@ void main() {
 
       // The answer used to be discarded outright, so this reported success
       // and sent the pilot to an aircraft still running the old firmware.
-      expect(session.outcome, isA<DfuFailed>());
+      //
+      // DfuCommitRefused, not DfuFailed(rejected): the image arrived whole
+      // and passed the controller's own CRC, so naming it a bad image sends
+      // the pilot to download the firmware again for a fault in the
+      // controller's flash write.
+      expect(session.outcome, isA<DfuCommitRefused>());
       expect(session.state, DfuTransferState.failed);
     });
 

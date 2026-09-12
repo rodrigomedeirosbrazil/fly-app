@@ -92,6 +92,21 @@ class DfuNotReady extends DfuOutcome {
   const DfuNotReady();
 }
 
+/// The controller took every byte and then could not finalise the write.
+///
+/// `DFU_COMMIT` answers `ErrState` for two different things, and they send
+/// the pilot to opposite places. Either `commitAllowed()` refused — the image
+/// is short or its CRC does not match what `DFU_BEGIN` promised — or
+/// `Update.end()` failed, meaning the controller's own flash holds less than
+/// it told us it had accepted.
+///
+/// Reporting both as "recusou a imagem" reads as a bad file and sends the
+/// pilot to download the firmware again, which fixes nothing when the file
+/// was fine and arrived whole.
+class DfuCommitRefused extends DfuOutcome {
+  const DfuCommitRefused();
+}
+
 /// The controller reported `DfuState.error`.
 ///
 /// Its own flash write failed — `Update.write()` returned short, or the
@@ -496,14 +511,14 @@ class DfuSession extends ChangeNotifier {
     // still running the old one — or, if the controller did reboot, one whose
     // image failed its own verification.
     //
-    // `ErrState` here is specifically `commitAllowed()` refusing: the image
-    // is short, or its CRC does not match what DFU_BEGIN promised. That is a
-    // corrupt transfer, not an aircraft state, so it does not map to
-    // DfuNotReady the way DFU_BEGIN's ErrState does.
+    // `ErrState` here is never the aircraft state, so it does not map to
+    // DfuNotReady the way DFU_BEGIN's ErrState does. It is the commit
+    // handler's own two refusals, which get their own outcome because
+    // "recusou a imagem" was read as a bad download.
     if (result is! ControlOk) {
       _outcome = switch (result) {
         ControlRefused(status: ControlStatus.errState) =>
-          const DfuFailed(DfuFailureReason.rejected),
+          const DfuCommitRefused(),
         _ => _mapRefusal(result) ?? const DfuFailed(),
       };
       _state = DfuTransferState.failed;

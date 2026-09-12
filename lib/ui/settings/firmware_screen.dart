@@ -136,6 +136,10 @@ class _FirmwareSettingsScreenState extends State<FirmwareSettingsScreen> {
           'O controlador recusou iniciar. Uma transferência anterior pode ter '
               'ficado aberta — tente enviar de novo.',
         DfuUnsupported() => 'Este firmware não aceita atualização pelo app',
+        DfuCommitRefused() =>
+          'O controlador recebeu a imagem inteira mas não conseguiu finalizar '
+              'a gravação. O firmware antigo continua rodando — não desligue '
+              'o controlador esperando o novo.',
         DfuControllerError() =>
           'O controlador falhou ao gravar na memória e encerrou a '
               'transferência. Desligue e ligue o controlador antes de tentar '
