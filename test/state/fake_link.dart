@@ -31,6 +31,7 @@ class FakeLink extends FlyControllerLink {
   final _payloads = StreamController<TelemetryPayload>.broadcast();
   final _responses = StreamController<List<int>>.broadcast();
   final commands = <List<int>>[];
+  final dfuWrites = <List<int>>[];
 
   @override
   Stream<LinkStatus> get status => _status.stream;
@@ -47,10 +48,22 @@ class FakeLink extends FlyControllerLink {
   /// Set to fail every write, standing in for a controller with no CMD.
   bool rejectCommands = false;
 
+  /// Set to true to simulate a controller with DFU support.
+  bool supportsDfu = false;
+
+  @override
+  bool get canUpdateFirmware => supportsDfu;
+
   @override
   Future<void> sendCommand(List<int> bytes) async {
     if (rejectCommands) throw StateError('no CMD characteristic');
     commands.add(bytes);
+  }
+
+  @override
+  Future<void> writeDfuData(List<int> bytes) async {
+    if (!supportsDfu) throw StateError('no DFU data characteristic');
+    dfuWrites.add(bytes);
   }
 
   /// Replies to the request at [index] with a full Thermal group.

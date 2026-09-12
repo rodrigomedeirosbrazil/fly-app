@@ -466,4 +466,36 @@ void main() {
 
     expect(player.calls.where((c) => c.startsWith('play')), isEmpty);
   });
+
+  test('a controller without DFU still connects', () async {
+    // This is critical: the DFU characteristic is optional. Today's firmware
+    // does not have it. A controller without D4CF0006 must connect, stream
+    // telemetry, serve config and mirror the buzzer exactly as now.
+    link.supportsDfu = false;
+    link.emit(LinkStatus.connected);
+    link.feedBinary(binarySample());
+    await pumpEventQueue();
+
+    expect(repo.frame, isNotNull, reason: 'telemetry flows normally');
+    expect(link.canUpdateFirmware, isFalse,
+        reason: 'the property exists on the link');
+    expect(repo.dfuTransport, isNull,
+        reason: 'no transport without the characteristic');
+
+    // Config fetch still works
+    expect(link.commands, isNotEmpty,
+        reason: 'thermal config fetch is triggered');
+  });
+
+  test('canUpdateFirmware and dfuTransport are available when the characteristic exists',
+      () async {
+    link.supportsDfu = true;
+    link.emit(LinkStatus.connected);
+    link.feedBinary(binarySample());
+    await pumpEventQueue();
+
+    expect(link.canUpdateFirmware, isTrue);
+    expect(repo.dfuTransport, isNotNull,
+        reason: 'transport is available when characteristic exists');
+  });
 }

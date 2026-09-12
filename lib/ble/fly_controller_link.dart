@@ -65,6 +65,8 @@ class FlyControllerLink {
       Guid('D4CF0004-9B9D-4BFD-8F7F-40C6989D3EA9');
   static final Guid controlRspUuid =
       Guid('D4CF0005-9B9D-4BFD-8F7F-40C6989D3EA9');
+  static final Guid controlDfuUuid =
+      Guid('D4CF0006-9B9D-4BFD-8F7F-40C6989D3EA9');
 
   static const String deviceName = 'FlyController';
 
@@ -112,6 +114,10 @@ class FlyControllerLink {
   /// True when this connection can carry requests at all.
   bool get canSendCommands => _cmd != null;
 
+  /// True when this connection can carry DFU data transfers.
+  bool get canUpdateFirmware => _dfu != null;
+  BluetoothCharacteristic? _dfu;
+
   /// Writes one `CMD` frame.
   ///
   /// Throws when there is no command characteristic, which
@@ -125,6 +131,20 @@ class FlyControllerLink {
     // withoutResponse: false — an ATT write response is the only
     // acknowledgement that the frame reached the controller at all.
     await cmd.write(bytes, withoutResponse: false);
+  }
+
+  /// Writes DFU bulk data without response.
+  ///
+  /// Throws when there is no DFU data characteristic, which is expected
+  /// behaviour when the controller does not support DFU yet.
+  Future<void> writeDfuData(List<int> bytes) async {
+    final dfu = _dfu;
+    if (dfu == null) {
+      throw StateError('no DFU data characteristic on this connection');
+    }
+    // withoutResponse: true — bulk transfers cannot afford to wait for an ACK
+    // on every frame, and the offset in each packet is redundant anyway.
+    await dfu.write(bytes, withoutResponse: true);
   }
 
   StreamSubscription<BluetoothConnectionState>? _connectionSub;
@@ -415,6 +435,9 @@ class FlyControllerLink {
         // are simply unavailable, which canSendCommands reports.
         _cmd = null;
       }
+      // DFU is optional: firmware without it simply has no DFU, and everything
+      // else must keep working. The characteristic's absence is not an error.
+      _dfu = find(controlServiceUuid, controlDfuUuid);
       return (TelemetrySource.control, controlTelemetry!);
     }
 
@@ -507,6 +530,7 @@ class FlyControllerLink {
     await _rspSub?.cancel();
     _rspSub = null;
     _cmd = null;
+    _dfu = null;
     await _connectionSub?.cancel();
     _connectionSub = null;
     try {
