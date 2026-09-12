@@ -697,24 +697,12 @@ class _SecondaryData extends StatefulWidget {
 }
 
 class _SecondaryDataState extends State<_SecondaryData> {
-  late bool _muted;
-
-  @override
-  void initState() {
-    super.initState();
-    _muted = widget.muted;
-  }
-
-  @override
-  void didUpdateWidget(_SecondaryData oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    _muted = widget.muted;
-  }
-
-  Future<void> _setMuted(bool value) async {
-    await widget.onSetMuted?.call(value);
-    if (mounted) setState(() => _muted = value);
-  }
+  // No local copy of `muted`. The repository owns it and notifies, and
+  // app.dart's AnimatedBuilder rebuilds this whole subtree — a second copy
+  // here would be free to drift from the one the mirror is actually obeying,
+  // which is the failure this codebase refuses everywhere else.
+  Future<void> _setMuted(bool value) => widget.onSetMuted?.call(value) ??
+      Future<void>.value();
 
   TelemetryFrame? get frame => widget.frame;
 
@@ -859,7 +847,7 @@ class _SecondaryDataState extends State<_SecondaryData> {
                               const SizedBox(height: 8),
                               _MuteControl(
                                 key: const Key('mute-buzzer'),
-                                muted: _muted,
+                                muted: widget.muted,
                                 onSetMuted: _setMuted,
                               ),
                               const SizedBox(height: 8),

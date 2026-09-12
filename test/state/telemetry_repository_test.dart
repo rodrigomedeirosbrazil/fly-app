@@ -395,7 +395,7 @@ void main() {
       expect(player.calls.first, contains('2000'));
     });
 
-    test('a reply with a real sequence is not a beep', () async {
+    test('an unsolicited event this build does not know is ignored', () async {
       final player = FakePlayer();
       final mirror = BuzzerMirror(player);
       link = FakeLink();
@@ -409,11 +409,27 @@ void main() {
       link.feedBinary(binarySample());
       await pumpEventQueue();
 
-      // Push an RSP with op 0x10 (not EVT_BEEP), seq 3 (a real sequence, not 0)
-      link.pushResponse([0x10, 3, 0, 0]);
+      // An UNSOLICITED event (seq 0) under an opcode this build does not
+      // know, carrying a full 13-byte payload.
+      //
+      // Both details matter. A seq other than 0 never reaches _onEvent at all
+      // -- ControlSession routes it to the pending request instead -- and a
+      // short payload is rejected by BeepEvent.decode on length alone. Get
+      // either wrong and the test passes with the opcode check deleted, which
+      // is what the first version of it did.
+      final d = ByteData(13);
+      d.setUint32(0, 1, Endian.little);
+      d.setUint16(4, 2000, Endian.little);
+      d.setUint16(6, 100, Endian.little);
+      d.setUint16(8, 50, Endian.little);
+      d.setUint8(10, 2);
+      d.setUint8(11, 0);
+      d.setUint8(12, 1);
+      link.pushResponse([0x10, 0, 0, 13, ...d.buffer.asUint8List()]);
       await pumpEventQueue();
 
-      expect(player.calls, isEmpty);
+      expect(player.calls, isEmpty,
+          reason: 'only op 0x80 is a beep, whatever the payload decodes to');
     });
   });
 }
