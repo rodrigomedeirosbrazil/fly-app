@@ -281,6 +281,15 @@ class ConfigEditor {
     return _reread(group);
   }
 
+  /// Authenticates this connection. Returns null on success, or the outcome
+  /// to report.
+  ///
+  /// Public because the DFU session needs the same session: the firmware's
+  /// `authenticated_` is per connection, so a second flag here would have the
+  /// pilot typing the PIN again to update firmware on a connection already
+  /// authenticated to save settings.
+  Future<SaveOutcome?> authenticate(String pin) => _authenticate(pin);
+
   /// Returns null when authentication succeeded, or the outcome to report.
   Future<SaveOutcome?> _authenticate(String pin) async {
     // The firmware compares raw characters against Settings' PIN and requires

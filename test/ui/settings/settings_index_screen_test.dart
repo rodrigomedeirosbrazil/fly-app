@@ -5,30 +5,34 @@ import 'package:fly_app/ui/settings/settings_index_screen.dart';
 Widget wrap(Widget child) => MaterialApp(home: child);
 
 void main() {
-  testWidgets('lists the four areas the portal has', (tester) async {
+  testWidgets('lists the five settings areas', (tester) async {
     await tester.pumpWidget(wrap(SettingsIndexScreen(
       onOpenPower: () {},
       onOpenThermal: () {},
       onOpenBms: () {},
       onOpenSystem: () {},
+      onOpenFirmware: () {},
     )));
 
     expect(find.text('Energia'), findsOneWidget);
     expect(find.text('Térmica'), findsOneWidget);
     expect(find.text('BMS'), findsOneWidget);
     expect(find.text('Sistema'), findsOneWidget);
+    expect(find.text('Atualizar'), findsOneWidget);
   });
 
-  testWidgets('all four areas open', (tester) async {
+  testWidgets('all five areas open', (tester) async {
     var power = false;
     var thermal = false;
     var bms = false;
     var system = false;
+    var firmware = false;
     await tester.pumpWidget(wrap(SettingsIndexScreen(
       onOpenPower: () => power = true,
       onOpenThermal: () => thermal = true,
       onOpenBms: () => bms = true,
       onOpenSystem: () => system = true,
+      onOpenFirmware: () => firmware = true,
     )));
 
     await tester.tap(find.text('Energia'));
@@ -46,20 +50,28 @@ void main() {
     await tester.tap(find.text('Sistema'));
     await tester.pumpAndSettle();
     expect(system, isTrue);
+
+    await tester.ensureVisible(find.text('Atualizar'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Atualizar'));
+    await tester.pumpAndSettle();
+    expect(firmware, isTrue);
   });
 
-  testWidgets('all four cards have descriptions', (tester) async {
+  testWidgets('all five cards have descriptions', (tester) async {
     await tester.pumpWidget(wrap(SettingsIndexScreen(
       onOpenPower: () {},
       onOpenThermal: () {},
       onOpenBms: () {},
       onOpenSystem: () {},
+      onOpenFirmware: () {},
     )));
 
     expect(find.textContaining('Capacidade da bateria'), findsOneWidget);
     expect(find.textContaining('Limites de proteção'), findsOneWidget);
     expect(find.textContaining('Tipo de BMS'), findsOneWidget);
     expect(find.textContaining('Volume do buzzer'), findsOneWidget);
+    expect(find.textContaining('Enviar novo firmware'), findsOneWidget);
   });
 
   group('layout', () {
@@ -80,6 +92,7 @@ void main() {
           onOpenThermal: () {},
           onOpenBms: () {},
           onOpenSystem: () {},
+          onOpenFirmware: () {},
         )));
         await tester.pumpAndSettle();
 

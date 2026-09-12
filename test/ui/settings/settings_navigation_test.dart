@@ -252,6 +252,60 @@ void main() {
         reason: 'the route must follow the repository, not a snapshot');
   });
 
+  testWidgets('the firmware screen keeps send and commit inert while armed',
+      (tester) async {
+    link.emit(LinkStatus.connected);
+    link.feedBinary(binarySample(armed: false));
+    await tester.pumpAndSettle();
+
+    // Wait for and reply to CFG_GET requests for configs.
+    await tester.pump(const Duration(milliseconds: 50));
+    if (link.commands.isNotEmpty) link.replyThermal(0);
+    await tester.runAsync(() => pumpEventQueue());
+    await tester.pumpAndSettle();
+
+    await tester.pump(const Duration(milliseconds: 50));
+    if (link.commands.length > 1) link.replyPower(1);
+    await tester.runAsync(() => pumpEventQueue());
+    await tester.pumpAndSettle();
+
+    await tester.pump(const Duration(milliseconds: 50));
+    if (link.commands.length > 2) link.replyBms(2);
+    await tester.runAsync(() => pumpEventQueue());
+    await tester.pumpAndSettle();
+
+    await tester.pump(const Duration(milliseconds: 50));
+    if (link.commands.length > 3) link.replySystem(3);
+    await tester.runAsync(() => pumpEventQueue());
+    await tester.pumpAndSettle();
+
+    await pumpHost(tester);
+    await tester.tap(find.text('abrir'));
+    await tester.pumpAndSettle();
+
+    // Firmware card is 5th, so scroll to find it
+    await tester.ensureVisible(find.text('Atualizar'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Atualizar'));
+    await tester.pumpAndSettle();
+
+    // When disarmed, the armed warning should not appear.
+    expect(find.textContaining('Não é possível enviar enquanto a aeronave está armada'),
+        findsNothing,
+        reason: 'disarmed, so no armed warning');
+
+    link.feedBinary(binarySample(armed: true));
+    await tester.pumpAndSettle();
+
+    // When armed, the warning must appear. This proves the ListenableBuilder
+    // is watching the repository: if it is dropped, this warning will not
+    // appear when armed changes.
+    expect(find.textContaining('Não é possível enviar enquanto a aeronave está armada'),
+        findsOneWidget,
+        reason: 'the route must follow the repository, not a snapshot');
+  });
+
   testWidgets('every screen is handed the connection\'s own editor',
       (tester) async {
     // THE REGRESSION THIS COVERS.

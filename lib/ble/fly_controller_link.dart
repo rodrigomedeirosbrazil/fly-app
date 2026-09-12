@@ -65,6 +65,8 @@ class FlyControllerLink {
       Guid('D4CF0004-9B9D-4BFD-8F7F-40C6989D3EA9');
   static final Guid controlRspUuid =
       Guid('D4CF0005-9B9D-4BFD-8F7F-40C6989D3EA9');
+  static final Guid controlDfuUuid =
+      Guid('D4CF0006-9B9D-4BFD-8F7F-40C6989D3EA9');
 
   static const String deviceName = 'FlyController';
 
@@ -112,6 +114,35 @@ class FlyControllerLink {
   /// True when this connection can carry requests at all.
   bool get canSendCommands => _cmd != null;
 
+  /// True when this connection can carry DFU data transfers.
+  bool get canUpdateFirmware => _dfu != null;
+  BluetoothCharacteristic? _dfu;
+
+  /// The largest single write **this phone** will accept on the data
+  /// characteristic.
+  ///
+  /// **Not the same limit as the controller's `chunkSize`**, and conflating
+  /// the two cost a whole test round. The controller reports its own ATT MTU
+  /// minus 3 — what it can receive. This is what the local platform will
+  /// send: `flutter_blue_plus` caps a write at `MIN(the OS maximum, 512)` on
+  /// both iOS and Android, and rejects anything longer outright, before a
+  /// byte leaves the phone.
+  ///
+  /// It shipped wrong because on this iPhone the two numbers agreed for a
+  /// while. One connection negotiated an ATT MTU of 517, the controller
+  /// reported 514, the app built a 514-byte packet, and the plugin refused it
+  /// for being two bytes over its own cap. The transfer failed at 0% with
+  /// every packet, and the app called it a lost connection.
+  ///
+  /// `mtuNow` is the plugin's own accounting of that cap — on iOS it is
+  /// literally `MIN(maximumWriteValueLength, 512) + 3` — so this is the same
+  /// number the write is checked against, not a guess at it.
+  int get maxDfuWriteBytes {
+    final device = _device;
+    if (device == null) return 20; // the 23-byte ATT default, minus overhead
+    return device.mtuNow - 3;
+  }
+
   /// Writes one `CMD` frame.
   ///
   /// Throws when there is no command characteristic, which
@@ -125,6 +156,20 @@ class FlyControllerLink {
     // withoutResponse: false — an ATT write response is the only
     // acknowledgement that the frame reached the controller at all.
     await cmd.write(bytes, withoutResponse: false);
+  }
+
+  /// Writes DFU bulk data without response.
+  ///
+  /// Throws when there is no DFU data characteristic, which is expected
+  /// behaviour when the controller does not support DFU yet.
+  Future<void> writeDfuData(List<int> bytes) async {
+    final dfu = _dfu;
+    if (dfu == null) {
+      throw StateError('no DFU data characteristic on this connection');
+    }
+    // withoutResponse: true — bulk transfers cannot afford to wait for an ACK
+    // on every frame, and the offset in each packet is redundant anyway.
+    await dfu.write(bytes, withoutResponse: true);
   }
 
   StreamSubscription<BluetoothConnectionState>? _connectionSub;
@@ -415,6 +460,18 @@ class FlyControllerLink {
         // are simply unavailable, which canSendCommands reports.
         _cmd = null;
       }
+      // DFU is optional, and this line is the whole of that guarantee: `find`
+      // returns null and nothing reacts. No controller in existence has this
+      // characteristic today, so making its absence fatal would take the app
+      // off every aircraft at once.
+      //
+      // **No test covers this line.** Discovery only runs against a real
+      // radio — every test above substitutes FakeLink wholesale — so making
+      // the characteristic mandatory here goes unnoticed by the suite. It was
+      // checked by hand: adding a throw leaves all tests green.
+      // `telemetry_repository_test.dart` covers the layer above, where a link
+      // reporting no DFU must still connect and stream.
+      _dfu = find(controlServiceUuid, controlDfuUuid);
       return (TelemetrySource.control, controlTelemetry!);
     }
 
@@ -507,6 +564,7 @@ class FlyControllerLink {
     await _rspSub?.cancel();
     _rspSub = null;
     _cmd = null;
+    _dfu = null;
     await _connectionSub?.cancel();
     _connectionSub = null;
     try {

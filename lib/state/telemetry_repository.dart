@@ -15,8 +15,36 @@ import '../protocol/xctod_parser.dart';
 import 'buzzer_mirror.dart';
 import 'config_editor.dart';
 import 'control_session.dart';
+import 'dfu_session.dart';
 import 'link_health.dart';
 import 'telemetry_source_policy.dart';
+
+/// Concrete implementation of [DfuTransport] wired to a link and session.
+class _DfuTransportImpl implements DfuTransport {
+  _DfuTransportImpl(this._session, this._link, this._editor);
+
+  final ControlSession _session;
+  final FlyControllerLink _link;
+
+  /// The connection's editor, so the PIN typed to save a setting also covers
+  /// a firmware update. The firmware authenticates per connection; two flags
+  /// here would mean two prompts.
+  final ConfigEditor _editor;
+
+  @override
+  Future<bool> authenticate(String pin) async =>
+      await _editor.authenticate(pin) == null;
+
+  @override
+  Future<ControlResult> request({required int op, List<int> payload = const []}) =>
+      _session.request(op: op, payload: payload);
+
+  @override
+  Future<void> writeData(List<int> bytes) => _link.writeDfuData(bytes);
+
+  @override
+  int get maxWriteBytes => _link.maxDfuWriteBytes;
+}
 
 /// Single source of truth for the UI.
 ///
@@ -115,6 +143,12 @@ class TelemetryRepository extends ChangeNotifier {
   /// separate flag: the pilot was asked for the PIN again on each one.
   ConfigEditor? get editor => _editor;
 
+  /// The transport for DFU transfers, or null when the DFU characteristic is
+  /// absent. A controller without it simply does not support firmware updates
+  /// over BLE, and everything else keeps working.
+  DfuTransport? get dfuTransport => _dfuTransport;
+  DfuTransport? _dfuTransport;
+
   /// Whether the buzzer is muted.
   bool get muted => _mirror?.muted ?? false;
 
@@ -136,6 +170,10 @@ class TelemetryRepository extends ChangeNotifier {
   /// Whether the controller supports remote pairing. False when INFO was never
   /// read.
   bool get hasRemoteLink => _link.info?.hasRemoteLink ?? false;
+
+  /// Whether the controller supports firmware updates over BLE.
+  /// False when INFO was never read or the DFU characteristic is absent.
+  bool get canUpdateFirmware => _link.canUpdateFirmware;
 
   /// The `Power` group, fetched alongside the thermal one.
   PowerConfig? get powerConfig => _powerConfig;
@@ -309,6 +347,7 @@ class TelemetryRepository extends ChangeNotifier {
       _session = null;
       // With the session, because the PIN it holds is per connection.
       _editor = null;
+      _dfuTransport = null;
       _eventsSub?.cancel();
       _eventsSub = null;
       _thermalRequested = false;
@@ -365,6 +404,10 @@ class TelemetryRepository extends ChangeNotifier {
             );
             _eventsSub ??= session.events.listen(_onEvent);
             _editor ??= ConfigEditor(session, onGroupRead: _applyGroupRead);
+            // DFU transport is available when the characteristic exists
+            _dfuTransport ??= _link.canUpdateFirmware
+                ? _DfuTransportImpl(session, _link, _editor!)
+                : null;
             unawaited(_fetchConfig(session));
           }
         }

@@ -1,10 +1,16 @@
+import 'dart:typed_data';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
+import '../../state/control_session.dart';
 import '../../state/bms_scan_controller.dart';
 import '../../state/config_editor.dart';
+import '../../state/dfu_session.dart';
 import '../../state/remote_pairing_controller.dart';
 import '../../state/telemetry_repository.dart';
 import 'bms_settings_screen.dart';
+import 'firmware_screen.dart';
 import 'power_settings_screen.dart';
 import 'settings_index_screen.dart';
 import 'system_settings_screen.dart';
@@ -51,6 +57,7 @@ void openSettings(BuildContext context, TelemetryRepository repo) {
         ),
         onOpenBms: () => _pushBms(indexContext, repo),
         onOpenSystem: () => _pushSystem(indexContext, repo),
+        onOpenFirmware: () => _pushFirmware(indexContext, repo),
       ),
     ),
   );
@@ -189,4 +196,95 @@ class _SystemScreenWrapperState extends State<_SystemScreenWrapper> {
       ),
     );
   }
+}
+
+void _pushFirmware(BuildContext context, TelemetryRepository repo) {
+  Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => _FirmwareScreenWrapper(repo: repo),
+    ),
+  );
+}
+
+class _FirmwareScreenWrapper extends StatefulWidget {
+  const _FirmwareScreenWrapper({required this.repo});
+
+  final TelemetryRepository repo;
+
+  @override
+  State<_FirmwareScreenWrapper> createState() => _FirmwareScreenWrapperState();
+}
+
+class _FirmwareScreenWrapperState extends State<_FirmwareScreenWrapper> {
+  late final DfuSession _session;
+
+  @override
+  void initState() {
+    super.initState();
+    final transport = widget.repo.dfuTransport;
+    if (transport != null) {
+      _session = DfuSession(transport);
+    } else {
+      // This should not happen in practice, but handle it gracefully.
+      _session = DfuSession(
+        _NoOpTransport(),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _session.dispose();
+    super.dispose();
+  }
+
+  /// Opens the system picker and reads the chosen file.
+  ///
+  /// `FileType.any`, not `custom` with `['bin']`: iOS filters by UTI and has
+  /// no type registered for a bare `.bin`, so a custom filter there shows a
+  /// browser in which the firmware cannot be selected at all.
+  ///
+  /// `readAsBytes()` rather than `PlatformFile.bytes`: on mobile the picker
+  /// returns a path and leaves `bytes` null unless asked, and the deprecated
+  /// `withData` flag is the old way of asking.
+  ///
+  /// **Nothing is caught here.** An earlier version wrapped the whole thing
+  /// in `catch (_) { return null; }`, which made a failed pick
+  /// indistinguishable from a cancelled one — the same silence that cost two
+  /// rounds on the audio. The screen reports what went wrong.
+  Future<Uint8List?> _pickFile() async {
+    final file = await FilePicker.pickFile(type: FileType.any);
+    return file == null ? null : await file.readAsBytes();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: widget.repo,
+      builder: (context, _) => FirmwareSettingsScreen(
+        repo: widget.repo,
+        session: _session,
+        armed: widget.repo.frame?.isArmed ?? false,
+        canUpdateFirmware: widget.repo.canUpdateFirmware,
+        pickFile: _pickFile,
+      ),
+    );
+  }
+}
+
+/// Fallback transport when the characteristic is absent.
+class _NoOpTransport implements DfuTransport {
+  @override
+  Future<ControlResult> request({required int op, List<int> payload = const []}) async {
+    return const ControlTimeout();
+  }
+
+  @override
+  Future<void> writeData(List<int> bytes) async {}
+
+  @override
+  int get maxWriteBytes => 20;
+
+  @override
+  Future<bool> authenticate(String pin) async => false;
 }

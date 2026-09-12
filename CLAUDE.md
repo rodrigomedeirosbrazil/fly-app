@@ -72,6 +72,7 @@ here — neither has a Bluetooth radio.
 | `shared_preferences` | 2.5.5 | Remembers the pack/per-cell voltage mode |
 | `flutter_svg` | 2.3.0 | Renders the tintable Aerovolt logo |
 | `audioplayers` | 6.8.1 | Mirrors the controller's buzzer. **See below.** |
+| `file_picker` | 12.3.0 | The pilot supplies the firmware `.bin` |
 | `flutter_launcher_icons` | 0.14.4 | **Dev only.** Generates the icon sets |
 
 Plugins resolve through **Swift Package Manager**, not CocoaPods — Flutter 3.47
@@ -546,6 +547,131 @@ there.
 Mute lives in the "MAIS DADOS" drawer, defaults to sound on, and is **not
 persisted** — per-connection UI state, like everything else in that drawer.
 The repository owns the flag; the screen must not keep a copy.
+
+### Firmware bulk cannot travel on `CMD`
+
+`CONTROL_QUEUED_PAYLOAD_MAX` is 32 bytes and `ControlRequestQueue` is four
+deep and drops the **newest** on overflow. A 1.8 MB image through it is around
+57,000 round trips into a queue designed to shed load. So control uses
+`CMD`/`RSP` and bulk uses the characteristic the protocol reserved for it,
+`D4CF0006-…`, **written without response**.
+
+Write-without-response is what makes the transfer a minute rather than ten —
+the phone pushes several packets per connection interval instead of waiting
+for an ATT acknowledgement on each. It guarantees nothing in exchange, so
+**every packet carries its absolute offset** and the image carries a CRC32.
+
+**The characteristic is optional, and that is load-bearing today.** No
+controller in existence has it: the firmware counterpart is specified in
+`docs/BLE-DFU-FIRMWARE.md` and not yet written. A build that made its absence
+fatal would take the app off every aircraft at once. No test covers that line
+— discovery only runs against a real radio, and every test above substitutes
+`FakeLink` wholesale — so it is guarded by a comment where it lives.
+
+### Progress is what arrived, never what was sent
+
+`DfuSession.progress` comes from `DFU_STATUS.received`, the highest
+**contiguous** offset the controller has written. Bytes handed to the OS run
+ahead of bytes that arrived on a write-without-response stream, so progress
+taken from them reads 100% on a transfer that lost a third of itself — and the
+pilot then commits a firmware the controller never fully received.
+
+When everything has been sent and the count is short, the app **restarts from
+the reported offset**. Nothing about a lossy stream tells either side which
+packet went missing, and selective repeat over a link that already
+retransmits underneath would be complexity serving nobody. Slower in the rare
+case, correct in every case.
+
+**`DFU_BEGIN` is never retried.** It erases a flash slot; a second erase on a
+controller that merely answered slowly is worse than a reported failure. Same
+reasoning as `PIN_CHANGE`, and the opposite of `AUTH` and `CFG_SET`.
+
+### The packet has two limits, and only the smaller one is safe
+
+`DFU_STATUS.chunkSize` is what the **controller** can receive in one write —
+its negotiated ATT MTU minus 3. `FlyControllerLink.maxDfuWriteBytes` is what
+**this phone** will send: `flutter_blue_plus` caps a write at
+`MIN(the OS maximum, 512)` on both platforms and **rejects anything longer
+outright**, before a byte leaves the phone. The packet is the minimum of the
+two.
+
+They are independent, which is the part that shipped wrong. The app used the
+controller's number alone, and the two agreed for as long as the MTU stayed
+low. Then one connection negotiated 517, the controller reported 514, the app
+built a 514-byte packet, and the plugin refused every one of them for being
+two bytes over its own cap. The transfer failed at 0% having sent nothing —
+and the app reported it as a lost connection, because the refusal arrives as
+a thrown exception from the write.
+
+`mtuNow - 3` is the plugin's own accounting of that cap, not a guess at it:
+on iOS `getMtu` is literally `MIN(maximumWriteValueLength, 512) + 3`. So the
+app is checked against the same number the write is.
+
+**The MTU is not stable across connections.** The same phone and the same
+controller reported 247 on one connection and 517 on the next, so anything
+derived from it has to be read per transfer rather than assumed.
+
+### `received` is half the status, and the half that cannot say why
+
+`DFU_STATUS` carries a **state** beside the byte count, and the app read only
+the count for three rounds of failed diagnosis. Every fault on the controller
+looks identical through `received` alone: a flash write that failed, a session
+someone else aborted, a restart, and a controller that is merely slow all stop
+advancing it — and a restart resets it to zero, which is indistinguishable
+from a transfer that never began.
+
+So `_checkControllerState` runs on **every** poll. `Error` means the
+controller's own `Update.write()` failed and it will accept nothing further;
+`Idle` after a successful `DFU_BEGIN` means the session is gone. Both are
+reported as themselves.
+
+**A stall is not silence.** When three windows in a row move nothing the
+outcome is `DfuFailureReason.stalled`, never `noAnswer`: every poll in that
+loop was answered, which is how the app knows it is stuck at all. It shipped
+as "o controlador não respondeu" and pointed three rounds of diagnosis at a
+link that was working.
+
+The screen shows a **diagnostic trail** on failure — each request and what it
+answered. A transfer crosses two repositories and a radio, and the one
+sentence naming the outcome never contained the part in doubt, which was
+always *which step*.
+
+### The controller never says `Ready` on its own
+
+`markVerifying()` and `markReady()` exist **only inside the firmware's
+`DFU_COMMIT` handler**. A controller holding a complete, verified image sits
+in `Receiving` until it is told to commit.
+
+So the transfer ends when `received == size`, and the app goes straight to
+ready. Polling for `DfuState.ready` first — which it did — waits for a
+transition that requires the button the wait is blocking, and the pilot sees
+"Verificando…" until they give up.
+
+The CRC verdict is not skipped by this, it moves: `commitAllowed()` compares
+the running CRC against what `DFU_BEGIN` promised, and a mismatch comes back
+as the commit's own `ErrState`. **Which is why the commit's answer is read.**
+It used to be discarded, so a refused commit was reported as a successful one
+— the worst lie available here, because the pilot is told the firmware is
+written and the aircraft is still running the old one.
+
+### Three checks on the image, and the one nobody can make
+
+`inspectImage` refuses an empty file, a file whose first byte is not `0xE9`
+(every ESP32 application image starts with it), and anything larger than one
+OTA slot — `0x1E0000`, from the firmware's `min_spiffs.csv`. The CRC32 is
+CRC-32/ISO-HDLC, the value `esp_rom_crc32_le` and every zip tool produce; the
+standard vectors are pinned in the test because a disagreement with the
+firmware refuses every update after a full minute of transfer.
+
+**None of them prove the image is for this controller.** XAG and Tmotor run
+different builds and both pass all three. The firmware cannot tell either.
+This is stated on the screen in as many words, above the send button rather
+than in a dialog after it, because the failure it describes is a controller
+that will not boot and the recovery is a USB cable.
+
+Transfer and commit are separate buttons for the same reason: the transfer is
+reversible until the moment it is not, and the irreversible half gets its own
+press.
 
 ### The Dart enum order does not match the firmware's
 
