@@ -136,9 +136,19 @@ class _FirmwareSettingsScreenState extends State<FirmwareSettingsScreen> {
           'O controlador recusou iniciar. Uma transferência anterior pode ter '
               'ficado aberta — tente enviar de novo.',
         DfuUnsupported() => 'Este firmware não aceita atualização pelo app',
+        DfuControllerError() =>
+          'O controlador falhou ao gravar na memória e encerrou a '
+              'transferência. Desligue e ligue o controlador antes de tentar '
+              'de novo.',
+        DfuControllerRestarted() =>
+          'O controlador reiniciou durante o envio — a transferência foi '
+              'perdida. Tente de novo.',
         DfuFailed(:final reason) => switch (reason) {
             DfuFailureReason.noAnswer =>
               'O controlador não respondeu. Tente de novo.',
+            DfuFailureReason.stalled =>
+              'O controlador respondeu, mas parou de aceitar dados. Veja o '
+                  'diagnóstico abaixo.',
             DfuFailureReason.linkLost => 'A conexão caiu durante o envio',
             DfuFailureReason.rejected =>
               'O controlador recusou a imagem — tamanho ou verificação',
@@ -322,6 +332,30 @@ class _FirmwareSettingsScreenState extends State<FirmwareSettingsScreen> {
                           ),
                       ],
                     ),
+                    // Shown only after a failure, and only when there is
+                    // something to read. A transfer crosses two repositories
+                    // and a radio; without this the only thing that ever
+                    // reached the pilot was one sentence naming the outcome,
+                    // and every diagnosis started by asking them to try again
+                    // and describe it better.
+                    if (widget.session.state == DfuTransferState.failed &&
+                        widget.session.trail.isNotEmpty)
+                      SettingsCard(
+                        title: 'DIAGNÓSTICO',
+                        children: [
+                          SelectableText(
+                            widget.session.trail.join('\n'),
+                            style: TextStyle(
+                              fontFamily: 'monospace',
+                              fontSize: 12,
+                              height: 1.5,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
                     SettingsCard(
                       title: 'FINALIZAR',
                       children: [

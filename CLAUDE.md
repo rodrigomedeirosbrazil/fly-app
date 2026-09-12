@@ -586,6 +586,49 @@ case, correct in every case.
 controller that merely answered slowly is worse than a reported failure. Same
 reasoning as `PIN_CHANGE`, and the opposite of `AUTH` and `CFG_SET`.
 
+### `received` is half the status, and the half that cannot say why
+
+`DFU_STATUS` carries a **state** beside the byte count, and the app read only
+the count for three rounds of failed diagnosis. Every fault on the controller
+looks identical through `received` alone: a flash write that failed, a session
+someone else aborted, a restart, and a controller that is merely slow all stop
+advancing it — and a restart resets it to zero, which is indistinguishable
+from a transfer that never began.
+
+So `_checkControllerState` runs on **every** poll. `Error` means the
+controller's own `Update.write()` failed and it will accept nothing further;
+`Idle` after a successful `DFU_BEGIN` means the session is gone. Both are
+reported as themselves.
+
+**A stall is not silence.** When three windows in a row move nothing the
+outcome is `DfuFailureReason.stalled`, never `noAnswer`: every poll in that
+loop was answered, which is how the app knows it is stuck at all. It shipped
+as "o controlador não respondeu" and pointed three rounds of diagnosis at a
+link that was working.
+
+The screen shows a **diagnostic trail** on failure — each request and what it
+answered. A transfer crosses two repositories and a radio, and the one
+sentence naming the outcome never contained the part in doubt, which was
+always *which step*.
+
+### The controller never says `Ready` on its own
+
+`markVerifying()` and `markReady()` exist **only inside the firmware's
+`DFU_COMMIT` handler**. A controller holding a complete, verified image sits
+in `Receiving` until it is told to commit.
+
+So the transfer ends when `received == size`, and the app goes straight to
+ready. Polling for `DfuState.ready` first — which it did — waits for a
+transition that requires the button the wait is blocking, and the pilot sees
+"Verificando…" until they give up.
+
+The CRC verdict is not skipped by this, it moves: `commitAllowed()` compares
+the running CRC against what `DFU_BEGIN` promised, and a mismatch comes back
+as the commit's own `ErrState`. **Which is why the commit's answer is read.**
+It used to be discarded, so a refused commit was reported as a successful one
+— the worst lie available here, because the pilot is told the firmware is
+written and the aircraft is still running the old one.
+
 ### Three checks on the image, and the one nobody can make
 
 `inspectImage` refuses an empty file, a file whose first byte is not `0xE9`

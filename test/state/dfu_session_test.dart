@@ -111,9 +111,13 @@ void main() {
         chunkSize: 244,
       );
 
-      // Setup: status check during verification
+      // The final poll, and it is still `receiving` -- the firmware's only
+      // markVerifying()/markReady() are both inside its DFU_COMMIT handler,
+      // so a controller holding a complete image reports exactly this until
+      // it is told to commit. Queueing `ready` here, as this test once did,
+      // described a transition the controller cannot make on its own.
       transport.queueDfuStatus(
-        state: dfu_protocol.DfuState.ready,
+        state: dfu_protocol.DfuState.receiving,
         received: 1024,
         chunkSize: 244,
       );
@@ -292,7 +296,14 @@ void main() {
       await session.start(image);
 
       expect(session.state, DfuTransferState.failed);
-      expect(session.outcome, isA<DfuFailed>());
+      // Stalled, NOT noAnswer. Every poll above was answered -- that is how
+      // the session knows it is stuck at all. Reporting silence here is what
+      // put three rounds of diagnosis on a link that was working.
+      expect(
+        session.outcome,
+        isA<DfuFailed>().having(
+            (f) => f.reason, 'reason', DfuFailureReason.stalled),
+      );
     });
 
     test('progress never exceeds what the controller acknowledged', () async {
@@ -728,6 +739,169 @@ void main() {
 
       expect(session.outcome, isA<DfuRejectedImage>());
       expect(transport.requestLog, isEmpty);
+    });
+  });
+
+  group('the state the controller reports', () {
+    /// Queues a DFU_BEGIN answer and the first status poll, so each test
+    /// below only has to say what the *second* poll reports.
+    FakeDfuTransport startedTransport() {
+      final transport = FakeDfuTransport();
+      transport.queueOk();
+      transport.queueDfuStatus(
+        state: dfu_protocol.DfuState.receiving,
+        received: 0,
+        chunkSize: 244,
+      );
+      return transport;
+    }
+
+    test('an error mid-transfer is reported as the controller failing, not '
+        'as silence', () async {
+      final transport = startedTransport();
+      final session = DfuSession(transport,
+          pollInterval: const Duration(milliseconds: 5));
+      addTearDown(session.dispose);
+
+      // The controller's own flash write failed. `received` still holds the
+      // last accepted offset, so nothing about the number says so -- the
+      // state byte beside it is the only signal, and it used to be read
+      // only after the whole image had been sent.
+      transport.queueDfuStatus(
+        state: dfu_protocol.DfuState.error,
+        received: 512,
+      );
+
+      await session.start(Uint8List(4096)..[0] = 0xE9);
+
+      expect(session.outcome, isA<DfuControllerError>());
+      expect(session.state, DfuTransferState.failed);
+    });
+
+    test('a controller that restarted is not a controller that stalled',
+        () async {
+      final transport = startedTransport();
+      final session = DfuSession(transport,
+          pollInterval: const Duration(milliseconds: 5));
+      addTearDown(session.dispose);
+
+      // A restart clears the session and resets `received` to zero, which as
+      // a bare number is exactly what a transfer that never moved looks like.
+      transport.queueDfuStatus(
+        state: dfu_protocol.DfuState.idle,
+        received: 0,
+      );
+
+      await session.start(Uint8List(4096)..[0] = 0xE9);
+
+      expect(session.outcome, isA<DfuControllerRestarted>());
+    });
+
+    test('a complete image is ready without the controller ever saying ready',
+        () async {
+      final transport = startedTransport();
+      final session = DfuSession(transport,
+          pollInterval: const Duration(milliseconds: 5));
+      addTearDown(session.dispose);
+
+      // Both polls report `receiving`, because that is all the firmware ever
+      // reports before a commit. A session waiting for `ready` here would
+      // poll until the pilot gave up -- and the button that produces `ready`
+      // is the one the wait was blocking.
+      transport.queueDfuStatus(
+        state: dfu_protocol.DfuState.receiving,
+        received: 1024,
+      );
+      transport.queueDfuStatus(
+        state: dfu_protocol.DfuState.receiving,
+        received: 1024,
+      );
+
+      await session.start(Uint8List(1024)..[0] = 0xE9);
+
+      expect(session.state, DfuTransferState.ready);
+      expect(session.outcome, isA<DfuReady>());
+    });
+  });
+
+  group('committing', () {
+    /// Drives a session to `ready` so commit() can be exercised.
+    Future<DfuSession> readySession(FakeDfuTransport transport) async {
+      transport.queueOk();
+      for (var i = 0; i < 3; i++) {
+        transport.queueDfuStatus(
+          state: dfu_protocol.DfuState.receiving,
+          received: i == 0 ? 0 : 1024,
+        );
+      }
+      final session = DfuSession(transport,
+          pollInterval: const Duration(milliseconds: 5));
+      await session.start(Uint8List(1024)..[0] = 0xE9);
+      expect(session.state, DfuTransferState.ready);
+      return session;
+    }
+
+    test('a refused commit is a failure, not a commit', () async {
+      final transport = FakeDfuTransport();
+      final session = await readySession(transport);
+      addTearDown(session.dispose);
+
+      // ErrState from DFU_COMMIT is commitAllowed() refusing: the image is
+      // short, or its CRC does not match what DFU_BEGIN promised.
+      transport.queueRefused(ControlStatus.errState);
+      await session.commit();
+
+      // The answer used to be discarded outright, so this reported success
+      // and sent the pilot to an aircraft still running the old firmware.
+      expect(session.outcome, isA<DfuFailed>());
+      expect(session.state, DfuTransferState.failed);
+    });
+
+    test('a commit the controller accepts is reported as committed', () async {
+      final transport = FakeDfuTransport();
+      final session = await readySession(transport);
+      addTearDown(session.dispose);
+
+      transport.queueOk();
+      await session.commit();
+
+      expect(session.outcome, isA<DfuCommitted>());
+      expect(session.state, DfuTransferState.committed);
+    });
+  });
+
+  group('the diagnostic trail', () {
+    test('names the step that failed and what it answered', () async {
+      final transport = FakeDfuTransport();
+      final session = DfuSession(transport,
+          pollInterval: const Duration(milliseconds: 5));
+      addTearDown(session.dispose);
+
+      transport.queueRefused(ControlStatus.errAuth);
+      await session.start(Uint8List(256)..[0] = 0xE9);
+
+      // The whole reason this exists: "falhou" names an outcome, and the
+      // outcome was never the part in doubt. The failing step was.
+      expect(session.trail.join('\n'), contains('DFU_BEGIN'));
+      expect(session.trail.join('\n'), contains('errAuth'));
+    });
+
+    test('a new attempt does not inherit the last one\'s trail', () async {
+      final transport = FakeDfuTransport();
+      final session = DfuSession(transport,
+          pollInterval: const Duration(milliseconds: 5));
+      addTearDown(session.dispose);
+
+      transport.queueRefused(ControlStatus.errAuth);
+      await session.start(Uint8List(256)..[0] = 0xE9);
+      final first = session.trail.length;
+
+      transport.queueRefused(ControlStatus.errBusy);
+      await session.start(Uint8List(256)..[0] = 0xE9);
+
+      expect(session.trail.length, first,
+          reason: 'a retry that showed both attempts would read as one');
+      expect(session.trail.join('\n'), isNot(contains('errAuth')));
     });
   });
 }

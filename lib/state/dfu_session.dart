@@ -59,6 +59,15 @@ enum DfuFailureReason {
   /// detector.
   noAnswer,
 
+  /// The controller answered every poll and accepted no bytes.
+  ///
+  /// **The opposite of [noAnswer], and it used to be reported as it.** A
+  /// window that moves nothing three times running means the link is fine and
+  /// the far side is refusing data — a full staging buffer, or a session that
+  /// is no longer `Receiving`. Calling that "o controlador não respondeu" sent
+  /// three rounds of diagnosis at the radio, which was working.
+  stalled,
+
   /// The link went away.
   linkLost,
 
@@ -81,6 +90,30 @@ enum DfuFailureReason {
 /// pilot looking for a switch that was already off.
 class DfuNotReady extends DfuOutcome {
   const DfuNotReady();
+}
+
+/// The controller reported `DfuState.error`.
+///
+/// Its own flash write failed — `Update.write()` returned short, or the
+/// staging buffer could not be drained. Nothing the app sends afterwards is
+/// accepted, because `acceptOffset` refuses every packet outside `Receiving`.
+///
+/// **This is carried in every `DFU_STATUS` reply and the app used to ignore
+/// it**, reading only `received`. So a controller that had already given up
+/// looked identical to a slow one, and three empty windows later the app
+/// blamed the link.
+class DfuControllerError extends DfuOutcome {
+  const DfuControllerError();
+}
+
+/// The controller went back to `Idle` in the middle of a transfer.
+///
+/// It restarted — the task watchdog is 10 s with `panic=true` — or something
+/// else sent `DFU_ABORT`. Either way the session on the far side is gone and
+/// `received` has reset to zero, which as a bare number is indistinguishable
+/// from a transfer that never moved.
+class DfuControllerRestarted extends DfuOutcome {
+  const DfuControllerRestarted();
 }
 
 /// No authenticated session. Prompt, then call [DfuSession.start] with a PIN.
@@ -169,6 +202,33 @@ class DfuSession extends ChangeNotifier {
   int get bytesAcknowledged => _bytesAcknowledged;
   DfuOutcome? get outcome => _outcome;
 
+  /// What each step actually did, newest last.
+  ///
+  /// A transfer crosses two repositories and a radio, and the only thing that
+  /// ever reached the pilot was one sentence naming the outcome. Three rounds
+  /// of "tente de novo" produced no new information because the failing step
+  /// was never in the report. These lines are, deliberately, protocol
+  /// vocabulary rather than prose: their reader is whoever is diagnosing the
+  /// transfer, and `DFU_BEGIN -> ErrAuth` says more than any translation of
+  /// it would.
+  List<String> get trail => List.unmodifiable(_trail);
+  final List<String> _trail = [];
+
+  void _note(String line) {
+    // Bounded: a long transfer polls once per window, and an unbounded list
+    // on a 1.8 MB image would be thousands of entries held for a screen that
+    // shows the tail.
+    if (_trail.length >= 40) _trail.removeAt(0);
+    _trail.add(line);
+  }
+
+  String _describe(ControlResult result) => switch (result) {
+        ControlOk() => 'Ok',
+        ControlRefused(:final status) => status.name,
+        ControlTimeout() => 'sem resposta (2 s)',
+        ControlDropped() => 'link caiu',
+      };
+
   bool get isTransferring => _state == DfuTransferState.sending ||
       _state == DfuTransferState.verifying;
 
@@ -189,11 +249,19 @@ class DfuSession extends ChangeNotifier {
       return;
     }
 
-    if (pin != null && !await _transport.authenticate(pin)) {
-      _outcome = const DfuWrongPin();
-      _state = DfuTransferState.failed;
-      notifyListeners();
-      return;
+    _trail.clear();
+    _note('imagem ${image.length} B, CRC '
+        '0x${inspection.crc32.toRadixString(16).padLeft(8, '0')}');
+
+    if (pin != null) {
+      final authenticated = await _transport.authenticate(pin);
+      _note('AUTH -> ${authenticated ? 'Ok' : 'recusado'}');
+      if (!authenticated) {
+        _outcome = const DfuWrongPin();
+        _state = DfuTransferState.failed;
+        notifyListeners();
+        return;
+      }
     }
 
     // Clear anything a previous attempt left open, and ignore the answer.
@@ -204,7 +272,7 @@ class DfuSession extends ChangeNotifier {
     // pilot has no way to reset it and no reason to know it exists. ABORT is
     // safe at any point, including when nothing is in progress, so starting
     // every attempt with one makes a retry mean what the pilot expects.
-    await _transport.request(op: opDfuAbort);
+    _note('DFU_ABORT -> ${_describe(await _transport.request(op: opDfuAbort))}');
 
     _state = DfuTransferState.sending;
     _progress = 0;
@@ -218,6 +286,7 @@ class DfuSession extends ChangeNotifier {
       op: opDfuBegin,
       payload: encodeDfuBegin(sizeBytes: image.length, crc: inspection.crc32),
     );
+    _note('DFU_BEGIN -> ${_describe(beginResult)}');
 
     final beginOutcome = _mapRefusal(beginResult);
     if (beginOutcome != null) {
@@ -227,24 +296,46 @@ class DfuSession extends ChangeNotifier {
       return;
     }
 
-    // Start streaming data.
-    final statusResult = await _transport.request(op: opDfuStatus);
-    if (statusResult is! ControlOk) {
-      _outcome = DfuLost(_controlResultToCause(statusResult));
-      _state = DfuTransferState.failed;
-      notifyListeners();
-      return;
-    }
+    // The first poll settles the packet size, and is also the first chance to
+    // see a session that did not actually open.
+    final status = await _readStatus();
+    if (status == null) return;
+    if (!_checkControllerState(status)) return;
 
-    final status = DfuStatus.decode(statusResult.payload);
-    if (status == null) {
-      _outcome = DfuFailed();
-      _state = DfuTransferState.failed;
-      notifyListeners();
-      return;
-    }
+    _note('chunkSize ${status.chunkSize} '
+        '(${payloadPerPacket(status.chunkSize)} B por pacote)');
 
     await _streamData(image, status.chunkSize);
+  }
+
+  /// Judges the state the controller reports, and stops the transfer when it
+  /// is one the app cannot continue from.
+  ///
+  /// Returns false when it has already set the outcome. `received` alone
+  /// cannot carry this: a controller that failed its own flash write and one
+  /// that is merely slow both stop advancing it, and a controller that
+  /// restarted resets it to zero, which reads as a transfer that never began.
+  bool _checkControllerState(DfuStatus status) {
+    if (status.state == DfuState.error) {
+      _note('estado do controlador: error');
+      _outcome = const DfuControllerError();
+      _state = DfuTransferState.failed;
+      notifyListeners();
+      return false;
+    }
+
+    // Idle after a successful DFU_BEGIN means the session is gone: a restart,
+    // or something else aborting it. Only meaningful once bytes have moved or
+    // BEGIN has been answered, which is the only way this is reached.
+    if (status.state == DfuState.idle) {
+      _note('estado do controlador: idle (sessão perdida)');
+      _outcome = const DfuControllerRestarted();
+      _state = DfuTransferState.failed;
+      notifyListeners();
+      return false;
+    }
+
+    return true;
   }
 
   /// Reads `DFU_STATUS`, or reports why it could not and returns null.
@@ -255,6 +346,7 @@ class DfuSession extends ChangeNotifier {
   Future<DfuStatus?> _readStatus() async {
     final result = await _transport.request(op: opDfuStatus);
     if (result is! ControlOk) {
+      _note('DFU_STATUS -> ${_describe(result)}');
       _outcome = DfuLost(_controlResultToCause(result));
       _state = DfuTransferState.failed;
       notifyListeners();
@@ -263,6 +355,7 @@ class DfuSession extends ChangeNotifier {
 
     final status = DfuStatus.decode(result.payload);
     if (status == null) {
+      _note('DFU_STATUS -> resposta ilegível (${result.payload.length} B)');
       _outcome = const DfuFailed(DfuFailureReason.malformed);
       _state = DfuTransferState.failed;
       notifyListeners();
@@ -322,6 +415,7 @@ class DfuSession extends ChangeNotifier {
 
       final status = await _readStatus();
       if (status == null) return;
+      if (!_checkControllerState(status)) return;
 
       final advanced = status.received > _bytesAcknowledged;
       _bytesAcknowledged = status.received;
@@ -336,8 +430,14 @@ class DfuSession extends ChangeNotifier {
       // A window that moved nothing. Give the controller a moment — it may
       // still be draining — and try that window again.
       _restarts++;
+      _note('janela em $windowStart B não avançou '
+          '($_restarts/$_maxRestarts, aceito ${status.received} B)');
       if (_restarts >= _maxRestarts) {
-        _outcome = const DfuFailed(DfuFailureReason.noAnswer);
+        // NOT noAnswer. Every poll in this loop was answered — that is how
+        // `status` exists to be read. The controller is refusing data, which
+        // is a different fault with a different fix, and reporting it as
+        // silence pointed three rounds of diagnosis at a working link.
+        _outcome = const DfuFailed(DfuFailureReason.stalled);
         _state = DfuTransferState.failed;
         notifyListeners();
         return;
@@ -345,44 +445,40 @@ class DfuSession extends ChangeNotifier {
       await Future.delayed(_pollInterval);
     }
 
-    // All data sent and acknowledged. Wait for verification.
+    // Every byte is acknowledged, so the transfer is over.
+    //
+    // **There is nothing to wait for here.** This used to poll for
+    // `DfuState.ready`, which the firmware never reports on its own: its only
+    // `markVerifying()`/`markReady()` are both inside the `DFU_COMMIT`
+    // handler. The controller sits in `Receiving` with the whole image staged
+    // until it is told to commit, so the wait was for a transition that
+    // required the button it was blocking.
+    //
+    // The CRC verdict is not skipped, it moves: `commitAllowed()` compares
+    // the running CRC against what `DFU_BEGIN` promised, and a mismatch comes
+    // back as the commit's own `ErrState`.
     _state = DfuTransferState.verifying;
     notifyListeners();
 
-    while (_state == DfuTransferState.verifying) {
-      await Future.delayed(_pollInterval);
+    final status = await _readStatus();
+    if (status == null) return;
+    if (!_checkControllerState(status)) return;
 
-      final statusResult = await _transport.request(op: opDfuStatus);
-      if (statusResult is! ControlOk) {
-        _outcome = DfuLost(_controlResultToCause(statusResult));
-        _state = DfuTransferState.failed;
-        notifyListeners();
-        return;
-      }
-
-      final status = DfuStatus.decode(statusResult.payload);
-      if (status == null) {
-        _outcome = DfuFailed();
-        _state = DfuTransferState.failed;
-        notifyListeners();
-        return;
-      }
-
-      if (status.state == DfuState.ready) {
-        _state = DfuTransferState.ready;
-        _outcome = const DfuReady();
-        _progress = 1.0;
-        notifyListeners();
-        return;
-      }
-
-      if (status.state == DfuState.error) {
-        _outcome = DfuFailed();
-        _state = DfuTransferState.failed;
-        notifyListeners();
-        return;
-      }
+    if (status.received != image.length) {
+      // The poll that ended the loop and this one disagree, which means the
+      // session moved under us.
+      _note('aceito ${status.received} B de ${image.length} B após o envio');
+      _outcome = const DfuFailed(DfuFailureReason.stalled);
+      _state = DfuTransferState.failed;
+      notifyListeners();
+      return;
     }
+
+    _note('${image.length} B aceitos, pronto para gravar');
+    _state = DfuTransferState.ready;
+    _outcome = const DfuReady();
+    _progress = 1.0;
+    notifyListeners();
   }
 
   /// Commit the update and reboot.
@@ -391,8 +487,31 @@ class DfuSession extends ChangeNotifier {
       return;
     }
 
+    final result = await _transport.request(op: opDfuCommit);
+    _note('DFU_COMMIT -> ${_describe(result)}');
+
+    // **The answer used to be discarded**, so a refused commit was reported
+    // as a committed one. That is the worst lie in this file: the pilot is
+    // told the firmware is written, and the aircraft they walk out to is
+    // still running the old one — or, if the controller did reboot, one whose
+    // image failed its own verification.
+    //
+    // `ErrState` here is specifically `commitAllowed()` refusing: the image
+    // is short, or its CRC does not match what DFU_BEGIN promised. That is a
+    // corrupt transfer, not an aircraft state, so it does not map to
+    // DfuNotReady the way DFU_BEGIN's ErrState does.
+    if (result is! ControlOk) {
+      _outcome = switch (result) {
+        ControlRefused(status: ControlStatus.errState) =>
+          const DfuFailed(DfuFailureReason.rejected),
+        _ => _mapRefusal(result) ?? const DfuFailed(),
+      };
+      _state = DfuTransferState.failed;
+      notifyListeners();
+      return;
+    }
+
     _state = DfuTransferState.committed;
-    await _transport.request(op: opDfuCommit);
     _outcome = const DfuCommitted();
     notifyListeners();
   }
