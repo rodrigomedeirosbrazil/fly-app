@@ -42,9 +42,44 @@ class DfuUnsupported extends DfuOutcome {
   const DfuUnsupported();
 }
 
-/// The transfer timed out or the link went away.
+/// Something went wrong, and [reason] says what.
+///
+/// This used to be a bare `DfuFailed()` covering eight different causes --
+/// including a missing PIN, which is the one that happens on every first
+/// transfer. A pilot was shown "falha" with nothing to act on, and so was I.
 class DfuFailed extends DfuOutcome {
-  const DfuFailed();
+  const DfuFailed([this.reason = DfuFailureReason.noAnswer]);
+
+  final DfuFailureReason reason;
+}
+
+enum DfuFailureReason {
+  /// The controller never answered. A timeout is the protocol's only failure
+  /// detector.
+  noAnswer,
+
+  /// The link went away.
+  linkLost,
+
+  /// The controller rejected the request's arguments — a size or CRC it will
+  /// not accept.
+  rejected,
+
+  /// Another long operation holds the flash.
+  busy,
+
+  /// The controller answered something this build could not read.
+  malformed,
+}
+
+/// No authenticated session. Prompt, then call [DfuSession.start] with a PIN.
+class DfuNeedsPin extends DfuOutcome {
+  const DfuNeedsPin();
+}
+
+/// The PIN was wrong. The firmware fails closed and has cleared the session.
+class DfuWrongPin extends DfuOutcome {
+  const DfuWrongPin();
 }
 
 /// Why a transfer stopped.
@@ -67,6 +102,14 @@ enum DfuTransferState { idle, sending, verifying, ready, committed, aborted, fai
 
 /// The transport layer — requests over CMD/RSP, bulk data without response.
 abstract class DfuTransport {
+  /// Authenticates the connection, returning true on success.
+  ///
+  /// `DFU_BEGIN`, `DFU_COMMIT` and `DFU_ABORT` are writes by the firmware's
+  /// gate — `opRequiresAuth` exempts only `DFU_STATUS`. Without this the very
+  /// first send of every connection came back `ErrAuth` and was reported as a
+  /// bare failure.
+  Future<bool> authenticate(String pin);
+
   /// A `CMD` request, answered on `RSP`. Same shape ConfigEditor uses.
   Future<ControlResult> request({required int op, List<int> payload});
 
@@ -105,10 +148,24 @@ class DfuSession extends ChangeNotifier {
       _state == DfuTransferState.verifying;
 
   /// Start a transfer with the given image.
-  Future<void> start(Uint8List image) async {
+  /// Starts a transfer. Pass [pin] when a previous attempt reported
+  /// [DfuNeedsPin].
+  ///
+  /// `DFU_BEGIN` is a write by the firmware's gate, so a connection that has
+  /// not authenticated is refused with `ErrAuth` before a single byte goes
+  /// out. The PIN covers the whole connection, so one typed to save a setting
+  /// already covers this.
+  Future<void> start(Uint8List image, {String? pin}) async {
     final inspection = inspectImage(image);
     if (inspection.problem != null) {
       _outcome = DfuRejectedImage(inspection.problem!);
+      _state = DfuTransferState.failed;
+      notifyListeners();
+      return;
+    }
+
+    if (pin != null && !await _transport.authenticate(pin)) {
+      _outcome = const DfuWrongPin();
       _state = DfuTransferState.failed;
       notifyListeners();
       return;
@@ -321,9 +378,10 @@ class DfuSession extends ChangeNotifier {
       ControlRefused(:final status) => switch (status) {
           ControlStatus.errState => const DfuRefusedArmed(),
           ControlStatus.errBadOp => const DfuUnsupported(),
-          ControlStatus.errAuth => const DfuFailed(),
-          ControlStatus.errBadArg => const DfuFailed(),
-          ControlStatus.errBusy => const DfuFailed(),
+          ControlStatus.errAuth => const DfuNeedsPin(),
+          ControlStatus.errBadArg =>
+            const DfuFailed(DfuFailureReason.rejected),
+          ControlStatus.errBusy => const DfuFailed(DfuFailureReason.busy),
           ControlStatus.unknown => const DfuFailed(),
           ControlStatus.ok => const DfuFailed(), // Should not happen
         },

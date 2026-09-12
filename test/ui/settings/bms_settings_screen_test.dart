@@ -20,6 +20,9 @@ Widget wrap(Widget child) => MaterialApp(home: child);
 
 class RecordingEditor implements ConfigEditor {
   @override
+  Future<SaveOutcome?> authenticate(String pin) async => null;
+
+  @override
   void Function(SaveOk)? get onGroupRead => null;
 
   final saves = <BmsConfig>[];
@@ -74,6 +77,9 @@ class RecordingEditor implements ConfigEditor {
 /// must not move the type dropdown, and the count line must report the
 /// controller's total rather than the length of the truncated list.
 class _MockEditor implements ConfigEditor {
+  @override
+  Future<SaveOutcome?> authenticate(String pin) async => null;
+
   @override
   void Function(SaveOk)? get onGroupRead => null;
 

@@ -21,10 +21,19 @@ import 'telemetry_source_policy.dart';
 
 /// Concrete implementation of [DfuTransport] wired to a link and session.
 class _DfuTransportImpl implements DfuTransport {
-  _DfuTransportImpl(this._session, this._link);
+  _DfuTransportImpl(this._session, this._link, this._editor);
 
   final ControlSession _session;
   final FlyControllerLink _link;
+
+  /// The connection's editor, so the PIN typed to save a setting also covers
+  /// a firmware update. The firmware authenticates per connection; two flags
+  /// here would mean two prompts.
+  final ConfigEditor _editor;
+
+  @override
+  Future<bool> authenticate(String pin) async =>
+      await _editor.authenticate(pin) == null;
 
   @override
   Future<ControlResult> request({required int op, List<int> payload = const []}) =>
@@ -394,7 +403,7 @@ class TelemetryRepository extends ChangeNotifier {
             _editor ??= ConfigEditor(session, onGroupRead: _applyGroupRead);
             // DFU transport is available when the characteristic exists
             _dfuTransport ??= _link.canUpdateFirmware
-                ? _DfuTransportImpl(session, _link)
+                ? _DfuTransportImpl(session, _link, _editor!)
                 : null;
             unawaited(_fetchConfig(session));
           }

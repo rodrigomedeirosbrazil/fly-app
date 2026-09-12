@@ -40,6 +40,7 @@ class _FirmwareSettingsScreenState extends State<FirmwareSettingsScreen> {
   @override
   void dispose() {
     widget.session.removeListener(_onSessionChanged);
+    _pinController.dispose();
     super.dispose();
   }
 
@@ -66,10 +67,88 @@ class _FirmwareSettingsScreenState extends State<FirmwareSettingsScreen> {
     });
   }
 
-  Future<void> _send() async {
+  Future<void> _send({String? pin}) async {
     if (_chosenImage == null) return;
-    await widget.session.start(_chosenImage!);
+    await widget.session.start(_chosenImage!, pin: pin);
+    if (!mounted) return;
+    // A missing session is answered by asking, not by a line of text. What
+    // asked for the PIN is what continues -- the same rule the other screens
+    // follow.
+    if (widget.session.outcome is DfuNeedsPin) _askPin((p) => _send(pin: p));
   }
+
+  /// Owned by the screen, not by the dialog: disposing it when the dialog
+  /// closes destroys it while the TextField still holds it, because
+  /// Navigator.pop only starts the teardown.
+  final TextEditingController _pinController = TextEditingController();
+
+  void _askPin(Future<void> Function(String pin) onPin) {
+    _pinController.clear();
+    showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('PIN'),
+        content: TextField(
+          controller: _pinController,
+          obscureText: true,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: 'Digite o PIN'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, _pinController.text),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    ).then((pin) async {
+      if (pin == null || !mounted) return;
+      await onPin(pin);
+    });
+  }
+
+  /// What went wrong, in words the pilot can act on.
+  ///
+  /// Every branch here was once a single "Falha na transferência". The one
+  /// that mattered was a missing PIN, which happens on the *first* transfer of
+  /// every connection -- so the only message the pilot ever saw was the one
+  /// that said nothing, for the cause that had an obvious fix.
+  String? _outcomeMessage(DfuOutcome? outcome) => switch (outcome) {
+        null => null,
+        DfuReady() => null,
+        DfuCommitted() => null,
+        DfuAborted() => null,
+        // Answered by the prompt, not by a line of text.
+        DfuNeedsPin() => null,
+        DfuWrongPin() => 'PIN incorreto',
+        DfuRejectedImage(:final problem) => switch (problem) {
+            ImageProblem.empty => 'O arquivo está vazio',
+            ImageProblem.notEsp32 => 'Não é um firmware ESP32 válido',
+            ImageProblem.tooLarge =>
+              'O arquivo é maior que o espaço disponível no controlador',
+          },
+        DfuRefusedArmed() =>
+          'Recusado: a aeronave está armada',
+        DfuUnsupported() => 'Este firmware não aceita atualização pelo app',
+        DfuFailed(:final reason) => switch (reason) {
+            DfuFailureReason.noAnswer =>
+              'O controlador não respondeu. Tente de novo.',
+            DfuFailureReason.linkLost => 'A conexão caiu durante o envio',
+            DfuFailureReason.rejected =>
+              'O controlador recusou a imagem — tamanho ou verificação',
+            DfuFailureReason.busy =>
+              'O controlador está ocupado com outra operação',
+            DfuFailureReason.malformed =>
+              'O controlador respondeu algo que este app não entendeu',
+          },
+        DfuLost(:final cause) => cause == DfuFailure.linkLost
+            ? 'A conexão foi perdida durante o envio'
+            : 'O controlador parou de responder durante o envio',
+      };
 
   Future<void> _commit() async {
     await widget.session.commit();
@@ -270,21 +349,7 @@ class _FirmwareSettingsScreenState extends State<FirmwareSettingsScreen> {
             _WarningFooter(
               messages: [
                 ?disabledReason,
-                if (widget.session.outcome is DfuRejectedImage)
-                  'Arquivo inválido',
-                if (widget.session.outcome is DfuRefusedArmed)
-                  'A aeronave está armada',
-                if (widget.session.outcome is DfuUnsupported)
-                  'Este firmware não suporta atualização',
-                if (widget.session.outcome is DfuFailed)
-                  'Falha na transferência',
-                if (widget.session.outcome is DfuLost) ...[
-                  if ((widget.session.outcome as DfuLost).cause ==
-                      DfuFailure.linkLost)
-                    'A conexão foi perdida'
-                  else
-                    'Timeout na comunicação',
-                ],
+                ?_outcomeMessage(widget.session.outcome),
               ],
             ),
           ],

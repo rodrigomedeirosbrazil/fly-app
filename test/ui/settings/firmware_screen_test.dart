@@ -25,6 +25,9 @@ class SilentTransport implements DfuTransport {
 
   @override
   Future<void> writeData(List<int> bytes) async => writes.add(bytes);
+
+  @override
+  Future<bool> authenticate(String pin) async => true;
 }
 
 Widget wrap(Widget child) => MaterialApp(home: child);

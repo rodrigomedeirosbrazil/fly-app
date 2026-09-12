@@ -11,6 +11,16 @@ class FakeDfuTransport implements DfuTransport {
   final writeDataLog = <List<int>>[];
   final _requestQueue = <ControlResult>[];
 
+  /// What authenticate() answers, and how many times it was asked.
+  bool authSucceeds = true;
+  final authPins = <String>[];
+
+  @override
+  Future<bool> authenticate(String pin) async {
+    authPins.add(pin);
+    return authSucceeds;
+  }
+
   void queueOk([List<int> payload = const []]) {
     _requestQueue.add(ControlOk(payload));
   }
@@ -479,6 +489,93 @@ void main() {
           .toList();
       expect(commitRequests.isEmpty, true,
           reason: 'Commit should not send when not ready');
+    });
+  });
+
+  group('authentication', () {
+    test('a connection with no session is told to ask for the PIN', () async {
+      // THE BUG THIS COVERS.
+      //
+      // DFU_BEGIN is a write by the firmware's gate -- opRequiresAuth exempts
+      // only DFU_STATUS -- so the FIRST transfer of every connection came
+      // back ErrAuth. It was mapped to a bare DfuFailed, and the screen said
+      // "Falha na transferência": the one message the pilot ever saw, for the
+      // one cause with an obvious fix.
+      final transport = FakeDfuTransport();
+      final session = DfuSession(transport,
+          pollInterval: const Duration(milliseconds: 5));
+      addTearDown(session.dispose);
+
+      transport.queueRefused(ControlStatus.errAuth);
+
+      final image = Uint8List(512)..[0] = 0xE9;
+      await session.start(image);
+
+      expect(session.outcome, isA<DfuNeedsPin>());
+      expect(transport.writeDataLog, isEmpty,
+          reason: 'not one byte goes out before the controller accepts');
+    });
+
+    test('a PIN authenticates before DFU_BEGIN', () async {
+      final transport = FakeDfuTransport();
+      final session = DfuSession(transport,
+          pollInterval: const Duration(milliseconds: 5));
+      addTearDown(session.dispose);
+
+      transport.queueOk();  // DFU_BEGIN, once authenticated
+
+      final image = Uint8List(512)..[0] = 0xE9;
+      await session.start(image, pin: '1234');
+
+      expect(transport.authPins, ['1234']);
+      expect(session.outcome, isNot(isA<DfuNeedsPin>()));
+    });
+
+    test('a wrong PIN says so and sends nothing', () async {
+      final transport = FakeDfuTransport()..authSucceeds = false;
+      final session = DfuSession(transport,
+          pollInterval: const Duration(milliseconds: 5));
+      addTearDown(session.dispose);
+
+      final image = Uint8List(512)..[0] = 0xE9;
+      await session.start(image, pin: '9999');
+
+      expect(session.outcome, isA<DfuWrongPin>());
+      expect(transport.requestLog, isEmpty,
+          reason: 'DFU_BEGIN erases a slot; it must not be reached');
+    });
+
+    test('each refusal names itself', () async {
+      for (final (status, matcher) in [
+        (ControlStatus.errBadArg, isA<DfuFailed>()),
+        (ControlStatus.errBusy, isA<DfuFailed>()),
+        (ControlStatus.errState, isA<DfuRefusedArmed>()),
+        (ControlStatus.errBadOp, isA<DfuUnsupported>()),
+      ]) {
+        final transport = FakeDfuTransport()..queueRefused(status);
+        final session = DfuSession(transport,
+            pollInterval: const Duration(milliseconds: 5));
+
+        await session.start(Uint8List(512)..[0] = 0xE9);
+        expect(session.outcome, matcher, reason: '$status');
+        session.dispose();
+      }
+    });
+
+    test('ErrBadArg and ErrBusy are different reasons, not one failure',
+        () async {
+      final bad = FakeDfuTransport()..queueRefused(ControlStatus.errBadArg);
+      final busy = FakeDfuTransport()..queueRefused(ControlStatus.errBusy);
+      final s1 = DfuSession(bad, pollInterval: const Duration(milliseconds: 5));
+      final s2 = DfuSession(busy, pollInterval: const Duration(milliseconds: 5));
+      addTearDown(s1.dispose);
+      addTearDown(s2.dispose);
+
+      await s1.start(Uint8List(512)..[0] = 0xE9);
+      await s2.start(Uint8List(512)..[0] = 0xE9);
+
+      expect((s1.outcome as DfuFailed).reason, DfuFailureReason.rejected);
+      expect((s2.outcome as DfuFailed).reason, DfuFailureReason.busy);
     });
   });
 }
