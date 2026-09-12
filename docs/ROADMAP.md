@@ -49,8 +49,17 @@ from here the app is the lagging side of phase 2.
 
 **Configuration writes are done** (2026-09-11). The `Power` and `Thermal`
 groups can be changed from the app, authenticated per connection with the
-controller's PIN. `Bms` and `System` wait on subsystem 4, which produces the
-MAC addresses they carry.
+controller's PIN.
+
+**BMS and System are done** (2026-09-11). The BMS type and address come from a
+controller-driven scan, and the remote throttle pairs from the app. That closes
+every value the web portal writes except the PIN itself, and leaves buzzer
+mirroring as the last of phase 2.
+
+Two things the app refuses to do, both recorded in `CLAUDE.md`: it never sends
+`BMS_DETECT`, whose blocking connect can outlast the 10 s watchdog and reboot
+the controller, and it never claims to cancel a pairing, because the protocol
+has no opcode that does.
 
 This is the first piece of the web portal with a real alternative, and
 therefore the first step toward phase 4.
@@ -175,6 +184,24 @@ left in the 1.875 MB slot is unmeasured, and phase 3's OTA is additive — so
 the number matters before it is planned.
 
 ## Known issues in fly-controller
+
+**`REMOTE_FORGET` does not drop the running peer.** `Settings::clearRemoteMac()`
+saves, but nothing tells `RemoteLink` to clear `peerMac_` or remove the ESP-NOW
+peer, so a remote already transmitting may keep working until the controller
+restarts. The app warns about this rather than working around it.
+
+**A BMS scan alongside a second connected central is unmeasured.** Advertising
+is suppressed for the 5 s a scan runs; XCTrack's existing link should survive,
+but that is the firmware's claim and not yet a measurement.
+
+**`REMOTE_FORGET` does not drop the running peer.** `Settings::clearRemoteMac()`
+saves, but nothing tells `RemoteLink` to clear `peerMac_` or remove the ESP-NOW
+peer, so a remote already transmitting may keep working until the controller
+restarts. The app warns about this rather than working around it.
+
+**A BMS scan alongside a second connected central is unmeasured.** Advertising
+is suppressed for the 5 s a scan runs; XCTrack's existing link should survive,
+but that is the firmware's claim and not yet a measurement.
 
 Neither is fixed, and both belong to the other repo.
 
