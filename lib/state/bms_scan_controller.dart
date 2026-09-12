@@ -33,6 +33,7 @@ class BmsScanController extends ChangeNotifier {
   List<BmsScanResult> _results = const [];
   int _total = 0;
   SaveOutcome? _refusal;
+  bool _lostContact = false;
 
   BmsScanStatus get status => _status;
 
@@ -51,11 +52,18 @@ class BmsScanController extends ChangeNotifier {
   /// screen reports it with the same messages every other refusal uses.
   SaveOutcome? get refusal => _refusal;
 
+  /// True when the scan ended because nothing ever answered, rather than
+  /// because the controller reported a scan that failed. They need different
+  /// things said: one is a link problem, the other is the controller unable
+  /// to start scanning at all.
+  bool get lostContact => _lostContact;
+
   Future<SaveOutcome> start({String? pin}) async {
     _refusal = null;
     _results = const [];
     _total = 0;
     _ticks = 0;
+    _lostContact = false;
     _status = BmsScanStatus.scanning;
     notifyListeners();
 
@@ -89,6 +97,7 @@ class BmsScanController extends ChangeNotifier {
       // it really lost.
       if (_ticks * pollInterval.inMilliseconds >= deadline.inMilliseconds) {
         _status = BmsScanStatus.error;
+        _lostContact = true;
         _stopTimer();
         notifyListeners();
       }

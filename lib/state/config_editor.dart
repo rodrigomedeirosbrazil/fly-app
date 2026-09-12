@@ -71,9 +71,24 @@ class SaveBusy extends SaveOutcome {
   const SaveBusy();
 }
 
+/// Why a write produced nothing. Reported separately because the two need
+/// different things from the pilot: a timeout is worth retrying where they
+/// stand, a dropped link is not.
+enum SaveFailure {
+  /// The controller never answered. A timeout is the only failure detector
+  /// the protocol has — the firmware answers neither a malformed frame nor a
+  /// request its four-deep queue dropped.
+  noAnswer,
+
+  /// The link went away mid-request.
+  linkLost,
+}
+
 /// Nothing came back, or the link went away.
 class SaveFailed extends SaveOutcome {
-  const SaveFailed();
+  const SaveFailed([this.cause = SaveFailure.noAnswer]);
+
+  final SaveFailure cause;
 }
 
 /// Owns the authenticate → write → re-read sequence for one connection.
@@ -87,9 +102,19 @@ class SaveFailed extends SaveOutcome {
 /// kept — the flight panel never prompts for anything, because telemetry and
 /// `CFG_GET` are unauthenticated.
 class ConfigEditor {
-  ConfigEditor(this._session);
+  ConfigEditor(this._session, {this.onGroupRead});
 
   final ControlSession _session;
+
+  /// Called with what the controller reported after a successful write.
+  ///
+  /// Without it the write lands and nothing above this class hears about it:
+  /// the repository keeps the values it fetched when the connection opened,
+  /// so reopening a settings screen shows the old numbers and the dials keep
+  /// drawing the old thermal band for the rest of the connection. A band
+  /// drawn from stale thresholds is the failure `CLAUDE.md` calls worse than
+  /// no band at all, because it looks like information.
+  final void Function(SaveOk)? onGroupRead;
 
   bool _authenticated = false;
   bool get authenticated => _authenticated;
@@ -201,7 +226,8 @@ class ConfigEditor {
           ControlStatus.errBusy => const SaveBusy(),
           _ => const SaveFailed(),
         },
-      ControlTimeout() || ControlDropped() => const SaveFailed(),
+      ControlTimeout() => const SaveFailed(SaveFailure.noAnswer),
+      ControlDropped() => const SaveFailed(SaveFailure.linkLost),
     };
   }
 
@@ -237,8 +263,9 @@ class ConfigEditor {
           _ => const SaveFailed(),
         };
       case ControlTimeout():
+        return const SaveFailed(SaveFailure.noAnswer);
       case ControlDropped():
-        return const SaveFailed();
+        return const SaveFailed(SaveFailure.linkLost);
     }
 
     return _reread(group);
@@ -264,8 +291,9 @@ class ConfigEditor {
           _ => const SaveFailed(),
         };
       case ControlTimeout():
+        return const SaveFailed(SaveFailure.noAnswer);
       case ControlDropped():
-        return const SaveFailed();
+        return const SaveFailed(SaveFailure.linkLost);
     }
   }
 
@@ -280,7 +308,7 @@ class ConfigEditor {
     final result = await _retrying(op: _opCfgGet, payload: [group.id]);
     if (result is! ControlOk) return const SaveOk();
 
-    return switch (group) {
+    final outcome = switch (group) {
       ConfigGroup.power => SaveOk(power: PowerConfig.decode(result.payload)),
       ConfigGroup.thermal =>
         SaveOk(thermal: ThermalConfig.decode(result.payload)),
@@ -288,6 +316,9 @@ class ConfigEditor {
       ConfigGroup.system =>
         SaveOk(system: SystemConfig.decode(result.payload)),
     };
+
+    onGroupRead?.call(outcome);
+    return outcome;
   }
 
   SaveOutcome _lostSession([SaveOutcome Function() make = SaveNeedsPin.new]) {

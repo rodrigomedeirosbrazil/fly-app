@@ -16,6 +16,9 @@ const thermal = ThermalConfig(
 Widget wrap(Widget child) => MaterialApp(home: child);
 
 class RecordingEditor implements ConfigEditor {
+  @override
+  void Function(SaveOk)? get onGroupRead => null;
+
   final saves = <ThermalConfig>[];
   SaveOutcome outcome = const SaveOk();
 

@@ -214,6 +214,20 @@ class TelemetryRepository extends ChangeNotifier {
     }
   }
 
+  /// Takes what the controller reported after a write.
+  ///
+  /// The re-read is the authority, not the values the app sent — the same
+  /// rule `_fetchConfig` follows. Without this the cache stayed at whatever
+  /// the connection opened with, so a saved threshold was invisible until the
+  /// next reconnect and the dials kept their old band.
+  void _applyGroupRead(SaveOk read) {
+    if (read.thermal != null) _thermalConfig = read.thermal;
+    if (read.power != null) _powerConfig = read.power;
+    if (read.bms != null) _bmsConfig = read.bms;
+    if (read.system != null) _systemConfig = read.system;
+    notifyListeners();
+  }
+
   void _onStatus(LinkStatus s) {
     _status = s;
     if (s == LinkStatus.disconnected || s == LinkStatus.idle) {
@@ -278,7 +292,7 @@ class TelemetryRepository extends ChangeNotifier {
               _link.sendCommand,
               incoming: _link.responses,
             );
-            _editor ??= ConfigEditor(session);
+            _editor ??= ConfigEditor(session, onGroupRead: _applyGroupRead);
             unawaited(_fetchConfig(session));
           }
         }

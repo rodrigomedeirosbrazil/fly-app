@@ -15,6 +15,9 @@ const bmsConfig = BmsConfig(
 Widget wrap(Widget child) => MaterialApp(home: child);
 
 class RecordingEditor implements ConfigEditor {
+  @override
+  void Function(SaveOk)? get onGroupRead => null;
+
   final saves = <BmsConfig>[];
   SaveOutcome outcome = const SaveOk();
 
@@ -67,6 +70,9 @@ class RecordingEditor implements ConfigEditor {
 /// must not move the type dropdown, and the count line must report the
 /// controller's total rather than the length of the truncated list.
 class _MockEditor implements ConfigEditor {
+  @override
+  void Function(SaveOk)? get onGroupRead => null;
+
   BmsScanState? next;
 
   /// What starting a scan answers. A real editor returns SaveNeedsPin until
@@ -358,6 +364,37 @@ void main() {
 
     expect(find.text('Digite o PIN'), findsNothing);
     expect(scanEditor.scanPins.single, isNull);
+  });
+
+  testWidgets('a scan the controller could not run names the likely cause',
+      (tester) async {
+    // The firmware tears down the BMS client link and calls scan->start() in
+    // the same breath. BLE disconnect is asynchronous, so the scan often
+    // loses that race -- which is why removing the configured BMS is what
+    // makes a scan work. Saying "erro" alone leaves the pilot nowhere.
+    await completeScan(tester, total: 0, results: []);
+    scanEditor.next = const BmsScanState(
+        status: BmsScanStatus.error, total: 0, results: []);
+    await tester.runAsync(() async {
+      await scanController.start(pin: '1234');
+      while (scanController.status == BmsScanStatus.scanning) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+    });
+    await tester.pumpWidget(wrap(screen()));
+
+    final line = find.byKey(const Key('scan-error'));
+    await tester.ensureVisible(line);
+    await tester.pumpAndSettle();
+    expect(tester.widget<Text>(line).data, contains('Nenhum'));
+    expect(scanController.lostContact, isFalse);
+  });
+
+  testWidgets('a scan that completes with nothing says so', (tester) async {
+    await completeScan(tester, total: 0, results: []);
+    await tester.pumpWidget(wrap(screen()));
+
+    expect(find.byKey(const Key('scan-empty')), findsOneWidget);
   });
 
   group('layout', () {

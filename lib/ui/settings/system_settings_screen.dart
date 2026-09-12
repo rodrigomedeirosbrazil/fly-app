@@ -107,8 +107,10 @@ class _SystemSettingsScreenState extends State<SystemSettingsScreen> {
         _showSnackBar('Este firmware não aceita gravação');
       case SaveBusy():
         _showSnackBar('O controlador está ocupado');
-      case SaveFailed():
-        _showSnackBar('Não foi possível gravar');
+      case SaveFailed(:final cause):
+        _showSnackBar(cause == SaveFailure.linkLost
+            ? 'A conexão caiu antes de gravar'
+            : 'O controlador não respondeu. Tente de novo.');
     }
   }
 
@@ -192,8 +194,10 @@ class _SystemSettingsScreenState extends State<SystemSettingsScreen> {
         _showSnackBar('Este firmware não aceita som');
       case SaveBusy():
         _showSnackBar('O controlador está ocupado');
-      case SaveFailed():
-        _showSnackBar('Não foi possível reproduzir som');
+      case SaveFailed(:final cause):
+        _showSnackBar(cause == SaveFailure.linkLost
+            ? 'A conexão caiu antes de gravar'
+            : 'O controlador não respondeu ao som.');
     }
   }
 
@@ -218,8 +222,11 @@ class _SystemSettingsScreenState extends State<SystemSettingsScreen> {
       case SaveBusy():
         _showSnackBar('O controlador está ocupado');
       case SaveRejectedByController():
-      case SaveFailed():
-        _showSnackBar('Não foi possível iniciar o pareamento');
+        _showSnackBar('O controlador recusou o pedido de pareamento');
+      case SaveFailed(:final cause):
+        _showSnackBar(cause == SaveFailure.linkLost
+            ? 'A conexão caiu antes de gravar'
+            : 'O controlador não respondeu.');
     }
   }
 
@@ -341,8 +348,10 @@ class _SystemSettingsScreenState extends State<SystemSettingsScreen> {
           _showSnackBar('Este firmware não suporta essa operação');
         case SaveBusy():
           _showSnackBar('O controlador está ocupado');
-        case SaveFailed():
-          _showSnackBar('Não foi possível apagar');
+        case SaveFailed(:final cause):
+          _showSnackBar(cause == SaveFailure.linkLost
+              ? 'A conexão caiu antes de gravar'
+              : 'O controlador não respondeu. Tente de novo.');
       }
     });
   }
@@ -365,8 +374,10 @@ class _SystemSettingsScreenState extends State<SystemSettingsScreen> {
         _showSnackBar('Este firmware não suporta essa operação');
       case SaveBusy():
         _showSnackBar('O controlador está ocupado');
-      case SaveFailed():
-        _showSnackBar('Não foi possível apagar');
+      case SaveFailed(:final cause):
+        _showSnackBar(cause == SaveFailure.linkLost
+            ? 'A conexão caiu antes de gravar'
+            : 'O controlador não respondeu. Tente de novo.');
       case SaveNeedsPin():
         // The firmware fails closed: a wrong PIN clears the session it had
         // already earned, so being asked again here means exactly that.

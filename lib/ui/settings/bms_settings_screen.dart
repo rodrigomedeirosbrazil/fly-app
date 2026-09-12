@@ -117,8 +117,10 @@ class _BmsSettingsScreenState extends State<BmsSettingsScreen> {
         _showSnackBar('Este firmware não aceita gravação');
       case SaveBusy():
         _showSnackBar('O controlador está ocupado');
-      case SaveFailed():
-        _showSnackBar('Não foi possível gravar');
+      case SaveFailed(:final cause):
+        _showSnackBar(cause == SaveFailure.linkLost
+            ? 'A conexão caiu antes de gravar'
+            : 'O controlador não respondeu. Tente de novo.');
     }
   }
 
@@ -309,8 +311,17 @@ class _BmsSettingsScreenState extends State<BmsSettingsScreen> {
                           const SizedBox(height: 12),
                           Text(
                             key: const Key('scan-error'),
-                            'A busca não respondeu. O controlador pode ter '
-                            'ficado ocupado — tente de novo.',
+                            widget.scanController.lostContact
+                                ? 'A busca não respondeu. O controlador pode '
+                                    'ter ficado ocupado — tente de novo.'
+                                // The controller answered, and what it
+                                // answered is that its scan failed. It tears
+                                // down the BMS link and starts scanning in
+                                // the same breath, and the scan loses that
+                                // race often enough to be worth naming.
+                                : 'O controlador não conseguiu buscar. Se há '
+                                    'um BMS conectado, escolha "Nenhum", '
+                                    'salve, e busque de novo.',
                             style: TextStyle(
                               fontSize: 13,
                               color: Theme.of(context).colorScheme.error,
@@ -430,7 +441,9 @@ class _BmsSettingsScreenState extends State<BmsSettingsScreen> {
         'O controlador recusou o valor — o app e o firmware discordam sobre a faixa válida',
       SaveUnsupported() => 'Este firmware não aceita gravação',
       SaveBusy() => 'O controlador está ocupado',
-      SaveFailed() => 'Não foi possível gravar',
+      SaveFailed(:final cause) => cause == SaveFailure.linkLost
+          ? 'A conexão caiu antes de gravar'
+          : 'O controlador não respondeu. Tente de novo.',
       _ => null,
     };
   }

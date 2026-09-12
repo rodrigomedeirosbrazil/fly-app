@@ -173,8 +173,10 @@ class _ThermalSettingsScreenState extends State<ThermalSettingsScreen> {
         _showSnackBar('Este firmware não aceita gravação');
       case SaveBusy():
         _showSnackBar('O controlador está ocupado');
-      case SaveFailed():
-        _showSnackBar('Não foi possível gravar');
+      case SaveFailed(:final cause):
+        _showSnackBar(cause == SaveFailure.linkLost
+            ? 'A conexão caiu antes de gravar'
+            : 'O controlador não respondeu. Tente de novo.');
     }
   }
 

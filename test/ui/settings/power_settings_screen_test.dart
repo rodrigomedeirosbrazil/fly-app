@@ -17,6 +17,9 @@ const power = PowerConfig(
 Widget wrap(Widget child) => MaterialApp(home: child);
 
 class RecordingEditor implements ConfigEditor {
+  @override
+  void Function(SaveOk)? get onGroupRead => null;
+
   final saves = <PowerConfig>[];
   SaveOutcome outcome = const SaveOk();
 

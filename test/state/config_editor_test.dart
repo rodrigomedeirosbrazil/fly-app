@@ -326,4 +326,46 @@ void main() {
       expect(session.sent.single.op, 0x10);
     });
   });
+
+  group('the re-read reaches whoever cached the group', () {
+    test('a successful write hands the new values up', () async {
+      // THE REGRESSION THIS COVERS.
+      //
+      // The repository fetched all four groups once per connection and
+      // nothing ever updated them, so a saved threshold was invisible the
+      // moment you left the screen and came back -- and the dials kept
+      // drawing the thermal band from the values the connection opened with,
+      // for the rest of that connection. A band from stale thresholds is the
+      // one CLAUDE.md calls worse than no band, because it looks like
+      // information.
+      final reads = <SaveOk>[];
+      final editor = ConfigEditor(session, onGroupRead: reads.add);
+
+      session.queueOk();                            // AUTH
+      session.queueOk();                            // CFG_SET
+      session.queueOk(thermalBytes(motorStartMc: 70000));  // CFG_GET
+
+      await editor.saveThermal(thermalPayload, pin: '1234');
+
+      expect(reads, hasLength(1));
+      expect(reads.single.thermal!.motorReductionStartC, closeTo(70, 1e-9));
+    });
+
+    test('a write whose re-read fails hands nothing up', () async {
+      // The write landed; only the confirmation is missing. Publishing the
+      // values the app *sent* would be assumed data, which is what the
+      // re-read exists to avoid in the first place.
+      final reads = <SaveOk>[];
+      final editor = ConfigEditor(session, onGroupRead: reads.add);
+
+      session.queueOk();   // AUTH
+      session.queueOk();   // CFG_SET
+      // Nothing for CFG_GET: it times out.
+
+      final outcome = await editor.saveThermal(thermalPayload, pin: '1234');
+
+      expect(outcome, isA<SaveOk>());
+      expect(reads, isEmpty);
+    });
+  });
 }

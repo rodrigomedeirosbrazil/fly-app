@@ -185,6 +185,20 @@ the number matters before it is planned.
 
 ## Known issues in fly-controller
 
+**A BMS scan races the BMS link it just tore down.** `startWebScan()` calls
+`setEnabled(false)` on the three backends — which reaches
+`pClient_->disconnect()` — and then `scan->start()` in the same loop
+iteration. A BLE disconnect is asynchronous, so the scan begins while the
+client link is still tearing down, and on a controller with a BMS configured
+it commonly fails or finds nothing. Removing the configured BMS first is the
+workaround, and it is what the app now tells the pilot to do. The fix belongs
+in the firmware: wait for the disconnect before starting the scan.
+
+**The scan's failure reason never reaches the app.** `getWebScanError()` holds
+a string ("Failed to start BLE scan", "BLE stack is not initialized") that
+`BMS_SCAN_STATUS` does not carry — the reply is `[status][count]` and results.
+So the app can say a scan failed but never why. Worth appending to that reply.
+
 **`REMOTE_FORGET` does not drop the running peer.** `Settings::clearRemoteMac()`
 saves, but nothing tells `RemoteLink` to clear `peerMac_` or remove the ESP-NOW
 peer, so a remote already transmitting may keep working until the controller
