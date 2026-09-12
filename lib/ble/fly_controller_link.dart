@@ -435,8 +435,17 @@ class FlyControllerLink {
         // are simply unavailable, which canSendCommands reports.
         _cmd = null;
       }
-      // DFU is optional: firmware without it simply has no DFU, and everything
-      // else must keep working. The characteristic's absence is not an error.
+      // DFU is optional, and this line is the whole of that guarantee: `find`
+      // returns null and nothing reacts. No controller in existence has this
+      // characteristic today, so making its absence fatal would take the app
+      // off every aircraft at once.
+      //
+      // **No test covers this line.** Discovery only runs against a real
+      // radio — every test above substitutes FakeLink wholesale — so making
+      // the characteristic mandatory here goes unnoticed by the suite. It was
+      // checked by hand: adding a throw leaves all tests green.
+      // `telemetry_repository_test.dart` covers the layer above, where a link
+      // reporting no DFU must still connect and stream.
       _dfu = find(controlServiceUuid, controlDfuUuid);
       return (TelemetrySource.control, controlTelemetry!);
     }
