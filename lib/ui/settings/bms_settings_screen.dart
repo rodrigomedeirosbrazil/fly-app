@@ -105,7 +105,7 @@ class _BmsSettingsScreenState extends State<BmsSettingsScreen> {
           _macController.text = formatMac(bms.bmsMac) ?? '';
         }
       case SaveNeedsPin():
-        _showPinDialog();
+        _askPin(_saveWithPin);
       case SaveWrongPin():
         _showSnackBar('PIN incorreto');
       case SaveRefusedArmed():
@@ -130,7 +130,14 @@ class _BmsSettingsScreenState extends State<BmsSettingsScreen> {
 
   final TextEditingController _pinController = TextEditingController();
 
-  void _showPinDialog() {
+  /// Asks for the PIN, then runs [onPin].
+  ///
+  /// The dialog used to end in a hardcoded `saveBms`, which was wrong the
+  /// moment a second thing on this screen needed authentication: starting a
+  /// scan is a write by the firmware's gate, so tapping "Buscar BMS" without
+  /// a session would have prompted and then saved the form instead of
+  /// scanning. What asked for the PIN is what continues.
+  void _askPin(Future<void> Function(String pin) onPin) {
     _pinController.clear();
     showDialog<String>(
       context: context,
@@ -155,18 +162,31 @@ class _BmsSettingsScreenState extends State<BmsSettingsScreen> {
       ),
     ).then((pin) async {
       if (pin == null || !mounted) return;
-
-      final bmsType = int.tryParse(_typeController.text.trim()) ?? 0;
-      final bmsMacStr = _macController.text.trim();
-      final bmsMac = parseMac(bmsMacStr) ?? kUnsetMac;
-
-      final outcome = await widget.editor.saveBms(
-        BmsConfig(bmsType: bmsType, bmsMac: bmsMac),
-        pin: pin,
-      );
-
-      await _handleSaveOutcome(outcome);
+      await onPin(pin);
     });
+  }
+
+  /// Re-saves from the fields, not from `widget.config`: the pilot may have
+  /// changed something between the first save and entering the PIN.
+  Future<void> _saveWithPin(String pin) async {
+    final outcome = await widget.editor.saveBms(
+      BmsConfig(
+        bmsType: int.tryParse(_typeController.text.trim()) ?? 0,
+        bmsMac: parseMac(_macController.text.trim()) ?? kUnsetMac,
+      ),
+      pin: pin,
+    );
+    await _handleSaveOutcome(outcome);
+  }
+
+  /// Starting a scan needs the PIN, because `opRequiresAuth` says so: the
+  /// firmware treats it as a write. So the first scan of a connection prompts
+  /// exactly like the first save does, instead of reporting the missing
+  /// session as a refusal the pilot can do nothing about.
+  Future<void> _startScan() async {
+    final outcome = await widget.scanController.start();
+    if (!mounted || outcome is! SaveNeedsPin) return;
+    _askPin((pin) => widget.scanController.start(pin: pin));
   }
 
   void _onScanResultTapped(BmsScanResult result) {
@@ -249,7 +269,7 @@ class _BmsSettingsScreenState extends State<BmsSettingsScreen> {
                                   widget.scanController.isPolling ||
                                   widget.config == null
                               ? null
-                              : () => widget.scanController.start(),
+                              : _startScan,
                           child: const Text('Buscar BMS'),
                         ),
                         const SizedBox(height: 8),
@@ -375,7 +395,8 @@ class _BmsSettingsScreenState extends State<BmsSettingsScreen> {
 
   String? _messageForOutcome(SaveOutcome outcome) {
     return switch (outcome) {
-      SaveNeedsPin() => 'PIN necessário',
+      // Answered by the prompt, not by a line of text.
+      SaveNeedsPin() => null,
       SaveWrongPin() => 'PIN incorreto',
       SaveRefusedArmed() => 'Recusado: a aeronave está armada',
       SaveRejectedByController() =>

@@ -69,6 +69,12 @@ class RecordingEditor implements ConfigEditor {
 class _MockEditor implements ConfigEditor {
   BmsScanState? next;
 
+  /// What starting a scan answers. A real editor returns SaveNeedsPin until
+  /// the connection has been authenticated.
+  SaveOutcome scanOutcome = const SaveOk();
+  int scanStarts = 0;
+  final scanPins = <String?>[];
+
   @override
   bool get authenticated => true;
   @override
@@ -84,7 +90,11 @@ class _MockEditor implements ConfigEditor {
   Future<SaveOutcome> saveSystem(SystemConfig config, {String? pin}) async =>
       const SaveOk();
   @override
-  Future<SaveOutcome> startBmsScan({String? pin}) async => const SaveOk();
+  Future<SaveOutcome> startBmsScan({String? pin}) async {
+    scanStarts++;
+    scanPins.add(pin);
+    return scanOutcome;
+  }
   @override
   Future<BmsScanState?> readBmsScan() async => next;
   @override
@@ -310,6 +320,44 @@ void main() {
     await tester.pumpWidget(wrap(screen()));
 
     expect(find.byKey(const Key('scan-truncated')), findsNothing);
+  });
+
+  testWidgets('a scan with no session asks for the PIN instead of complaining',
+      (tester) async {
+    // THE REGRESSION THIS COVERS.
+    //
+    // Starting a scan is a write by the firmware's gate (opRequiresAuth does
+    // not exempt BMS_SCAN_START), so the first one of a connection needs the
+    // PIN. The screen used to call start() with none, take SaveNeedsPin, and
+    // print it as a refusal -- the pilot tapped "Buscar BMS" and was told the
+    // PIN was missing, with nowhere to type it.
+    scanEditor.scanOutcome = const SaveNeedsPin();
+    await tester.pumpWidget(wrap(screen()));
+
+    await tester.tap(find.byKey(const Key('scan-bms')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Digite o PIN'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField).last, '1234');
+    scanEditor.scanOutcome = const SaveOk();
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+
+    expect(scanEditor.scanPins.last, '1234',
+        reason: 'the retry carries the PIN that was just typed');
+    expect(scanEditor.scanStarts, 2);
+  });
+
+  testWidgets('a scan on an authenticated connection never prompts',
+      (tester) async {
+    await tester.pumpWidget(wrap(screen()));
+
+    await tester.tap(find.byKey(const Key('scan-bms')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Digite o PIN'), findsNothing);
+    expect(scanEditor.scanPins.single, isNull);
   });
 
   group('layout', () {

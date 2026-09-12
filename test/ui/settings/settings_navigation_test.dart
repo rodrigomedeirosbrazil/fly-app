@@ -2,7 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fly_app/ble/fly_controller_link.dart';
 import 'package:fly_app/state/telemetry_repository.dart';
+import 'package:fly_app/ui/settings/bms_settings_screen.dart';
+import 'package:fly_app/ui/settings/power_settings_screen.dart';
 import 'package:fly_app/ui/settings/settings_navigation.dart';
+import 'package:fly_app/ui/settings/system_settings_screen.dart';
+import 'package:fly_app/ui/settings/thermal_settings_screen.dart';
 
 import '../../state/fake_link.dart';
 
@@ -217,5 +221,56 @@ void main() {
 
     expect(tester.widget<FilledButton>(save).onPressed, isNull,
         reason: 'the route must follow the repository, not a snapshot');
+  });
+
+  testWidgets('every screen is handed the connection\'s own editor',
+      (tester) async {
+    // THE REGRESSION THIS COVERS.
+    //
+    // Each route used to build its own ConfigEditor -- six of them across the
+    // four screens, one of which also gave the scan controller a seventh.
+    // ConfigEditor carries the authenticated flag, so the pilot was asked for
+    // the PIN again on every screen, and again for the scan on a screen
+    // already authenticated to save. The firmware authenticates per
+    // connection; so must this.
+    link.emit(LinkStatus.connected);
+    link.feedBinary(binarySample(armed: false));
+    await tester.pumpAndSettle();
+
+    for (var i = 0; i < 4; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+      if (link.commands.length > i) {
+        [link.replyThermal, link.replyPower, link.replyBms, link.replySystem][i](i);
+      }
+      await tester.runAsync(() => pumpEventQueue());
+      await tester.pumpAndSettle();
+    }
+
+    await pumpHost(tester);
+    await tester.tap(find.text('abrir'));
+    await tester.pumpAndSettle();
+
+    for (final entry in {
+      'Energia': (WidgetTester t) =>
+          t.widget<PowerSettingsScreen>(find.byType(PowerSettingsScreen)).editor,
+      'Térmica': (WidgetTester t) => t
+          .widget<ThermalSettingsScreen>(find.byType(ThermalSettingsScreen))
+          .editor,
+      'BMS': (WidgetTester t) =>
+          t.widget<BmsSettingsScreen>(find.byType(BmsSettingsScreen)).editor,
+      'Sistema': (WidgetTester t) => t
+          .widget<SystemSettingsScreen>(find.byType(SystemSettingsScreen))
+          .editor,
+    }.entries) {
+      await tester.tap(find.text(entry.key));
+      await tester.pumpAndSettle();
+
+      expect(identical(entry.value(tester), repo.editor), isTrue,
+          reason: '${entry.key} built its own editor, so it would prompt '
+              'for the PIN again');
+
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+    }
   });
 }

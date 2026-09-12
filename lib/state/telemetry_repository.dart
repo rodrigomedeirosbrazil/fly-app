@@ -10,6 +10,7 @@ import '../protocol/control_telemetry_codec.dart';
 import '../protocol/line_assembler.dart';
 import '../protocol/telemetry_frame.dart';
 import '../protocol/xctod_parser.dart';
+import 'config_editor.dart';
 import 'control_session.dart';
 import 'link_health.dart';
 import 'telemetry_source_policy.dart';
@@ -72,10 +73,18 @@ class TelemetryRepository extends ChangeNotifier {
     return '${i.appVersion} · $type';
   }
 
-  /// The live request channel, or null on the `$XCTOD` path. Exposed so the
-  /// settings screen can build a [ConfigEditor] for this connection; the
-  /// repository stays glue and owns no editing rules of its own.
+  /// The live request channel, or null on the `$XCTOD` path.
   ControlSession? get session => _session;
+
+  /// The one editor for this connection, or null on the `$XCTOD` path.
+  ///
+  /// **One per connection, not one per screen.** `ConfigEditor` carries the
+  /// authenticated flag, and the firmware clears its own `authenticated_` in
+  /// `onCentralDisconnected()` — so the connection is the unit the PIN
+  /// belongs to on both sides. Building an editor per route made every screen,
+  /// and even the scan and the save button on the *same* screen, hold a
+  /// separate flag: the pilot was asked for the PIN again on each one.
+  ConfigEditor? get editor => _editor;
 
   /// Whether the controller reports a selectable motor temperature source.
   /// False when INFO was never read.
@@ -123,6 +132,7 @@ class TelemetryRepository extends ChangeNotifier {
   bool _anyFrameRendered = false;
 
   ControlSession? _session;
+  ConfigEditor? _editor;
 
   /// This pilot's configured thermal thresholds, or null when they are not
   /// known: the sentence path, firmware that refuses `CFG_GET`, or a fetch
@@ -215,6 +225,8 @@ class TelemetryRepository extends ChangeNotifier {
       // after a reconnect must not reach a request from the previous one.
       _session?.dispose();
       _session = null;
+      // With the session, because the PIN it holds is per connection.
+      _editor = null;
       _thermalRequested = false;
       _thermalConfig = null;
       _powerConfig = null;
@@ -266,6 +278,7 @@ class TelemetryRepository extends ChangeNotifier {
               _link.sendCommand,
               incoming: _link.responses,
             );
+            _editor ??= ConfigEditor(session);
             unawaited(_fetchConfig(session));
           }
         }

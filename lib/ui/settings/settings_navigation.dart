@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../../state/bms_scan_controller.dart';
 import '../../state/config_editor.dart';
-import '../../state/control_session.dart';
 import '../../state/remote_pairing_controller.dart';
 import '../../state/telemetry_repository.dart';
 import 'bms_settings_screen.dart';
@@ -30,8 +29,8 @@ void openSettings(BuildContext context, TelemetryRepository repo) {
         onOpenPower: () => _push(
           indexContext,
           repo,
-          (session) => PowerSettingsScreen(
-            editor: ConfigEditor(session),
+          (editor) => PowerSettingsScreen(
+            editor: editor,
             config: repo.powerConfig,
             armed: repo.frame?.isArmed ?? false,
             // Null unless the battery-voltage signal state is Valid: the
@@ -43,8 +42,8 @@ void openSettings(BuildContext context, TelemetryRepository repo) {
         onOpenThermal: () => _push(
           indexContext,
           repo,
-          (session) => ThermalSettingsScreen(
-            editor: ConfigEditor(session),
+          (editor) => ThermalSettingsScreen(
+            editor: editor,
             config: repo.thermalConfig,
             armed: repo.frame?.isArmed ?? false,
             selectableMotorTempSource: repo.selectableMotorTempSource,
@@ -60,29 +59,31 @@ void openSettings(BuildContext context, TelemetryRepository repo) {
 void _push(
   BuildContext context,
   TelemetryRepository repo,
-  Widget Function(ControlSession) build,
+  Widget Function(ConfigEditor) build,
 ) {
-  final session = repo.session;
-  if (session == null) return;
+  // The connection's editor, not a fresh one: it carries the PIN, and the
+  // firmware's own authentication is per connection too.
+  final editor = repo.editor;
+  if (editor == null) return;
 
   Navigator.of(context).push(
     MaterialPageRoute<void>(
       builder: (_) => ListenableBuilder(
         listenable: repo,
-        builder: (context, _) => build(session),
+        builder: (context, _) => build(editor),
       ),
     ),
   );
 }
 
 void _pushBms(BuildContext context, TelemetryRepository repo) {
-  final session = repo.session;
-  if (session == null) return;
+  final editor = repo.editor;
+  if (editor == null) return;
 
   Navigator.of(context).push(
     MaterialPageRoute<void>(
       builder: (_) => _BmsScreenWrapper(
-        session: session,
+        editor: editor,
         repo: repo,
       ),
     ),
@@ -90,13 +91,13 @@ void _pushBms(BuildContext context, TelemetryRepository repo) {
 }
 
 void _pushSystem(BuildContext context, TelemetryRepository repo) {
-  final session = repo.session;
-  if (session == null) return;
+  final editor = repo.editor;
+  if (editor == null) return;
 
   Navigator.of(context).push(
     MaterialPageRoute<void>(
       builder: (_) => _SystemScreenWrapper(
-        session: session,
+        editor: editor,
         repo: repo,
       ),
     ),
@@ -105,11 +106,11 @@ void _pushSystem(BuildContext context, TelemetryRepository repo) {
 
 class _BmsScreenWrapper extends StatefulWidget {
   const _BmsScreenWrapper({
-    required this.session,
+    required this.editor,
     required this.repo,
   });
 
-  final ControlSession session;
+  final ConfigEditor editor;
   final TelemetryRepository repo;
 
   @override
@@ -122,7 +123,7 @@ class _BmsScreenWrapperState extends State<_BmsScreenWrapper> {
   @override
   void initState() {
     super.initState();
-    _scanController = BmsScanController(ConfigEditor(widget.session));
+    _scanController = BmsScanController(widget.editor);
   }
 
   @override
@@ -136,7 +137,7 @@ class _BmsScreenWrapperState extends State<_BmsScreenWrapper> {
     return ListenableBuilder(
       listenable: widget.repo,
       builder: (context, _) => BmsSettingsScreen(
-        editor: ConfigEditor(widget.session),
+        editor: widget.editor,
         scanController: _scanController,
         config: widget.repo.bmsConfig,
         armed: widget.repo.frame?.isArmed ?? false,
@@ -149,11 +150,11 @@ class _BmsScreenWrapperState extends State<_BmsScreenWrapper> {
 
 class _SystemScreenWrapper extends StatefulWidget {
   const _SystemScreenWrapper({
-    required this.session,
+    required this.editor,
     required this.repo,
   });
 
-  final ControlSession session;
+  final ConfigEditor editor;
   final TelemetryRepository repo;
 
   @override
@@ -166,7 +167,7 @@ class _SystemScreenWrapperState extends State<_SystemScreenWrapper> {
   @override
   void initState() {
     super.initState();
-    _pairingController = RemotePairingController(ConfigEditor(widget.session));
+    _pairingController = RemotePairingController(widget.editor);
   }
 
   @override
@@ -180,7 +181,7 @@ class _SystemScreenWrapperState extends State<_SystemScreenWrapper> {
     return ListenableBuilder(
       listenable: widget.repo,
       builder: (context, _) => SystemSettingsScreen(
-        editor: ConfigEditor(widget.session),
+        editor: widget.editor,
         pairingController: _pairingController,
         config: widget.repo.systemConfig,
         armed: widget.repo.frame?.isArmed ?? false,

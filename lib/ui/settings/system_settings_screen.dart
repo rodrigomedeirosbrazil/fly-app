@@ -95,7 +95,7 @@ class _SystemSettingsScreenState extends State<SystemSettingsScreen> {
           });
         }
       case SaveNeedsPin():
-        _showPinDialog();
+        _askPin(_saveWithPin);
       case SaveWrongPin():
         _showSnackBar('PIN incorreto');
       case SaveRefusedArmed():
@@ -120,7 +120,15 @@ class _SystemSettingsScreenState extends State<SystemSettingsScreen> {
 
   final TextEditingController _pinController = TextEditingController();
 
-  void _showPinDialog() {
+  /// Asks for the PIN, then runs [onPin].
+  ///
+  /// This screen has four things that need authentication -- saving, the
+  /// buzzer preview, pairing and forgetting -- and the dialog used to end in
+  /// a hardcoded `saveSystem`. So dragging the volume slider on a connection
+  /// with no session prompted for the PIN and then **wrote the whole
+  /// configuration**, which is not what the pilot asked for. What asked for
+  /// the PIN is what continues.
+  void _askPin(Future<void> Function(String pin) onPin) {
     _pinController.clear();
     showDialog<String>(
       context: context,
@@ -145,20 +153,26 @@ class _SystemSettingsScreenState extends State<SystemSettingsScreen> {
       ),
     ).then((pin) async {
       if (pin == null || !mounted) return;
-
-      final config = SystemConfig(
-        buzzerVolume: _buzzerVolume,
-        throttleSource: _throttleSource,
-        remoteMac: widget.config?.remoteMac ?? kUnsetMac,
-      );
-
-      final outcome = await widget.editor.saveSystem(config, pin: pin);
-      await _handleSaveOutcome(outcome);
+      await onPin(pin);
     });
   }
 
-  Future<void> _previewBuzzer(int volume) async {
-    final outcome = await widget.editor.previewBuzzer(volume);
+  /// Built from the fields, not from `widget.config`: the pilot may have
+  /// moved something between the first save and entering the PIN.
+  Future<void> _saveWithPin(String pin) async {
+    final outcome = await widget.editor.saveSystem(
+      SystemConfig(
+        buzzerVolume: _buzzerVolume,
+        throttleSource: _throttleSource,
+        remoteMac: widget.config?.remoteMac ?? kUnsetMac,
+      ),
+      pin: pin,
+    );
+    await _handleSaveOutcome(outcome);
+  }
+
+  Future<void> _previewBuzzer(int volume, {String? pin}) async {
+    final outcome = await widget.editor.previewBuzzer(volume, pin: pin);
     if (!mounted) return;
 
     switch (outcome) {
@@ -166,7 +180,8 @@ class _SystemSettingsScreenState extends State<SystemSettingsScreen> {
         // Preview succeeded, no feedback needed
         break;
       case SaveNeedsPin():
-        _showPinDialog();
+        // Replays the preview once authenticated, rather than saving.
+        _askPin((pin) => _previewBuzzer(volume, pin: pin));
       case SaveWrongPin():
         _showSnackBar('PIN incorreto');
       case SaveRefusedArmed():
@@ -182,9 +197,30 @@ class _SystemSettingsScreenState extends State<SystemSettingsScreen> {
     }
   }
 
-  void _showPairingDialog() {
-    widget.pairingController.start();
-    _showPairingProgressDialog();
+  Future<void> _showPairingDialog({String? pin}) async {
+    // Awaited, and the progress dialog opens only on success. Starting and
+    // showing a spinner regardless left the pilot watching a wait that was
+    // never going to resolve, because REMOTE_PAIR had been refused.
+    final outcome = await widget.pairingController.start(pin: pin);
+    if (!mounted) return;
+
+    switch (outcome) {
+      case SaveOk():
+        _showPairingProgressDialog();
+      case SaveNeedsPin():
+        _askPin((pin) => _showPairingDialog(pin: pin));
+      case SaveWrongPin():
+        _showSnackBar('PIN incorreto');
+      case SaveRefusedArmed():
+        _showSnackBar('Recusado: a aeronave está armada');
+      case SaveUnsupported():
+        _showSnackBar('Este firmware não pareia pelo app');
+      case SaveBusy():
+        _showSnackBar('O controlador está ocupado');
+      case SaveRejectedByController():
+      case SaveFailed():
+        _showSnackBar('Não foi possível iniciar o pareamento');
+    }
   }
 
   void _showPairingProgressDialog() {
@@ -294,7 +330,7 @@ class _SystemSettingsScreenState extends State<SystemSettingsScreen> {
           _showSnackBar('Endereço apagado');
           setState(() {});
         case SaveNeedsPin():
-          _showPinDialogForForget();
+          _askPin(_forgetWithPin);
         case SaveWrongPin():
           _showSnackBar('PIN incorreto');
         case SaveRefusedArmed():
@@ -311,56 +347,31 @@ class _SystemSettingsScreenState extends State<SystemSettingsScreen> {
     });
   }
 
-  void _showPinDialogForForget() {
-    _pinController.clear();
-    showDialog<String>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('PIN'),
-        content: TextField(
-          controller: _pinController,
-          obscureText: true,
-          autofocus: true,
-          decoration: const InputDecoration(hintText: 'Digite o PIN'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancelar'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, _pinController.text),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    ).then((pin) async {
-      if (pin == null || !mounted) return;
+  Future<void> _forgetWithPin(String pin) async {
+    final outcome = await widget.editor.forgetRemote(pin: pin);
+    if (!mounted) return;
 
-      final outcome = await widget.editor.forgetRemote(pin: pin);
-
-      if (!mounted) return;
-      switch (outcome) {
-        case SaveOk():
-          _showSnackBar('Endereço apagado');
-          setState(() {});
-        case SaveWrongPin():
-          _showSnackBar('PIN incorreto');
-        case SaveRefusedArmed():
-          _showSnackBar('Recusado: a aeronave está armada');
-        case SaveRejectedByController():
-          _showSnackBar('O controlador recusou a operação');
-        case SaveUnsupported():
-          _showSnackBar('Este firmware não suporta essa operação');
-        case SaveBusy():
-          _showSnackBar('O controlador está ocupado');
-        case SaveFailed():
-          _showSnackBar('Não foi possível apagar');
-        case SaveNeedsPin():
-          // This shouldn't happen on the second try with a PIN
-          _showSnackBar('PIN necessário');
-      }
-    });
+    switch (outcome) {
+      case SaveOk():
+        _showSnackBar('Endereço apagado');
+        setState(() {});
+      case SaveWrongPin():
+        _showSnackBar('PIN incorreto');
+      case SaveRefusedArmed():
+        _showSnackBar('Recusado: a aeronave está armada');
+      case SaveRejectedByController():
+        _showSnackBar('O controlador recusou a operação');
+      case SaveUnsupported():
+        _showSnackBar('Este firmware não suporta essa operação');
+      case SaveBusy():
+        _showSnackBar('O controlador está ocupado');
+      case SaveFailed():
+        _showSnackBar('Não foi possível apagar');
+      case SaveNeedsPin():
+        // The firmware fails closed: a wrong PIN clears the session it had
+        // already earned, so being asked again here means exactly that.
+        _askPin(_forgetWithPin);
+    }
   }
 
   @override

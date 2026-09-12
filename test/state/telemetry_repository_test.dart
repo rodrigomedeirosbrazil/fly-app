@@ -296,4 +296,26 @@ void main() {
       expect(repo.systemConfig, isNull);
     });
   });
+
+  group('the editor is per connection', () {
+    test('a disconnect drops it, because the PIN does not survive one',
+        () async {
+      final link = FakeLink();
+      final repo = TelemetryRepository(link: link, clock: DateTime.now);
+      addTearDown(repo.dispose);
+
+      link.emit(LinkStatus.connected);
+      link.feedBinary(binarySample());
+      await pumpEventQueue();
+      expect(repo.editor, isNotNull);
+
+      // The firmware clears authenticated_ in onCentralDisconnected(), so
+      // holding an editor across a reconnect would have the app believing in
+      // a session the controller has already forgotten.
+      link.emit(LinkStatus.disconnected);
+      await pumpEventQueue();
+
+      expect(repo.editor, isNull);
+    });
+  });
 }
