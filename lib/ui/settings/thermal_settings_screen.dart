@@ -4,6 +4,7 @@ import '../../protocol/config_groups.dart';
 import '../../protocol/settings_validation.dart';
 import '../../state/config_editor.dart';
 import 'number_input.dart';
+import 'settings_card.dart';
 
 class ThermalSettingsScreen extends StatefulWidget {
   const ThermalSettingsScreen({
@@ -251,100 +252,148 @@ class _ThermalSettingsScreenState extends State<ThermalSettingsScreen> {
       appBar: AppBar(
         title: const Text('Proteção Térmica'),
       ),
-      body: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            children: [
-              TextField(
-                key: const Key('motor-start'),
-                controller: _motorStartController,
-                decoration: const InputDecoration(
-                  labelText: 'Início da redução do motor (°C)',
-                  border: OutlineInputBorder(),
-                ),
-                keyboardType: kSettingsKeyboard,
-                inputFormatters: kSettingsFormatters,
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                key: const Key('motor-max'),
-                controller: _motorMaxController,
-                decoration: const InputDecoration(
-                  labelText: 'Máximo do motor (°C)',
-                  border: OutlineInputBorder(),
-                ),
-                keyboardType: kSettingsKeyboard,
-                inputFormatters: kSettingsFormatters,
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                key: const Key('esc-start'),
-                controller: _escStartController,
-                decoration: const InputDecoration(
-                  labelText: 'Início da redução do ESC (°C)',
-                  border: OutlineInputBorder(),
-                ),
-                keyboardType: kSettingsKeyboard,
-                inputFormatters: kSettingsFormatters,
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                key: const Key('esc-max'),
-                controller: _escMaxController,
-                decoration: const InputDecoration(
-                  labelText: 'Máximo do ESC (°C)',
-                  border: OutlineInputBorder(),
-                ),
-                keyboardType: kSettingsKeyboard,
-                inputFormatters: kSettingsFormatters,
-              ),
-              const SizedBox(height: 12),
-              if (widget.selectableMotorTempSource) ...[
-                const Text('Origem da temperatura do motor'),
-                const SizedBox(height: 8),
-                DropdownButton<int>(
-                  value: int.tryParse(_motorSourceController.text.trim()) ?? 0,
-                  items: const [
-                    DropdownMenuItem(value: 0, child: Text('CAN')),
-                    DropdownMenuItem(value: 1, child: Text('NTC')),
-                  ],
-                  onChanged: (value) {
-                    if (value != null) {
-                      setState(() {
-                        _motorSourceController.text = value.toString();
-                      });
-                    }
-                  },
-                ),
-                const SizedBox(height: 12),
-              ],
-              if (thermalErrorMessage != null)
-                Text(
-                  thermalErrorMessage,
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.error,
-                    fontSize: 12,
+      body: Column(
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SettingsCard(
+                    title: 'MOTOR',
+                    children: [
+                      TextField(
+                        key: const Key('motor-start'),
+                        controller: _motorStartController,
+                        decoration: const InputDecoration(
+                          labelText: 'Início da redução (°C)',
+                          border: OutlineInputBorder(),
+                        ),
+                        keyboardType: kSettingsKeyboard,
+                        inputFormatters: kSettingsFormatters,
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        key: const Key('motor-max'),
+                        controller: _motorMaxController,
+                        decoration: const InputDecoration(
+                          labelText: 'Máximo (°C)',
+                          border: OutlineInputBorder(),
+                        ),
+                        keyboardType: kSettingsKeyboard,
+                        inputFormatters: kSettingsFormatters,
+                      ),
+                    ],
                   ),
-                ),
-              if (thermalErrorMessage != null) const SizedBox(height: 12),
-              if (widget.armed)
-                Text(
-                  'Não é possível gravar enquanto a aeronave está armada',
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.error,
-                    fontSize: 12,
+                  SettingsCard(
+                    title: 'ESC',
+                    children: [
+                      TextField(
+                        key: const Key('esc-start'),
+                        controller: _escStartController,
+                        decoration: const InputDecoration(
+                          labelText: 'Início da redução (°C)',
+                          border: OutlineInputBorder(),
+                        ),
+                        keyboardType: kSettingsKeyboard,
+                        inputFormatters: kSettingsFormatters,
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        key: const Key('esc-max'),
+                        controller: _escMaxController,
+                        decoration: const InputDecoration(
+                          labelText: 'Máximo (°C)',
+                          border: OutlineInputBorder(),
+                        ),
+                        keyboardType: kSettingsKeyboard,
+                        inputFormatters: kSettingsFormatters,
+                      ),
+                    ],
                   ),
-                ),
-              if (widget.armed) const SizedBox(height: 12),
-              ElevatedButton(
-                key: const Key('save-thermal'),
-                onPressed: thermalDisabled ? null : _saveThermal,
-                child: const Text('Gravar'),
+                  if (widget.selectableMotorTempSource)
+                    SettingsCard(
+                      title: 'ORIGEM DA TEMPERATURA',
+                      children: [
+                        const Text('Origem da temperatura do motor'),
+                        const SizedBox(height: 8),
+                        DropdownButton<int>(
+                          value: int.tryParse(_motorSourceController.text.trim()) ?? 0,
+                          isExpanded: true,
+                          items: const [
+                            DropdownMenuItem(value: 0, child: Text('CAN')),
+                            DropdownMenuItem(value: 1, child: Text('NTC')),
+                          ],
+                          onChanged: (value) {
+                            if (value != null) {
+                              setState(() {
+                                _motorSourceController.text = value.toString();
+                              });
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+                ],
               ),
-            ],
+            ),
           ),
+          _SaveFooter(
+            messages: [
+              ?thermalErrorMessage,
+              if (widget.armed)
+                'Não é possível gravar enquanto a aeronave está armada',
+            ],
+            child: FilledButton(
+              key: const Key('save-thermal'),
+              onPressed: thermalDisabled ? null : _saveThermal,
+              child: const Text('Salvar'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The one action that writes to the aircraft, anchored where the thumb is,
+/// with whatever is stopping it directly above.
+///
+/// It used to be a small pill in the middle of the page with a screenful of
+/// nothing under it, carrying the same weight as the disclosure toggle two
+/// lines up.
+class _SaveFooter extends StatelessWidget {
+  const _SaveFooter({required this.messages, required this.child});
+
+  final List<String> messages;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        border: Border(
+          top: BorderSide(color: theme.colorScheme.outlineVariant),
         ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final m in messages)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                m,
+                style: TextStyle(color: theme.colorScheme.error, fontSize: 12),
+              ),
+            ),
+          child,
+        ],
       ),
     );
   }

@@ -113,7 +113,7 @@ void main() {
     await tester.enterText(find.byKey(const Key('motor-start')), '100');
     await tester.pump();
 
-    expect(tester.widget<ElevatedButton>(save()).onPressed, isNull);
+    expect(tester.widget<FilledButton>(save()).onPressed, isNull);
     expect(find.textContaining('precisa ser menor'), findsOneWidget);
   });
 
@@ -123,7 +123,7 @@ void main() {
     await tester.enterText(find.byKey(const Key('motor-max')), '200');
     await tester.pump();
 
-    expect(tester.widget<ElevatedButton>(save()).onPressed, isNull);
+    expect(tester.widget<FilledButton>(save()).onPressed, isNull);
     expect(find.textContaining('0 a 150'), findsOneWidget);
   });
 
@@ -135,7 +135,7 @@ void main() {
     await tester.enterText(find.byKey(const Key('motor-start')), 'abc');
     await tester.pump();
 
-    expect(tester.widget<ElevatedButton>(save()).onPressed, isNull);
+    expect(tester.widget<FilledButton>(save()).onPressed, isNull);
     expect(find.textContaining('números válidos'), findsOneWidget);
   });
 
@@ -144,7 +144,7 @@ void main() {
     await tester.enterText(find.byKey(const Key('esc-start')), '');
     await tester.pump();
 
-    expect(tester.widget<ElevatedButton>(save()).onPressed, isNull);
+    expect(tester.widget<FilledButton>(save()).onPressed, isNull);
   });
 
   testWidgets('a comma is a decimal separator, not a rejection',
@@ -159,7 +159,7 @@ void main() {
 
   testWidgets('armed makes save inert and says so', (tester) async {
     await tester.pumpWidget(wrap(screen(armed: true)));
-    expect(tester.widget<ElevatedButton>(save()).onPressed, isNull);
+    expect(tester.widget<FilledButton>(save()).onPressed, isNull);
     expect(find.textContaining('armada'), findsWidgets);
   });
 
@@ -174,7 +174,7 @@ void main() {
   testWidgets('no config means nothing to edit and nothing to overwrite',
       (tester) async {
     await tester.pumpWidget(wrap(screen(config: null)));
-    expect(tester.widget<ElevatedButton>(save()).onPressed, isNull);
+    expect(tester.widget<FilledButton>(save()).onPressed, isNull);
   });
 
   testWidgets('the PIN round trip carries what is on screen', (tester) async {
