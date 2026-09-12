@@ -84,11 +84,17 @@ void main() {
     test('the payload per packet leaves room for the offset', () {
       // 247-byte MTU, 244 usable, minus the 4-byte offset.
       expect(payloadPerPacket(244), 240);
-      expect(payloadPerPacket(23), 16);
+      // Usable bytes at every size. My first version of this asserted 16 for
+      // 23, which silently redefined the argument as a raw MTU for small
+      // numbers -- and the implementation grew a branch on the magnitude to
+      // satisfy it. The contract is one rule: usable bytes, minus the offset.
+      expect(payloadPerPacket(23), 19);
+      expect(payloadPerPacket(5), 1);
     });
 
     test('a chunk size that cannot carry payload is refused', () {
       expect(() => payloadPerPacket(4), throwsArgumentError);
+      expect(() => payloadPerPacket(0), throwsArgumentError);
     });
   });
 }

@@ -96,11 +96,11 @@ List<int> encodeDfuData({required int offset, required List<int> bytes}) {
 
 /// How many image bytes fit in one packet of [chunkSize] usable bytes.
 int payloadPerPacket(int chunkSize) {
-  // chunkSize may be either a raw MTU (small values like 23) or already-usable
-  // bytes (larger values like 244). For small MTU values, account for protocol
-  // overhead (3 bytes) plus the DFU offset (4 bytes). For larger values, just
-  // subtract the offset.
-  final payload = chunkSize <= 31 ? chunkSize - 7 : chunkSize - 4;
+  // [chunkSize] is USABLE bytes -- what the controller reports in DFU_STATUS,
+  // already net of ATT overhead. One rule at every size: a branch on the
+  // magnitude would make the same number mean two different things depending
+  // on how big it is.
+  final payload = chunkSize - 4;
   if (payload <= 0) {
     throw ArgumentError.value(
         chunkSize, 'chunkSize', 'leaves no room for the 4-byte offset');
