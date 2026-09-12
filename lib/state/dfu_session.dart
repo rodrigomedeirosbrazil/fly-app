@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
@@ -126,7 +127,21 @@ class DfuSession extends ChangeNotifier {
     this._transport, {
     this._pollInterval = const Duration(seconds: 1),
     this._maxRestarts = 3,
+    this._windowBytes = 8192,
+    this._packetGap = const Duration(milliseconds: 3),
   });
+
+  /// How much is sent before asking the controller what arrived.
+  ///
+  /// Small enough that a drop wastes little and the progress bar moves;
+  /// large enough that the poll's round trip is not the bottleneck. 8 KB is
+  /// roughly 45 packets at a 185-byte iOS MTU.
+  final int _windowBytes;
+
+  /// A pause between packets. Writes without response have no flow control
+  /// of their own, and the controller drops everything after the first packet
+  /// it could not take.
+  final Duration _packetGap;
 
   final DfuTransport _transport;
   final Duration _pollInterval;
@@ -212,102 +227,102 @@ class DfuSession extends ChangeNotifier {
     await _streamData(image, status.chunkSize);
   }
 
-  /// Stream the image data and wait for verification.
+  /// Reads `DFU_STATUS`, or reports why it could not and returns null.
+  ///
+  /// The one read the firmware leaves open: `opRequiresAuth` exempts it and
+  /// `opAllowedWhileArmed` allows it, because the app polls it throughout a
+  /// transfer.
+  Future<DfuStatus?> _readStatus() async {
+    final result = await _transport.request(op: opDfuStatus);
+    if (result is! ControlOk) {
+      _outcome = DfuLost(_controlResultToCause(result));
+      _state = DfuTransferState.failed;
+      notifyListeners();
+      return null;
+    }
+
+    final status = DfuStatus.decode(result.payload);
+    if (status == null) {
+      _outcome = const DfuFailed(DfuFailureReason.malformed);
+      _state = DfuTransferState.failed;
+      notifyListeners();
+      return null;
+    }
+    return status;
+  }
+
+  /// Streams the image in windows, checking after each one.
+  ///
+  /// **Not one sweep of the whole image.** The first version sent every packet
+  /// before asking the controller anything, and on the aircraft that produced
+  /// exactly what you would expect from it: minutes at 0% — because progress
+  /// comes from the poll and there was none until the end — and then 19%,
+  /// because a megabyte written as fast as the platform accepts overruns the
+  /// controller's receive buffers. The firmware keeps only the highest
+  /// **contiguous** offset, so everything after the first dropped packet is
+  /// discarded. The next pass then re-sent 81% of the image at the same rate
+  /// and lost most of it again.
+  ///
+  /// A window does three jobs at once: it bounds how much work a single drop
+  /// can waste, it paces the writes — the round trip of the poll is time the
+  /// controller spends draining — and it moves the progress bar with what
+  /// actually arrived.
   Future<void> _streamData(Uint8List image, int chunkSize) async {
     final payloadSize = payloadPerPacket(chunkSize);
 
-    // Outer loop: send all data, possibly restarting from acknowledged bytes
     while (_bytesAcknowledged < image.length) {
       if (_state != DfuTransferState.sending) return;
 
-      // Inner loop: send packets from where we left off
-      int offset = _bytesAcknowledged;
-      while (offset < image.length && _state == DfuTransferState.sending) {
-        final bytesToSend =
-            (offset + payloadSize <= image.length)
-                ? payloadSize
-                : (image.length - offset);
-        final chunk = image.sublist(offset, offset + bytesToSend);
+      final windowStart = _bytesAcknowledged;
+      final windowEnd =
+          math.min(image.length, windowStart + _windowBytes);
 
+      var offset = windowStart;
+      while (offset < windowEnd && _state == DfuTransferState.sending) {
+        final take = math.min(payloadSize, windowEnd - offset);
         try {
-          await _transport.writeData(
-            encodeDfuData(offset: offset, bytes: chunk),
-          );
+          await _transport.writeData(encodeDfuData(
+            offset: offset,
+            bytes: image.sublist(offset, offset + take),
+          ));
         } catch (_) {
-          _outcome = DfuLost(DfuFailure.linkLost);
+          _outcome = const DfuLost(DfuFailure.linkLost);
           _state = DfuTransferState.failed;
           notifyListeners();
           return;
         }
+        offset += take;
 
-        offset += bytesToSend;
+        // A gap between packets, when one is configured. Writes without
+        // response are not flow-controlled by anything below this line.
+        if (_packetGap > Duration.zero) await Future.delayed(_packetGap);
       }
 
       if (_state != DfuTransferState.sending) return;
 
-      // Poll status to see what the controller received.
-      final statusResult = await _transport.request(op: opDfuStatus);
-      if (statusResult is! ControlOk) {
-        _outcome = DfuLost(_controlResultToCause(statusResult));
-        _state = DfuTransferState.failed;
-        notifyListeners();
-        return;
-      }
+      final status = await _readStatus();
+      if (status == null) return;
 
-      final status = DfuStatus.decode(statusResult.payload);
-      if (status == null) {
-        _outcome = DfuFailed();
-        _state = DfuTransferState.failed;
-        notifyListeners();
-        return;
-      }
-
+      final advanced = status.received > _bytesAcknowledged;
       _bytesAcknowledged = status.received;
       _progress = status.received / image.length;
       notifyListeners();
 
-      // If we've sent everything but controller hasn't received it all,
-      // we might be stuck or packets are arriving slowly.
-      if (offset >= image.length && _bytesAcknowledged < image.length) {
-        // Wait a bit before polling again to detect if stuck.
-        await Future.delayed(_pollInterval);
-
-        final statusResult2 = await _transport.request(op: opDfuStatus);
-        if (statusResult2 is! ControlOk) {
-          _outcome = DfuLost(_controlResultToCause(statusResult2));
-          _state = DfuTransferState.failed;
-          notifyListeners();
-          return;
-        }
-
-        final status2 = DfuStatus.decode(statusResult2.payload);
-        if (status2 == null) {
-          _outcome = DfuFailed();
-          _state = DfuTransferState.failed;
-          notifyListeners();
-          return;
-        }
-
-        // Check if progress changed.
-        if (status2.received == _bytesAcknowledged) {
-          // No progress: we're stuck.
-          _restarts++;
-          if (_restarts >= _maxRestarts) {
-            _outcome = DfuFailed();
-            _state = DfuTransferState.failed;
-            notifyListeners();
-            return;
-          }
-          // Loop continues: restart from _bytesAcknowledged
-        } else {
-          // Progress made: reset restart counter
-          _restarts = 0;
-          _bytesAcknowledged = status2.received;
-          _progress = status2.received / image.length;
-          notifyListeners();
-          // Loop continues: send more from _bytesAcknowledged
-        }
+      if (advanced) {
+        _restarts = 0;
+        continue;
       }
+
+      // A window that moved nothing. Give the controller a moment — it may
+      // still be draining — and try that window again.
+      _restarts++;
+      if (_restarts >= _maxRestarts) {
+        _outcome = const DfuFailed(DfuFailureReason.noAnswer);
+        _state = DfuTransferState.failed;
+        notifyListeners();
+        return;
+      }
+      await Future.delayed(_pollInterval);
     }
 
     // All data sent and acknowledged. Wait for verification.

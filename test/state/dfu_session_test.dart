@@ -578,4 +578,109 @@ void main() {
       expect((s2.outcome as DfuFailed).reason, DfuFailureReason.busy);
     });
   });
+
+  group('windowing', () {
+    test('progress moves before the whole image has been sent', () async {
+      // THE REGRESSION THIS COVERS.
+      //
+      // The first version sent every packet before asking the controller
+      // anything, so the bar sat at 0% for minutes on the aircraft and then
+      // jumped. Progress must move during the transfer, not after it.
+      final transport = FakeDfuTransport();
+      final session = DfuSession(
+        transport,
+        pollInterval: const Duration(milliseconds: 5),
+        windowBytes: 256,
+        packetGap: Duration.zero,
+      );
+      addTearDown(session.dispose);
+
+      final image = Uint8List(1024)..[0] = 0xE9;
+
+      transport.queueOk();                                   // DFU_BEGIN
+      transport.queueDfuStatus(
+          state: dfu_protocol.DfuState.receiving, received: 0, chunkSize: 68);
+      for (final n in [256, 512, 768, 1024]) {
+        transport.queueDfuStatus(
+            state: dfu_protocol.DfuState.receiving,
+            received: n,
+            chunkSize: 68);
+      }
+      transport.queueDfuStatus(
+          state: dfu_protocol.DfuState.ready, received: 1024, chunkSize: 68);
+
+      final samples = <double>[];
+      session.addListener(() => samples.add(session.progress));
+
+      await session.start(image);
+
+      final partial = samples.where((p) => p > 0 && p < 1).toList();
+      expect(partial, isNotEmpty,
+          reason: 'the bar must move while the image is still going out');
+    });
+
+    test('a window is re-sent, not the whole image', () async {
+      // A drop costs one window of rework. The first version re-sent
+      // everything after the acknowledged offset, at the same rate that had
+      // just overrun the controller.
+      final transport = FakeDfuTransport();
+      final session = DfuSession(
+        transport,
+        pollInterval: const Duration(milliseconds: 5),
+        windowBytes: 256,
+        packetGap: Duration.zero,
+      );
+      addTearDown(session.dispose);
+
+      final image = Uint8List(1024)..[0] = 0xE9;
+
+      transport.queueOk();
+      transport.queueDfuStatus(
+          state: dfu_protocol.DfuState.receiving, received: 0, chunkSize: 68);
+      // The first window lands, the second is lost, then everything lands.
+      for (final n in [256, 256, 512, 768, 1024]) {
+        transport.queueDfuStatus(
+            state: dfu_protocol.DfuState.receiving,
+            received: n,
+            chunkSize: 68);
+      }
+      transport.queueDfuStatus(
+          state: dfu_protocol.DfuState.ready, received: 1024, chunkSize: 68);
+
+      await session.start(image);
+
+      final sent = transport.writeDataLog
+          .fold<int>(0, (n, p) => n + p.length - 4);
+      expect(sent, lessThan(image.length * 2),
+          reason: 'one lost window must not cost a second full image');
+      expect(session.bytesAcknowledged, 1024);
+    });
+
+    test('packets carry ascending offsets within a window', () async {
+      final transport = FakeDfuTransport();
+      final session = DfuSession(
+        transport,
+        pollInterval: const Duration(milliseconds: 5),
+        windowBytes: 256,
+        packetGap: Duration.zero,
+      );
+      addTearDown(session.dispose);
+
+      transport.queueOk();
+      transport.queueDfuStatus(
+          state: dfu_protocol.DfuState.receiving, received: 0, chunkSize: 68);
+      transport.queueDfuStatus(
+          state: dfu_protocol.DfuState.ready, received: 256, chunkSize: 68);
+
+      await session.start(Uint8List(256)..[0] = 0xE9);
+
+      final offsets = transport.writeDataLog
+          .map((p) => p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24))
+          .toList();
+      expect(offsets.first, 0);
+      for (var i = 1; i < offsets.length; i++) {
+        expect(offsets[i], greaterThan(offsets[i - 1]));
+      }
+    });
+  });
 }
