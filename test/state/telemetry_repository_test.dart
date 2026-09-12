@@ -1,12 +1,46 @@
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:fly_app/audio/tone_player.dart';
 import 'package:fly_app/ble/fly_controller_link.dart';
 import 'package:fly_app/protocol/config_groups.dart';
+import 'package:fly_app/state/buzzer_mirror.dart';
 import 'package:fly_app/state/telemetry_repository.dart';
 
 import 'fake_link.dart';
 
 const sample =
     r'$XCTOD,87,91,50.400,1.5,42,1234,100,61,can,4200,30,54,ARMED,38,3712,3745';
+
+class FakePlayer implements TonePlayer {
+  final calls = <String>[];
+
+  @override
+  Future<void> playPattern({
+    required int frequency,
+    required int onMs,
+    required int offMs,
+    required int reps,
+  }) async =>
+      calls.add('play $frequency/$onMs/$offMs x$reps');
+
+  @override
+  Future<void> startLoop({
+    required int frequency,
+    required int onMs,
+    required int offMs,
+  }) async =>
+      calls.add('loop $frequency/$onMs/$offMs');
+
+  @override
+  Future<void> stopLoop() async => calls.add('stop');
+
+  @override
+  Future<void> silence() async => calls.add('silence');
+
+  @override
+  Future<void> dispose() async {}
+}
 
 void main() {
   late DateTime now;
@@ -16,7 +50,10 @@ void main() {
   setUp(() {
     now = DateTime.utc(2026, 9, 10, 12);
     link = FakeLink();
-    repo = TelemetryRepository(link: link, clock: () => now);
+    // Inject a fake player so the test doesn't try to initialize audio
+    final fakePlayer = FakePlayer();
+    final mirror = BuzzerMirror(fakePlayer);
+    repo = TelemetryRepository(link: link, clock: () => now, mirror: mirror);
   });
 
   tearDown(() => repo.dispose());
@@ -301,7 +338,13 @@ void main() {
     test('a disconnect drops it, because the PIN does not survive one',
         () async {
       final link = FakeLink();
-      final repo = TelemetryRepository(link: link, clock: DateTime.now);
+      final fakePlayer = FakePlayer();
+      final mirror = BuzzerMirror(fakePlayer);
+      final repo = TelemetryRepository(
+        link: link,
+        clock: DateTime.now,
+        mirror: mirror,
+      );
       addTearDown(repo.dispose);
 
       link.emit(LinkStatus.connected);
@@ -316,6 +359,61 @@ void main() {
       await pumpEventQueue();
 
       expect(repo.editor, isNull);
+    });
+  });
+
+  group('buzzer mirror', () {
+    test('an EVT_BEEP reaches the mirror', () async {
+      final player = FakePlayer();
+      final mirror = BuzzerMirror(player);
+      link = FakeLink();
+      repo = TelemetryRepository(
+        link: link,
+        clock: () => now,
+        mirror: mirror,
+      );
+
+      link.emit(LinkStatus.connected);
+      link.feedBinary(binarySample());
+      await pumpEventQueue();
+
+      // Build a 13-byte beep payload
+      final d = ByteData(13);
+      d.setUint32(0, 7, Endian.little); // seq
+      d.setUint16(4, 2000, Endian.little); // frequency
+      d.setUint16(6, 120, Endian.little); // onMs
+      d.setUint16(8, 80, Endian.little); // offMs
+      d.setUint8(10, 3); // reps
+      d.setUint8(11, 0); // layer: event
+      d.setUint8(12, 1); // active
+
+      // Push an RSP with op 0x80 (EVT_BEEP), seq 0 (unsolicited), and the payload
+      link.pushResponse([0x80, 0, 0, 13, ...d.buffer.asUint8List()]);
+      await pumpEventQueue();
+
+      expect(player.calls, isNotEmpty);
+      expect(player.calls.first, contains('2000'));
+    });
+
+    test('a reply with a real sequence is not a beep', () async {
+      final player = FakePlayer();
+      final mirror = BuzzerMirror(player);
+      link = FakeLink();
+      repo = TelemetryRepository(
+        link: link,
+        clock: () => now,
+        mirror: mirror,
+      );
+
+      link.emit(LinkStatus.connected);
+      link.feedBinary(binarySample());
+      await pumpEventQueue();
+
+      // Push an RSP with op 0x10 (not EVT_BEEP), seq 3 (a real sequence, not 0)
+      link.pushResponse([0x10, 3, 0, 0]);
+      await pumpEventQueue();
+
+      expect(player.calls, isEmpty);
     });
   });
 }

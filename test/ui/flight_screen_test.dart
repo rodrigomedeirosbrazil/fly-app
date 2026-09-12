@@ -328,6 +328,7 @@ void main() {
       await tester.tap(find.text('MAIS DADOS'));
       await tester.pumpAndSettle();
 
+      await tester.ensureVisible(find.text('CONFIGURAÇÕES'));
       await tester.tap(find.text('CONFIGURAÇÕES'));
       await tester.pumpAndSettle();
       expect(opened, isTrue);
@@ -570,5 +571,59 @@ void main() {
         expect(tester.takeException(), isNull);
       });
     }
+  });
+
+  group('mute control', () {
+    testWidgets('the drawer carries a mute control', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(),
+        stale: false,
+        muted: false,
+      )));
+
+      await tester.tap(find.byTooltip('Mais dados'));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('mute-buzzer')), findsOneWidget);
+      expect(find.text('SOM DO CONTROLADOR'), findsOneWidget);
+      expect(find.text('LIGADO'), findsOneWidget);
+    });
+
+    testWidgets('the mute control toggles the state', (tester) async {
+      bool muted = false;
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(),
+        stale: false,
+        muted: muted,
+        onSetMuted: (value) async {
+          muted = value;
+        },
+      )));
+
+      await tester.tap(find.byTooltip('Mais dados'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('LIGADO'), findsOneWidget);
+
+      // Tap the switch to mute
+      await tester.tap(find.byType(Switch));
+      await tester.pumpAndSettle();
+
+      expect(muted, isTrue);
+    });
+
+    testWidgets('the label changes when muted', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(),
+        stale: false,
+        muted: true,
+      )));
+
+      await tester.tap(find.byTooltip('Mais dados'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('DESLIGADO'), findsOneWidget);
+      expect(find.text('LIGADO'), findsNothing);
+    });
   });
 }

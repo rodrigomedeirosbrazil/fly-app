@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:fly_app/audio/tone_player.dart';
 import 'package:fly_app/ble/fly_controller_link.dart';
+import 'package:fly_app/state/buzzer_mirror.dart';
 import 'package:fly_app/state/telemetry_repository.dart';
 import 'package:fly_app/ui/settings/bms_settings_screen.dart';
 import 'package:fly_app/ui/settings/power_settings_screen.dart';
@@ -10,13 +12,40 @@ import 'package:fly_app/ui/settings/thermal_settings_screen.dart';
 
 import '../../state/fake_link.dart';
 
+class FakePlayer implements TonePlayer {
+  @override
+  Future<void> playPattern({
+    required int frequency,
+    required int onMs,
+    required int offMs,
+    required int reps,
+  }) async {}
+
+  @override
+  Future<void> startLoop({
+    required int frequency,
+    required int onMs,
+    required int offMs,
+  }) async {}
+
+  @override
+  Future<void> stopLoop() async {}
+
+  @override
+  Future<void> silence() async {}
+
+  @override
+  Future<void> dispose() async {}
+}
+
 void main() {
   late FakeLink link;
   late TelemetryRepository repo;
 
   setUp(() {
     link = FakeLink();
-    repo = TelemetryRepository(link: link, clock: DateTime.now);
+    final mirror = BuzzerMirror(FakePlayer());
+    repo = TelemetryRepository(link: link, clock: DateTime.now, mirror: mirror);
   });
 
   tearDown(() => repo.dispose());

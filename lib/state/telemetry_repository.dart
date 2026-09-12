@@ -2,14 +2,17 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../audio/tone_player.dart';
 import '../ble/fly_controller_link.dart';
+import '../protocol/beep_event.dart';
 import '../protocol/config_groups.dart';
-import '../protocol/control_info.dart';
 import '../protocol/control_frame.dart';
+import '../protocol/control_info.dart';
 import '../protocol/control_telemetry_codec.dart';
 import '../protocol/line_assembler.dart';
 import '../protocol/telemetry_frame.dart';
 import '../protocol/xctod_parser.dart';
+import 'buzzer_mirror.dart';
 import 'config_editor.dart';
 import 'control_session.dart';
 import 'link_health.dart';
@@ -24,9 +27,11 @@ class TelemetryRepository extends ChangeNotifier {
     FlyControllerLink? link,
     LinkHealth? health,
     DateTime Function()? clock,
+    BuzzerMirror? mirror,
   })  : _link = link ?? FlyControllerLink(),
         _health = health ?? LinkHealth(),
-        _now = clock ?? DateTime.now {
+        _now = clock ?? DateTime.now,
+        _mirror = mirror ?? BuzzerMirror(AudioPlayersTonePlayer()) {
     _statusSub = _link.status.listen(_onStatus);
     _payloadSub = _link.payloads.listen(_onPayload);
     // Staleness has to be re-evaluated even when nothing arrives — that is
@@ -39,11 +44,13 @@ class TelemetryRepository extends ChangeNotifier {
   final FlyControllerLink _link;
   final LinkHealth _health;
   final DateTime Function() _now;
+  final BuzzerMirror _mirror;
   final LineAssembler _assembler = LineAssembler();
 
   late final StreamSubscription<LinkStatus> _statusSub;
   late final StreamSubscription<TelemetryPayload> _payloadSub;
   late final Timer _ticker;
+  StreamSubscription<ControlResponse>? _eventsSub;
 
   LinkStatus _status = LinkStatus.idle;
   LinkStatus get status => _status;
@@ -85,6 +92,15 @@ class TelemetryRepository extends ChangeNotifier {
   /// and even the scan and the save button on the *same* screen, hold a
   /// separate flag: the pilot was asked for the PIN again on each one.
   ConfigEditor? get editor => _editor;
+
+  /// Whether the buzzer is muted.
+  bool get muted => _mirror.muted;
+
+  /// Mute or unmute the buzzer.
+  Future<void> setMuted(bool value) async {
+    await _mirror.setMuted(value);
+    notifyListeners();
+  }
 
   /// Whether the controller reports a selectable motor temperature source.
   /// False when INFO was never read.
@@ -228,6 +244,16 @@ class TelemetryRepository extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Unsolicited `RSP` frames. Only `EVT_BEEP` means anything to this app so
+  /// far; anything else is ignored rather than logged, because newer firmware
+  /// is allowed to send events this build has never heard of.
+  void _onEvent(ControlResponse response) {
+    if (response.op != kOpEvtBeep) return;
+    final beep = BeepEvent.decode(response.payload);
+    if (beep == null) return;
+    unawaited(_mirror.handle(beep));
+  }
+
   void _onStatus(LinkStatus s) {
     _status = s;
     if (s == LinkStatus.disconnected || s == LinkStatus.idle) {
@@ -241,6 +267,8 @@ class TelemetryRepository extends ChangeNotifier {
       _session = null;
       // With the session, because the PIN it holds is per connection.
       _editor = null;
+      _eventsSub?.cancel();
+      _eventsSub = null;
       _thermalRequested = false;
       _thermalConfig = null;
       _powerConfig = null;
@@ -292,6 +320,7 @@ class TelemetryRepository extends ChangeNotifier {
               _link.sendCommand,
               incoming: _link.responses,
             );
+            _eventsSub ??= session.events.listen(_onEvent);
             _editor ??= ConfigEditor(session, onGroupRead: _applyGroupRead);
             unawaited(_fetchConfig(session));
           }
@@ -306,7 +335,9 @@ class TelemetryRepository extends ChangeNotifier {
     _ticker.cancel();
     _statusSub.cancel();
     _payloadSub.cancel();
+    _eventsSub?.cancel();
     _session?.dispose();
+    _mirror.dispose();
     _link.dispose();
     super.dispose();
   }
