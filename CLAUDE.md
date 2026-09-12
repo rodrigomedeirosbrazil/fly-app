@@ -988,6 +988,19 @@ available only when the binary service is present:
 - **The red reduction band** on the thermal dials — **done**, from `CFG_GET`
 - **Buzzer mirroring** — **done**, subsystem 5
 
-Nothing on that list is absent any more. What phase 2 still does not carry is
-`SET_TIME`, `PIN_CHANGE` and the two Tmotor direction opcodes, none of which
-is telemetry.
+Nothing on that list is absent any more, and **firmware update over BLE is
+done and verified on the aircraft** (2026-09-12).
+
+What is still not sent is `SESSION_RESET` (`0x20`), `SET_TIME` (`0x27`),
+`PIN_CHANGE` (`0x28`) and the two Tmotor direction opcodes (`0x29`/`0x2A`).
+None of them is telemetry. `PIN_CHANGE` alone deserves care: it is the one
+write that is **not idempotent**, so it cannot use the retry every other write
+here depends on.
+
+One duplication is now removable and has not been removed. The firmware
+appends `stateFreqHz` to the telemetry struct at offset 56 (58 bytes total),
+which is the number `gestureFrequencyFor` recomputes from `armCharge` and
+`powerScale` using a copy of the firmware's own line. It is the sixth
+hand-copied contract here and **the only one that is arithmetic rather than
+layout** — so it is the one that drifts without a byte moving. Reading the
+field deletes it.

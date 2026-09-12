@@ -88,7 +88,7 @@ buzzer mirroring.
 **Blocked on flash.** The likely payment is porting Bluedroid → **NimBLE**
 (`Xctod` plus the three BMS backends), worth roughly 100–200 KB and some RAM.
 
-### Phase 3 — firmware update over BLE · **next**
+### Phase 3 — firmware update over BLE · **done**
 
 A DFU characteristic writing into `esp_ota_write()`, using the dual-slot scheme
 that already exists. Additive in flash terms.
@@ -97,14 +97,31 @@ Moved ahead of everything else by the pilot (2026-09-11): it is the capability
 they want most, and unlike log download it removes a reason to open the portal
 at all.
 
-**The app side is done** (2026-09-12) and **cannot be verified**. No controller
-has the `D4CF0006-…` characteristic, because the firmware counterpart does not
-exist. It is specified in `docs/BLE-DFU-FIRMWARE.md`, precisely enough to build
-from, and that document is the blocker for every hardware check in this phase.
+**Done and verified on the aircraft** (2026-09-12): a 1.72 MB image
+transferred, committed, and the controller rebooted into it. The firmware
+counterpart was built from `docs/BLE-DFU-FIRMWARE.md` and lives in
+fly-controller PR #78.
 
-The app transfers, restarts from what the controller acknowledged, verifies by
-CRC32 and commits behind a second button. Throughput is a guess: the 60–120 s
-figure below has never been measured.
+It took five rounds on hardware, and every one of them was spent on the same
+kind of fault rather than on the transfer itself: **the app reported the wrong
+cause**. A stuck session read as "armed". A controller refusing data read as
+"o controlador não respondeu". A write the phone's own plugin rejected for
+being two bytes too long read as a lost connection. Each cost a round, because
+the message named an outcome and the outcome was never the part in doubt.
+
+What ended it was the diagnostic trail on the failure screen — each request
+and what it answered. The next report contained `chunkSize 514` and the cause
+was visible without a guess. **That is the lesson worth keeping from this
+phase**, and it generalises past DFU: on a path that crosses two repositories
+and a radio, a single sentence naming the outcome is not a diagnosis.
+
+Three real defects were found by reading the firmware source rather than by
+retrying: a staging race in the controller that silently dropped bytes it had
+already acknowledged, a `Ready` state the firmware only ever reaches inside
+its own commit handler, and a commit whose answer the app discarded — which
+reported a refused commit as a successful one.
+
+Throughput is now measured rather than guessed, and the screen shows it.
 
 The alternative considered and set aside: handing off to the existing WiFi AP,
 which would be ~10 s instead of ~60–120 s and cost almost no firmware, but
