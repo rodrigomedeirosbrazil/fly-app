@@ -283,8 +283,10 @@ void main() {
     await tester.tap(find.text('abrir'));
     await tester.pumpAndSettle();
 
-    // Firmware card is 5th, so scroll to find it
-    await tester.ensureVisible(find.text('Atualizar'));
+    // The firmware card is the fifth and does not fit the 600px test
+    // surface. scrollUntilVisible, not ensureVisible: the latter needs the
+    // widget already in the tree, and a ListView has not built it yet.
+    await tester.scrollUntilVisible(find.text('Atualizar'), 100);
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Atualizar'));

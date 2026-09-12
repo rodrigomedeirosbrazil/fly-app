@@ -127,6 +127,11 @@ class TelemetryRepository extends ChangeNotifier {
       ControllerType.tmotor => 'Tmotor',
       ControllerType.unknown => '?',
     };
+    // An empty `appVersion` would render as " · Tmotor" — a line that opens
+    // with a separator and looks like a rendering fault rather than a missing
+    // reading. The field is `char[24]` NUL-*padded*, so a firmware that never
+    // filled it decodes to the empty string rather than to null.
+    if (i.appVersion.isEmpty) return type;
     return '${i.appVersion} · $type';
   }
 

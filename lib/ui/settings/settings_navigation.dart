@@ -31,33 +31,37 @@ import 'thermal_settings_screen.dart';
 void openSettings(BuildContext context, TelemetryRepository repo) {
   Navigator.of(context).push(
     MaterialPageRoute<void>(
-      builder: (indexContext) => SettingsIndexScreen(
-        onOpenPower: () => _push(
-          indexContext,
-          repo,
-          (editor) => PowerSettingsScreen(
-            editor: editor,
-            config: repo.powerConfig,
-            armed: repo.frame?.isArmed ?? false,
-            // Null unless the battery-voltage signal state is Valid: the
-            // codec already applies that rule, so calibration inherits it
-            // rather than inventing a second one.
-            sensorVolts: repo.frame?.voltage,
+      builder: (indexContext) => ListenableBuilder(
+        listenable: repo,
+        builder: (indexContext, _) => SettingsIndexScreen(
+          firmwareVersion: repo.firmwareVersion,
+          onOpenPower: () => _push(
+            indexContext,
+            repo,
+            (editor) => PowerSettingsScreen(
+              editor: editor,
+              config: repo.powerConfig,
+              armed: repo.frame?.isArmed ?? false,
+              // Null unless the battery-voltage signal state is Valid: the
+              // codec already applies that rule, so calibration inherits it
+              // rather than inventing a second one.
+              sensorVolts: repo.frame?.voltage,
+            ),
           ),
-        ),
-        onOpenThermal: () => _push(
-          indexContext,
-          repo,
-          (editor) => ThermalSettingsScreen(
-            editor: editor,
-            config: repo.thermalConfig,
-            armed: repo.frame?.isArmed ?? false,
-            selectableMotorTempSource: repo.selectableMotorTempSource,
+          onOpenThermal: () => _push(
+            indexContext,
+            repo,
+            (editor) => ThermalSettingsScreen(
+              editor: editor,
+              config: repo.thermalConfig,
+              armed: repo.frame?.isArmed ?? false,
+              selectableMotorTempSource: repo.selectableMotorTempSource,
+            ),
           ),
+          onOpenBms: () => _pushBms(indexContext, repo),
+          onOpenSystem: () => _pushSystem(indexContext, repo),
+          onOpenFirmware: () => _pushFirmware(indexContext, repo),
         ),
-        onOpenBms: () => _pushBms(indexContext, repo),
-        onOpenSystem: () => _pushSystem(indexContext, repo),
-        onOpenFirmware: () => _pushFirmware(indexContext, repo),
       ),
     ),
   );
@@ -89,10 +93,7 @@ void _pushBms(BuildContext context, TelemetryRepository repo) {
 
   Navigator.of(context).push(
     MaterialPageRoute<void>(
-      builder: (_) => _BmsScreenWrapper(
-        editor: editor,
-        repo: repo,
-      ),
+      builder: (_) => _BmsScreenWrapper(editor: editor, repo: repo),
     ),
   );
 }
@@ -103,19 +104,13 @@ void _pushSystem(BuildContext context, TelemetryRepository repo) {
 
   Navigator.of(context).push(
     MaterialPageRoute<void>(
-      builder: (_) => _SystemScreenWrapper(
-        editor: editor,
-        repo: repo,
-      ),
+      builder: (_) => _SystemScreenWrapper(editor: editor, repo: repo),
     ),
   );
 }
 
 class _BmsScreenWrapper extends StatefulWidget {
-  const _BmsScreenWrapper({
-    required this.editor,
-    required this.repo,
-  });
+  const _BmsScreenWrapper({required this.editor, required this.repo});
 
   final ConfigEditor editor;
   final TelemetryRepository repo;
@@ -156,10 +151,7 @@ class _BmsScreenWrapperState extends State<_BmsScreenWrapper> {
 }
 
 class _SystemScreenWrapper extends StatefulWidget {
-  const _SystemScreenWrapper({
-    required this.editor,
-    required this.repo,
-  });
+  const _SystemScreenWrapper({required this.editor, required this.repo});
 
   final ConfigEditor editor;
   final TelemetryRepository repo;
@@ -200,9 +192,7 @@ class _SystemScreenWrapperState extends State<_SystemScreenWrapper> {
 
 void _pushFirmware(BuildContext context, TelemetryRepository repo) {
   Navigator.of(context).push(
-    MaterialPageRoute<void>(
-      builder: (_) => _FirmwareScreenWrapper(repo: repo),
-    ),
+    MaterialPageRoute<void>(builder: (_) => _FirmwareScreenWrapper(repo: repo)),
   );
 }
 
@@ -226,9 +216,7 @@ class _FirmwareScreenWrapperState extends State<_FirmwareScreenWrapper> {
       _session = DfuSession(transport);
     } else {
       // This should not happen in practice, but handle it gracefully.
-      _session = DfuSession(
-        _NoOpTransport(),
-      );
+      _session = DfuSession(_NoOpTransport());
     }
   }
 
@@ -275,7 +263,10 @@ class _FirmwareScreenWrapperState extends State<_FirmwareScreenWrapper> {
 /// Fallback transport when the characteristic is absent.
 class _NoOpTransport implements DfuTransport {
   @override
-  Future<ControlResult> request({required int op, List<int> payload = const []}) async {
+  Future<ControlResult> request({
+    required int op,
+    List<int> payload = const [],
+  }) async {
     return const ControlTimeout();
   }
 
