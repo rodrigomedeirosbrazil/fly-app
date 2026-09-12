@@ -3,7 +3,6 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fly_app/state/control_session.dart';
-import 'package:fly_app/protocol/dfu_protocol.dart';
 import 'package:fly_app/state/dfu_session.dart';
 import 'package:fly_app/state/buzzer_mirror.dart';
 import 'package:fly_app/state/telemetry_repository.dart';
