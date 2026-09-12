@@ -61,6 +61,19 @@ Two things the app refuses to do, both recorded in `CLAUDE.md`: it never sends
 the controller, and it never claims to cancel a pairing, because the protocol
 has no opcode that does.
 
+**Buzzer mirroring is done** (2026-09-11), and with it **phase 2's telemetry
+is complete**. Every reading the binary service carries now reaches the pilot,
+and nothing on the "deliberately absent" list is absent.
+
+Latency is unmeasured and will be audible: a beep travels a 1 Hz firmware
+loop, a BLE notification, a decode and an audio session before it sounds. Fine
+for a warning, useless for anything the pilot times.
+
+What phase 2 still does not send is `SET_TIME` (`0x27`), `PIN_CHANGE` (`0x28`)
+and the two Tmotor direction opcodes — none of them telemetry, and
+`PIN_CHANGE` alone deserves care because it is the one write that is **not
+idempotent**, so it cannot use the retry every other write here depends on.
+
 This is the first piece of the web portal with a real alternative, and
 therefore the first step toward phase 4.
 
