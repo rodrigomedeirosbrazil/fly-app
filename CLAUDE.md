@@ -72,6 +72,7 @@ here — neither has a Bluetooth radio.
 | `shared_preferences` | 2.5.5 | Remembers the pack/per-cell voltage mode |
 | `flutter_svg` | 2.3.0 | Renders the tintable Aerovolt logo |
 | `audioplayers` | 6.8.1 | Mirrors the controller's buzzer. **See below.** |
+| `file_picker` | 12.3.0 | The pilot supplies the firmware `.bin` |
 | `flutter_launcher_icons` | 0.14.4 | **Dev only.** Generates the icon sets |
 
 Plugins resolve through **Swift Package Manager**, not CocoaPods — Flutter 3.47
@@ -546,6 +547,63 @@ there.
 Mute lives in the "MAIS DADOS" drawer, defaults to sound on, and is **not
 persisted** — per-connection UI state, like everything else in that drawer.
 The repository owns the flag; the screen must not keep a copy.
+
+### Firmware bulk cannot travel on `CMD`
+
+`CONTROL_QUEUED_PAYLOAD_MAX` is 32 bytes and `ControlRequestQueue` is four
+deep and drops the **newest** on overflow. A 1.8 MB image through it is around
+57,000 round trips into a queue designed to shed load. So control uses
+`CMD`/`RSP` and bulk uses the characteristic the protocol reserved for it,
+`D4CF0006-…`, **written without response**.
+
+Write-without-response is what makes the transfer a minute rather than ten —
+the phone pushes several packets per connection interval instead of waiting
+for an ATT acknowledgement on each. It guarantees nothing in exchange, so
+**every packet carries its absolute offset** and the image carries a CRC32.
+
+**The characteristic is optional, and that is load-bearing today.** No
+controller in existence has it: the firmware counterpart is specified in
+`docs/BLE-DFU-FIRMWARE.md` and not yet written. A build that made its absence
+fatal would take the app off every aircraft at once. No test covers that line
+— discovery only runs against a real radio, and every test above substitutes
+`FakeLink` wholesale — so it is guarded by a comment where it lives.
+
+### Progress is what arrived, never what was sent
+
+`DfuSession.progress` comes from `DFU_STATUS.received`, the highest
+**contiguous** offset the controller has written. Bytes handed to the OS run
+ahead of bytes that arrived on a write-without-response stream, so progress
+taken from them reads 100% on a transfer that lost a third of itself — and the
+pilot then commits a firmware the controller never fully received.
+
+When everything has been sent and the count is short, the app **restarts from
+the reported offset**. Nothing about a lossy stream tells either side which
+packet went missing, and selective repeat over a link that already
+retransmits underneath would be complexity serving nobody. Slower in the rare
+case, correct in every case.
+
+**`DFU_BEGIN` is never retried.** It erases a flash slot; a second erase on a
+controller that merely answered slowly is worse than a reported failure. Same
+reasoning as `PIN_CHANGE`, and the opposite of `AUTH` and `CFG_SET`.
+
+### Three checks on the image, and the one nobody can make
+
+`inspectImage` refuses an empty file, a file whose first byte is not `0xE9`
+(every ESP32 application image starts with it), and anything larger than one
+OTA slot — `0x1E0000`, from the firmware's `min_spiffs.csv`. The CRC32 is
+CRC-32/ISO-HDLC, the value `esp_rom_crc32_le` and every zip tool produce; the
+standard vectors are pinned in the test because a disagreement with the
+firmware refuses every update after a full minute of transfer.
+
+**None of them prove the image is for this controller.** XAG and Tmotor run
+different builds and both pass all three. The firmware cannot tell either.
+This is stated on the screen in as many words, above the send button rather
+than in a dialog after it, because the failure it describes is a controller
+that will not boot and the recovery is a USB cable.
+
+Transfer and commit are separate buttons for the same reason: the transfer is
+reversible until the moment it is not, and the irreversible half gets its own
+press.
 
 ### The Dart enum order does not match the firmware's
 

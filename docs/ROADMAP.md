@@ -97,6 +97,15 @@ Moved ahead of everything else by the pilot (2026-09-11): it is the capability
 they want most, and unlike log download it removes a reason to open the portal
 at all.
 
+**The app side is done** (2026-09-12) and **cannot be verified**. No controller
+has the `D4CF0006-…` characteristic, because the firmware counterpart does not
+exist. It is specified in `docs/BLE-DFU-FIRMWARE.md`, precisely enough to build
+from, and that document is the blocker for every hardware check in this phase.
+
+The app transfers, restarts from what the controller acknowledged, verifies by
+CRC32 and commits behind a second button. Throughput is a guess: the 60–120 s
+figure below has never been measured.
+
 The alternative considered and set aside: handing off to the existing WiFi AP,
 which would be ~10 s instead of ~60–120 s and cost almost no firmware, but
 needs `NEHotspotConfiguration` on iOS (an Apple entitlement), drops the phone's
