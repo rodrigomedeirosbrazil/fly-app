@@ -192,14 +192,7 @@ class _FirmwareSettingsScreenState extends State<FirmwareSettingsScreen> {
         widget.session.state != DfuTransferState.ready;
 
     final percentage = (widget.session.progress * 100).toStringAsFixed(0);
-    final estimateSeconds =
-        widget.session.bytesAcknowledged > 0 && widget.session.progress < 1
-            ? ((_chosenImage?.length ?? 0) / widget.session.bytesAcknowledged /
-                widget.session.progress /
-                1024 *
-                (1 - widget.session.progress))
-                .toInt()
-            : 0;
+    final remaining = widget.session.estimatedRemaining;
 
     return Scaffold(
       appBar: AppBar(
@@ -306,9 +299,8 @@ class _FirmwareSettingsScreenState extends State<FirmwareSettingsScreen> {
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
                               Text('$percentage%'),
-                              if (estimateSeconds > 0)
-                                Text(
-                                    'Estimado: ${estimateSeconds}s'),
+                              if (remaining != null)
+                                Text('Faltam ${_formatRemaining(remaining)}'),
                             ],
                           ),
                           const SizedBox(height: 12),
@@ -396,6 +388,18 @@ class _FirmwareSettingsScreenState extends State<FirmwareSettingsScreen> {
         ),
       ),
     );
+  }
+
+  /// The estimate, rounded to something a pilot reads at a glance.
+  ///
+  /// Seconds below a minute, then whole minutes: a transfer takes about a
+  /// minute, so "1 min" and "40 s" are the two shapes that ever appear, and
+  /// second-level precision on a number that moves once per window would just
+  /// flicker.
+  String _formatRemaining(Duration d) {
+    if (d.inSeconds < 60) return '${d.inSeconds} s';
+    final minutes = (d.inSeconds / 60).ceil();
+    return '$minutes min';
   }
 
   String _problemMessage(ImageProblem problem) {
