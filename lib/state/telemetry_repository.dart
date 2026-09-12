@@ -280,6 +280,22 @@ class TelemetryRepository extends ChangeNotifier {
     unawaited(_mirror!.handle(beep));
   }
 
+  /// Sweeps the mirrored gesture tone with the aircraft's own scalar.
+  ///
+  /// The firmware pushes a beep event when a state *starts* and never when it
+  /// retunes, so the mirror would hold the base 1800 Hz for an arm charge the
+  /// pilot hears climbing. The scalars are in every frame; the arithmetic is
+  /// the firmware's, in `buzzer_mirror.dart`.
+  void _retuneGesture() {
+    final f = frame;
+    if (f == null) return;
+    unawaited(_mirror!.retuneState(gestureFrequencyFor(
+      isArmed: f.isArmed,
+      armCharge: f.armCharge,
+      powerScale: f.powerScale,
+    )));
+  }
+
   void _onStatus(LinkStatus s) {
     _status = s;
     if (s == LinkStatus.disconnected || s == LinkStatus.idle) {
@@ -340,6 +356,7 @@ class TelemetryRepository extends ChangeNotifier {
         }
         if (decoded) {
           _anyFrameRendered = true;
+          _retuneGesture();
           if (!_thermalRequested && _link.canSendCommands) {
             _thermalRequested = true;
             final session = _session ??= ControlSession(

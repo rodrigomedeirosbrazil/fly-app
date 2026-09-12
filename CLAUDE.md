@@ -477,6 +477,40 @@ none: a low-battery warning from ten minutes ago, played now, is
 disinformation. Unmuting replays nothing for the same reason — though a
 *state* resumes, because it describes a condition the aircraft is still in.
 
+### The gesture tones sweep, and the app has to derive that itself
+
+The arm-charge and disarm-ramp tones climb in pitch. The firmware pushes a
+beep event when a state **starts** — carrying the base 1800 Hz — and pushes
+nothing when `main.cpp` retunes it on every on→off edge. So a client that
+plays exactly what it is sent holds a flat tone while the aircraft sweeps,
+which is what the first build did.
+
+`gestureFrequencyFor` in `buzzer_mirror.dart` recomputes it from `armCharge`
+and `powerScale`, which are in every telemetry frame, using the firmware's own
+line: `1800 + scalar * (2500 - 1800) / 100`, from `main.cpp` and `config.h`.
+**The sixth hand-copied fly-controller contract here**, and the only one that
+is arithmetic rather than layout.
+
+Retuning restarts the loop, and that is *not* the stutter the repeated
+transition guard prevents: the pitch genuinely changed, and the firmware does
+the same thing — `ToneTransition::Retune` is `toneOff(); toneOn(newFreq)`. An
+unchanged frequency is ignored, which is what stops a 1 Hz caller restarting
+the loop every second.
+
+It steps at 1 Hz where the aircraft steps roughly ten times faster, so the
+sweep is coarser than the real one. **The smooth fix belongs in the
+firmware**: append the state frequency to the telemetry struct, which the
+append rule allows without a version bump. Recorded in `ROADMAP.md`.
+
+### A pattern is one buffer, not a timed sequence
+
+`buildPatternWav` bakes every repetition and every gap into a single WAV, and
+a state loop is one cycle played with `ReleaseMode.loop`. Playing one tone per
+repetition with a Dart delay between carried the plugin's per-play latency
+into every gap — on iOS that includes a temp-file write — so patterns ran
+slower and looser than the piezo they mirror. The gaps are now
+sample-accurate.
+
 ### The app must mix, never interrupt
 
 The audio session is **`playback` + `mixWithOthers`** on iOS and requests

@@ -331,4 +331,88 @@ void main() {
 
     expect(player.calls, isEmpty);
   });
+
+  group('the gesture sweep', () {
+    test('follows the firmware arithmetic', () {
+      // main.cpp: MIN + scalar * (MAX - MIN) / 100, with 1800 and 2500.
+      expect(gestureFrequency(0), 1800);
+      expect(gestureFrequency(100), 2500);
+      expect(gestureFrequency(50), 2150);
+    });
+
+    test('a scalar past the ends is clamped', () {
+      expect(gestureFrequency(-10), 1800);
+      expect(gestureFrequency(150), 2500);
+    });
+
+    test('arm charge sweeps while disarmed', () {
+      expect(
+          gestureFrequencyFor(isArmed: false, armCharge: 50, powerScale: 100),
+          2150);
+    });
+
+    test('the disarm ramp sweeps while armed', () {
+      expect(
+          gestureFrequencyFor(isArmed: true, armCharge: 0, powerScale: 20),
+          1940);
+    });
+
+    test('neither gesture, no frequency', () {
+      expect(
+          gestureFrequencyFor(isArmed: false, armCharge: 0, powerScale: 100),
+          isNull);
+      expect(
+          gestureFrequencyFor(isArmed: true, armCharge: 0, powerScale: 100),
+          isNull);
+    });
+
+    test('retuning a running state restarts it at the new pitch', () async {
+      final player = FakePlayer();
+      final mirror = BuzzerMirror(player);
+      await mirror.handle(const BeepEvent(
+          seq: 1,
+          frequency: 1800,
+          onMs: 60,
+          offMs: 40,
+          reps: 0,
+          layer: BeepLayer.state,
+          active: true));
+      player.calls.clear();
+
+      await mirror.retuneState(2150);
+
+      expect(player.calls, ['loop 2150/60/40'],
+          reason: 'the envelope is kept; only the pitch moves');
+    });
+
+    test('an unchanged frequency does not restart the loop', () async {
+      // The caller runs at 1 Hz. Restarting every second would be the same
+      // stutter the repeated-transition guard exists to prevent.
+      final player = FakePlayer();
+      final mirror = BuzzerMirror(player);
+      await mirror.handle(const BeepEvent(
+          seq: 1,
+          frequency: 1800,
+          onMs: 60,
+          offMs: 40,
+          reps: 0,
+          layer: BeepLayer.state,
+          active: true));
+      player.calls.clear();
+
+      await mirror.retuneState(1800);
+      await mirror.retuneState(1800);
+
+      expect(player.calls, isEmpty);
+    });
+
+    test('retuning with no state running does nothing', () async {
+      final player = FakePlayer();
+      final mirror = BuzzerMirror(player);
+
+      await mirror.retuneState(2150);
+
+      expect(player.calls, isEmpty);
+    });
+  });
 }

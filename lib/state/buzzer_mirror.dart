@@ -122,6 +122,29 @@ class BuzzerMirror {
   /// about what the controller has been doing, and it goes through the event
   /// path so a running state tone is paused and resumed exactly as a real
   /// event would be.
+  /// Moves a running state tone to [frequency], the way the firmware retunes
+  /// its buzzer.
+  ///
+  /// Restarting the loop is correct here and not the stutter the repeated
+  /// transition guard exists to prevent: the pitch genuinely changed, and the
+  /// firmware does the same thing — `ToneTransition::Retune` is literally
+  /// `toneOff(); toneOn(newFreq)`. Nothing happens when the frequency is
+  /// unchanged, which is what keeps a 1 Hz caller from restarting the loop
+  /// every second.
+  Future<void> retuneState(int? frequency) async {
+    final current = _state;
+    if (current == null || frequency == null) return;
+    if (current.frequency == frequency) return;
+
+    _state = _StatePattern(frequency, current.onMs, current.offMs);
+    if (_muted) return;
+    await _player.startLoop(
+      frequency: frequency,
+      onMs: current.onMs,
+      offMs: current.offMs,
+    );
+  }
+
   Future<void> confirmAudible() => handle(const BeepEvent(
         seq: 0,
         frequency: 2000,
@@ -140,4 +163,48 @@ class _StatePattern {
   final int frequency;
   final int onMs;
   final int offMs;
+}
+
+/// The gesture tones sweep, and this is the firmware's own arithmetic.
+///
+/// `main.cpp` retunes the state layer on every on→off edge:
+///
+/// ```c
+/// ArmCharging:    SOUND_GESTURE_FREQ_MIN + armCharge * (MAX - MIN) / 100
+/// DisarmRamping:  SOUND_GESTURE_FREQ_MAX - (100 - powerScale) * (MAX - MIN) / 100
+/// ```
+///
+/// with `SOUND_GESTURE_FREQ_MIN` 1800 and `_MAX` 2500 in `config.h`. Both
+/// reduce to the same line, which is why there is one function here.
+///
+/// **The sixth hand-copied fly-controller contract in this repo**, and the
+/// only one that is arithmetic rather than layout. It exists because the
+/// firmware pushes a beep event on the state *transition* only — carrying the
+/// base 1800 Hz — and never on a retune, so a client that plays what it is
+/// sent holds a flat tone while the aircraft sweeps. The scalars are in every
+/// telemetry frame, so the app can derive the same pitch.
+///
+/// It steps at 1 Hz where the aircraft steps about ten times faster, so the
+/// sweep is coarser than the real one. The smooth fix belongs in the
+/// firmware: append the state frequency to the telemetry struct, which the
+/// append rule allows without a version bump.
+const int kGestureFreqMin = 1800;
+const int kGestureFreqMax = 2500;
+
+int gestureFrequency(int scalar) =>
+    kGestureFreqMin +
+    (scalar.clamp(0, 100) * (kGestureFreqMax - kGestureFreqMin)) ~/ 100;
+
+/// Which gesture tone the aircraft is making, from the same conditions
+/// `main.cpp` uses to choose one, or null when it is making neither.
+int? gestureFrequencyFor({
+  required bool isArmed,
+  required int? armCharge,
+  required int? powerScale,
+}) {
+  if (!isArmed && (armCharge ?? 0) > 0) return gestureFrequency(armCharge!);
+  if (isArmed && (powerScale ?? 100) < 100) {
+    return gestureFrequency(powerScale!);
+  }
+  return null;
 }

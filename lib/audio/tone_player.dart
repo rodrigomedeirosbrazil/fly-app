@@ -86,6 +86,46 @@ Uint8List buildSquareWaveWav({
   return out.buffer.asUint8List();
 }
 
+/// A whole pattern — [reps] repetitions of a tone and the silence after it —
+/// as one WAV.
+///
+/// Baked into a single buffer rather than played once per repetition with a
+/// Dart delay between. The gaps are then **sample-accurate**, where a timed
+/// sequence carried the plugin's per-play latency into every gap and made a
+/// pattern sound slower and looser than the piezo it mirrors. On iOS that
+/// latency includes a temp-file write per play, which is not small.
+Uint8List buildPatternWav({
+  required int frequency,
+  required int onMs,
+  required int offMs,
+  required int reps,
+}) {
+  if (reps <= 0) return Uint8List(0);
+  final tone = buildSquareWaveWav(frequency: frequency, milliseconds: onMs);
+  if (tone.isEmpty) return Uint8List(0);
+
+  final toneData = tone.sublist(44);
+  final gapBytes = (kSampleRate * offMs / 1000).round() * 2;
+  final dataBytes = (toneData.length + gapBytes) * reps;
+
+  final out = Uint8List(44 + dataBytes);
+  // The tone's own header describes one repetition; copy it, then correct the
+  // two lengths for the whole buffer.
+  out.setRange(0, 44, tone);
+  final view = ByteData.sublistView(out);
+  view.setUint32(4, 36 + dataBytes, Endian.little);
+  view.setUint32(40, dataBytes, Endian.little);
+
+  var offset = 44;
+  for (var i = 0; i < reps; i++) {
+    out.setRange(offset, offset + toneData.length, toneData);
+    // The gap stays zeroed, which is silence.
+    offset += toneData.length + gapBytes;
+  }
+
+  return out;
+}
+
 /// The only thing in this app that makes a sound.
 ///
 /// **Mixes rather than interrupts.** A paramotor pilot may be flying by
@@ -106,9 +146,6 @@ class AudioPlayersTonePlayer implements TonePlayer {
 
   final AudioPlayer _player = AudioPlayer();
   final Map<int, Uint8List> _cache = {};
-
-  bool _loopStopped = true;
-  int _generation = 0;
 
   static final AudioContext _mixing = AudioContext(
     iOS: AudioContextIOS(
@@ -160,10 +197,16 @@ class AudioPlayersTonePlayer implements TonePlayer {
     }
   }
 
-  Uint8List _wav(int frequency, int onMs) => _cache.putIfAbsent(
-    frequency * 100000 + onMs,
-    () => buildSquareWaveWav(frequency: frequency, milliseconds: onMs),
-  );
+  Uint8List _wav(int frequency, int onMs, int offMs, int reps) =>
+      _cache.putIfAbsent(
+        Object.hash(frequency, onMs, offMs, reps),
+        () => buildPatternWav(
+          frequency: frequency,
+          onMs: onMs,
+          offMs: offMs,
+          reps: reps,
+        ),
+      );
 
   @override
   Future<void> playPattern({
@@ -174,13 +217,11 @@ class AudioPlayersTonePlayer implements TonePlayer {
   }) async {
     await _guard(() async {
       await _ensureConfigured();
-      final bytes = _wav(frequency, onMs);
+      final bytes = _wav(frequency, onMs, offMs, reps);
       if (bytes.isEmpty) return;
 
-      for (var i = 0; i < reps; i++) {
-        await _player.play(_source(bytes));
-        await Future<void>.delayed(Duration(milliseconds: onMs + offMs));
-      }
+      await _player.setReleaseMode(ReleaseMode.stop);
+      await _player.play(_source(bytes));
     });
   }
 
@@ -192,25 +233,20 @@ class AudioPlayersTonePlayer implements TonePlayer {
   }) async {
     await _guard(() async {
       await _ensureConfigured();
-      final bytes = _wav(frequency, onMs);
+      // One cycle — the tone AND the gap after it — looped by the player.
+      // The gap is baked into the buffer, so looping the file is seamless;
+      // the Dart-timed loop this replaces paid the plugin's play latency on
+      // every iteration and drifted slower than the aircraft's buzzer.
+      final bytes = _wav(frequency, onMs, offMs, 1);
       if (bytes.isEmpty) return;
 
-      _loopStopped = false;
-      final generation = ++_generation;
-
-      // A Dart-timed loop rather than ReleaseMode.loop: the pattern has a gap,
-      // and looping the file alone would run the tone together.
-      while (!_loopStopped && generation == _generation) {
-        await _player.play(_source(bytes));
-        await Future<void>.delayed(Duration(milliseconds: onMs + offMs));
-      }
+      await _player.setReleaseMode(ReleaseMode.loop);
+      await _player.play(_source(bytes));
     });
   }
 
   @override
   Future<void> stopLoop() async {
-    _loopStopped = true;
-    _generation++;
     await _guard(_player.stop);
   }
 
@@ -221,8 +257,6 @@ class AudioPlayersTonePlayer implements TonePlayer {
 
   @override
   Future<void> dispose() async {
-    _loopStopped = true;
-    _generation++;
     await _player.dispose();
   }
 }

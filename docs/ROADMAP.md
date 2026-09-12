@@ -208,6 +208,18 @@ confirming with a log line in that callback: if it fires when no phone
 disconnected, the callback is being invoked for the client role and the auth
 reset belongs behind a check on which connection actually went away.
 
+**The buzzer's gesture tones cannot be mirrored faithfully.** `Sound::handle()`
+pushes a beep event when a state starts and nothing when `main.cpp` retunes it
+via `setStateFreq()` on each on→off edge — so a BLE client is told 1800 Hz once
+and never hears the arm-charge sweep. The app works around it by recomputing
+the pitch from `armCharge`/`powerScale`, which duplicates `main.cpp`'s
+arithmetic and steps at 1 Hz instead of ~10 Hz.
+
+The clean fix is a **`uint16 stateFreqHz` appended to `ControlTelemetry`**: the
+append rule already covers it, no version bump, and it removes a hand-copied
+formula from fly-app. Pushing a beep event per retune would work too but
+floods the eight-slot ring at ten events a second.
+
 **A BMS scan races the BMS link it just tore down.** `startWebScan()` calls
 `setEnabled(false)` on the three backends — which reaches
 `pClient_->disconnect()` — and then `scan->start()` in the same loop
