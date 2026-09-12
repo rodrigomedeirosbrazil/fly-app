@@ -28,10 +28,21 @@ class TelemetryRepository extends ChangeNotifier {
     LinkHealth? health,
     DateTime Function()? clock,
     BuzzerMirror? mirror,
-  })  : _link = link ?? FlyControllerLink(),
+  })  :
+        // prefer_initializing_formals suggests `this._mirror`, which does not
+        // compile: a named parameter cannot carry a private name. Same
+        // situation as ControlSession's `_send`.
+        // ignore: prefer_initializing_formals
+        _mirror = mirror,
+        _link = link ?? FlyControllerLink(),
         _health = health ?? LinkHealth(),
-        _now = clock ?? DateTime.now,
-        _mirror = mirror ?? BuzzerMirror(AudioPlayersTonePlayer()) {
+        _now = clock ?? DateTime.now {
+    // Built here rather than in the initialiser list so the player can report
+    // failures back: a beep that fails silently is indistinguishable from a
+    // controller with nothing to say, which is how this subsystem reached
+    // hardware inaudible twice.
+    _mirror ??= BuzzerMirror(AudioPlayersTonePlayer(onError: _onAudioError));
+
     _statusSub = _link.status.listen(_onStatus);
     _payloadSub = _link.payloads.listen(_onPayload);
     // Staleness has to be re-evaluated even when nothing arrives — that is
@@ -44,7 +55,18 @@ class TelemetryRepository extends ChangeNotifier {
   final FlyControllerLink _link;
   final LinkHealth _health;
   final DateTime Function() _now;
-  final BuzzerMirror _mirror;
+  BuzzerMirror? _mirror;
+
+  /// What the speaker last refused to do, or null. Shown in the drawer beside
+  /// the sound control, because the pilot is the only one who can tell a
+  /// silent app from a quiet aircraft.
+  String? get audioError => _audioError;
+  String? _audioError;
+
+  void _onAudioError(Object error) {
+    _audioError = error.toString();
+    notifyListeners();
+  }
   final LineAssembler _assembler = LineAssembler();
 
   late final StreamSubscription<LinkStatus> _statusSub;
@@ -94,15 +116,16 @@ class TelemetryRepository extends ChangeNotifier {
   ConfigEditor? get editor => _editor;
 
   /// Whether the buzzer is muted.
-  bool get muted => _mirror.muted;
+  bool get muted => _mirror?.muted ?? false;
 
   /// Mute or unmute the buzzer.
   Future<void> setMuted(bool value) async {
-    await _mirror.setMuted(value);
+    await _mirror!.setMuted(value);
     notifyListeners();
     // Turning sound on answers "does this work?" immediately, rather than
     // leaving the pilot to arm the aircraft to find out.
-    if (!value) await _mirror.confirmAudible();
+    if (!value) _audioError = null;
+      await _mirror!.confirmAudible();
   }
 
   /// Whether the controller reports a selectable motor temperature source.
@@ -254,7 +277,7 @@ class TelemetryRepository extends ChangeNotifier {
     if (response.op != kOpEvtBeep) return;
     final beep = BeepEvent.decode(response.payload);
     if (beep == null) return;
-    unawaited(_mirror.handle(beep));
+    unawaited(_mirror!.handle(beep));
   }
 
   void _onStatus(LinkStatus s) {
@@ -340,7 +363,7 @@ class TelemetryRepository extends ChangeNotifier {
     _payloadSub.cancel();
     _eventsSub?.cancel();
     _session?.dispose();
-    _mirror.dispose();
+    _mirror?.dispose();
     _link.dispose();
     super.dispose();
   }

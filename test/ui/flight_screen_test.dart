@@ -612,6 +612,32 @@ void main() {
       expect(muted, isTrue);
     });
 
+    testWidgets('a speaker failure is named, not swallowed', (tester) async {
+      // This subsystem reached hardware inaudible twice, and both times the
+      // app said nothing -- so a silent phone and a quiet aircraft looked
+      // identical. The pilot is the only one who can tell them apart.
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(),
+        stale: false,
+        audioError: 'PlatformException(DarwinAudioError, ...)',
+      )));
+
+      await tester.tap(find.byTooltip('Mais dados'));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('audio-error')), findsOneWidget);
+      expect(find.textContaining('Falha no som'), findsOneWidget);
+    });
+
+    testWidgets('no failure, no line', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
+
+      await tester.tap(find.byTooltip('Mais dados'));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('audio-error')), findsNothing);
+    });
+
     testWidgets('the label changes when muted', (tester) async {
       await tester.pumpWidget(wrap(FlightScreen(
         frame: frame(),

@@ -94,7 +94,15 @@ Uint8List buildSquareWaveWav({
 /// preference, and it is why the audio context is set explicitly on both
 /// platforms rather than left at the plugin's default.
 class AudioPlayersTonePlayer implements TonePlayer {
-  AudioPlayersTonePlayer();
+  AudioPlayersTonePlayer({this.onError});
+
+  /// Called with whatever went wrong, because a beep that fails silently is
+  /// indistinguishable from a controller with nothing to say.
+  ///
+  /// This subsystem reached hardware twice while inaudible, and both times
+  /// the app had no way to tell the pilot -- or me -- which of the two it
+  /// was. Every call into the plugin is wrapped for that reason.
+  final void Function(Object error)? onError;
 
   final AudioPlayer _player = AudioPlayer();
   final Map<int, Uint8List> _cache = {};
@@ -134,9 +142,28 @@ class AudioPlayersTonePlayer implements TonePlayer {
     _configured = true;
   }
 
-  Uint8List _wav(int frequency, int onMs) =>
-      _cache.putIfAbsent(frequency * 100000 + onMs,
-          () => buildSquareWaveWav(frequency: frequency, milliseconds: onMs));
+  /// The WAV, told apart from anything else by its media type.
+  ///
+  /// **The mime type is not optional on iOS.** `setSourceBytes` there writes
+  /// the bytes to a temp file named after their hash, with **no extension**,
+  /// and hands the path to `AVURLAsset`. Without a type to go on, AVFoundation
+  /// has to sniff a headerless-looking filename and does not play it. The
+  /// darwin side passes this straight to `AVURLAssetOverrideMIMETypeKey`.
+  BytesSource _source(Uint8List bytes) =>
+      BytesSource(bytes, mimeType: 'audio/wav');
+
+  Future<void> _guard(Future<void> Function() body) async {
+    try {
+      await body();
+    } catch (e) {
+      onError?.call(e);
+    }
+  }
+
+  Uint8List _wav(int frequency, int onMs) => _cache.putIfAbsent(
+    frequency * 100000 + onMs,
+    () => buildSquareWaveWav(frequency: frequency, milliseconds: onMs),
+  );
 
   @override
   Future<void> playPattern({
@@ -145,14 +172,16 @@ class AudioPlayersTonePlayer implements TonePlayer {
     required int offMs,
     required int reps,
   }) async {
-    await _ensureConfigured();
-    final bytes = _wav(frequency, onMs);
-    if (bytes.isEmpty) return;
+    await _guard(() async {
+      await _ensureConfigured();
+      final bytes = _wav(frequency, onMs);
+      if (bytes.isEmpty) return;
 
-    for (var i = 0; i < reps; i++) {
-      await _player.play(BytesSource(bytes));
-      await Future<void>.delayed(Duration(milliseconds: onMs + offMs));
-    }
+      for (var i = 0; i < reps; i++) {
+        await _player.play(_source(bytes));
+        await Future<void>.delayed(Duration(milliseconds: onMs + offMs));
+      }
+    });
   }
 
   @override
@@ -161,26 +190,28 @@ class AudioPlayersTonePlayer implements TonePlayer {
     required int onMs,
     required int offMs,
   }) async {
-    await _ensureConfigured();
-    final bytes = _wav(frequency, onMs);
-    if (bytes.isEmpty) return;
+    await _guard(() async {
+      await _ensureConfigured();
+      final bytes = _wav(frequency, onMs);
+      if (bytes.isEmpty) return;
 
-    _loopStopped = false;
-    final generation = ++_generation;
+      _loopStopped = false;
+      final generation = ++_generation;
 
-    // A Dart-timed loop rather than ReleaseMode.loop: the pattern has a gap,
-    // and looping the file alone would run the tone together.
-    while (!_loopStopped && generation == _generation) {
-      await _player.play(BytesSource(bytes));
-      await Future<void>.delayed(Duration(milliseconds: onMs + offMs));
-    }
+      // A Dart-timed loop rather than ReleaseMode.loop: the pattern has a gap,
+      // and looping the file alone would run the tone together.
+      while (!_loopStopped && generation == _generation) {
+        await _player.play(_source(bytes));
+        await Future<void>.delayed(Duration(milliseconds: onMs + offMs));
+      }
+    });
   }
 
   @override
   Future<void> stopLoop() async {
     _loopStopped = true;
     _generation++;
-    await _player.stop();
+    await _guard(_player.stop);
   }
 
   @override

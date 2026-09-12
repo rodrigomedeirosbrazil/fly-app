@@ -26,6 +26,7 @@ class FlightScreen extends StatefulWidget {
     this.thermalConfig,
     this.onOpenSettings,
     this.muted = false,
+    this.audioError,
     this.onSetMuted,
   });
 
@@ -47,6 +48,9 @@ class FlightScreen extends StatefulWidget {
 
   /// Whether the buzzer is muted.
   final bool muted;
+
+  /// What the phone's speaker last refused to do, or null.
+  final String? audioError;
 
   /// Called when the mute state changes.
   final Future<void> Function(bool)? onSetMuted;
@@ -106,6 +110,7 @@ class _FlightScreenState extends State<FlightScreen> {
                   onOpenSettings: widget.onOpenSettings,
                   armed: f?.isArmed ?? false,
                   muted: widget.muted,
+                  audioError: widget.audioError,
                   onSetMuted: widget.onSetMuted,
                 ),
             ],
@@ -155,10 +160,10 @@ class _StatusRow extends StatelessWidget {
   /// The short codes the firmware already uses for disarm reasons, so the two
   /// chips in this row speak the same vocabulary.
   static String _causes(Set<LimitCause> causes) => [
-        if (causes.contains(LimitCause.battery)) 'BAT',
-        if (causes.contains(LimitCause.motorTemp)) 'MOT',
-        if (causes.contains(LimitCause.escTemp)) 'ESC',
-      ].join(' ');
+    if (causes.contains(LimitCause.battery)) 'BAT',
+    if (causes.contains(LimitCause.motorTemp)) 'MOT',
+    if (causes.contains(LimitCause.escTemp)) 'ESC',
+  ].join(' ');
 
   @override
   Widget build(BuildContext context) {
@@ -360,7 +365,9 @@ class _BatteryCardState extends State<_BatteryCard> {
                 // voltage centre, rather than reserving space for a dash.
                 if (f?.currentA != null) ...[
                   VerticalDivider(
-                      width: 1, color: theme.colorScheme.outlineVariant),
+                    width: 1,
+                    color: theme.colorScheme.outlineVariant,
+                  ),
                   Expanded(
                     child: _Reading(
                       label: 'CORRENTE',
@@ -523,7 +530,11 @@ class _InstrumentRow extends StatelessWidget {
 /// scale. Sized like the dials beside it: a fixed point size looks right on the
 /// phone it was written on and wraps on a narrower one.
 class _Readout extends StatelessWidget {
-  const _Readout({required this.label, required this.value, required this.unit});
+  const _Readout({
+    required this.label,
+    required this.value,
+    required this.unit,
+  });
 
   final String label;
   final String value;
@@ -681,6 +692,7 @@ class _SecondaryData extends StatefulWidget {
     this.onOpenSettings,
     required this.armed,
     required this.muted,
+    this.audioError,
     this.onSetMuted,
   });
 
@@ -690,6 +702,7 @@ class _SecondaryData extends StatefulWidget {
   final VoidCallback? onOpenSettings;
   final bool armed;
   final bool muted;
+  final String? audioError;
   final Future<void> Function(bool)? onSetMuted;
 
   @override
@@ -701,8 +714,8 @@ class _SecondaryDataState extends State<_SecondaryData> {
   // app.dart's AnimatedBuilder rebuilds this whole subtree — a second copy
   // here would be free to drift from the one the mirror is actually obeying,
   // which is the failure this codebase refuses everywhere else.
-  Future<void> _setMuted(bool value) => widget.onSetMuted?.call(value) ??
-      Future<void>.value();
+  Future<void> _setMuted(bool value) =>
+      widget.onSetMuted?.call(value) ?? Future<void>.value();
 
   TelemetryFrame? get frame => widget.frame;
 
@@ -719,10 +732,10 @@ class _SecondaryDataState extends State<_SecondaryData> {
   }
 
   String get _source => switch (frame?.motorTempSource) {
-        MotorTempSource.can => 'CAN',
-        MotorTempSource.ntc => 'NTC',
-        _ => '–',
-      };
+    MotorTempSource.can => 'CAN',
+    MotorTempSource.ntc => 'NTC',
+    _ => '–',
+  };
 
   /// `h:mm:ss`, for counters that run to hundreds of hours.
   static String _hours(Duration? d) {
@@ -737,12 +750,12 @@ class _SecondaryDataState extends State<_SecondaryData> {
   /// zero is a legitimate reading, so the state is the only thing that
   /// answers this.
   static String _signal(SignalState? s) => switch (s) {
-        SignalState.valid => 'OK',
-        SignalState.stale => 'PARADO',
-        SignalState.invalid => 'INVÁLIDO',
-        SignalState.absent => 'AUSENTE',
-        null => '–',
-      };
+    SignalState.valid => 'OK',
+    SignalState.stale => 'PARADO',
+    SignalState.invalid => 'INVÁLIDO',
+    SignalState.absent => 'AUSENTE',
+    null => '–',
+  };
 
   String get _signals {
     final f = frame;
@@ -815,8 +828,9 @@ class _SecondaryDataState extends State<_SecondaryData> {
                             children: [
                               for (final (label, value) in rows)
                                 Padding(
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 7),
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 7,
+                                  ),
                                   child: Row(
                                     children: [
                                       Expanded(
@@ -826,7 +840,8 @@ class _SecondaryDataState extends State<_SecondaryData> {
                                           overflow: TextOverflow.ellipsis,
                                           style: TextStyle(
                                             color: theme
-                                                .colorScheme.onSurfaceVariant,
+                                                .colorScheme
+                                                .onSurfaceVariant,
                                           ),
                                         ),
                                       ),
@@ -837,7 +852,7 @@ class _SecondaryDataState extends State<_SecondaryData> {
                                         style: const TextStyle(
                                           fontWeight: FontWeight.w700,
                                           fontFeatures: [
-                                            FontFeature.tabularFigures()
+                                            FontFeature.tabularFigures(),
                                           ],
                                         ),
                                       ),
@@ -848,6 +863,7 @@ class _SecondaryDataState extends State<_SecondaryData> {
                               _MuteControl(
                                 key: const Key('mute-buzzer'),
                                 muted: widget.muted,
+                                audioError: widget.audioError,
                                 onSetMuted: _setMuted,
                               ),
                               const SizedBox(height: 8),
@@ -860,8 +876,8 @@ class _SecondaryDataState extends State<_SecondaryData> {
                                 reason: armed
                                     ? 'Indisponível com a aeronave armada'
                                     : widget.onOpenSettings == null
-                                        ? 'Indisponível nesta conexão'
-                                        : null,
+                                    ? 'Indisponível nesta conexão'
+                                    : null,
                               ),
                             ],
                           ),
@@ -942,10 +958,16 @@ class _MuteControl extends StatelessWidget {
     super.key,
     required this.muted,
     required this.onSetMuted,
+    this.audioError,
   });
 
   final bool muted;
   final Future<void> Function(bool)? onSetMuted;
+
+  /// What the speaker last refused to do. Named rather than swallowed: the
+  /// pilot is the only one who can tell a silent app from a quiet aircraft,
+  /// and this subsystem reached hardware inaudible twice without a word.
+  final String? audioError;
 
   @override
   Widget build(BuildContext context) {
@@ -953,46 +975,62 @@ class _MuteControl extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 10),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
-            muted ? Icons.volume_off : Icons.volume_up,
-            size: 20,
-            color: theme.colorScheme.onSurface,
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              'SOM DO CONTROLADOR',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 13,
-                letterSpacing: 1.5,
-                fontWeight: FontWeight.w700,
+          Row(
+            children: [
+              Icon(
+                muted ? Icons.volume_off : Icons.volume_up,
+                size: 20,
                 color: theme.colorScheme.onSurface,
               ),
-            ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'SOM DO CONTROLADOR',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 13,
+                    letterSpacing: 1.5,
+                    fontWeight: FontWeight.w700,
+                    color: theme.colorScheme.onSurface,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Switch(
+                value: !muted,
+                onChanged: (value) => onSetMuted?.call(!value),
+              ),
+              const SizedBox(width: 4),
+              SizedBox(
+                width: 70,
+                child: Text(
+                  muted ? 'DESLIGADO' : 'LIGADO',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 8),
-          Switch(
-            value: !muted,
-            onChanged: (value) => onSetMuted?.call(!value),
-          ),
-          const SizedBox(width: 4),
-          SizedBox(
-            width: 70,
-            child: Text(
-              muted ? 'DESLIGADO' : 'LIGADO',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.right,
-              style: TextStyle(
-                fontSize: 11,
-                color: theme.colorScheme.onSurfaceVariant,
+          if (audioError != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                'Falha no som: $audioError',
+                key: const Key('audio-error'),
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 11, color: theme.colorScheme.error),
               ),
             ),
-          ),
         ],
       ),
     );
