@@ -127,7 +127,30 @@ class TelemetryRepository extends ChangeNotifier {
       ControllerType.tmotor => 'Tmotor',
       ControllerType.unknown => '?',
     };
+    // An empty `appVersion` would render as " · Tmotor" — a line that opens
+    // with a separator and looks like a rendering fault rather than a missing
+    // reading. The field is `char[24]` NUL-*padded*, so a firmware that never
+    // filled it decodes to the empty string rather than to null.
+    if (i.appVersion.isEmpty) return type;
     return '${i.appVersion} · $type';
+  }
+
+  /// When the running firmware was built — `Sep 12 2026 12:46:03` — or null.
+  ///
+  /// **Null on every controller built before the field existed**, because it
+  /// rides on the end of `INFO` under the append rule. That is a missing
+  /// reading, not a fault, and the row hides rather than printing a dash that
+  /// looks like a date failed to load.
+  ///
+  /// `APP_VERSION` alone does not answer "is this the build I just flashed?":
+  /// CI stamps it with the release tag and every local build reports `dev`,
+  /// so two different images a week apart carry the same version string. The
+  /// portal shows the build stamp beside the version for exactly this reason.
+  String? get firmwareBuild {
+    final i = _link.info;
+    if (i == null || i.buildDate == null) return null;
+    final time = i.buildTime;
+    return time == null ? i.buildDate : '${i.buildDate} $time';
   }
 
   /// The live request channel, or null on the `$XCTOD` path.

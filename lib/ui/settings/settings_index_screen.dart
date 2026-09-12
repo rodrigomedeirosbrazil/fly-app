@@ -8,7 +8,12 @@ class SettingsIndexScreen extends StatelessWidget {
     required this.onOpenBms,
     required this.onOpenSystem,
     required this.onOpenFirmware,
+    this.firmwareVersion,
   });
+
+  /// The controller's firmware version and type, as one line. Null on the
+  /// `$XCTOD` path, where INFO was never read.
+  final String? firmwareVersion;
 
   final VoidCallback onOpenPower;
   final VoidCallback onOpenThermal;
@@ -21,6 +26,35 @@ class SettingsIndexScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Configurações'),
+        // Which firmware is running, pinned under the title.
+        //
+        // It was already on the update screen and in the flight-screen
+        // drawer, and both are places you have to know to look. In the list
+        // it would sit either below five cards -- a scroll away, the same
+        // problem with extra steps -- or above them, eating the height the
+        // cards need. Here it is visible the moment the screen opens and
+        // stays put while the list scrolls, which is what reference
+        // information should do.
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(24),
+          child: Padding(
+            padding: const EdgeInsets.only(left: 16, right: 16, bottom: 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                firmwareVersion == null
+                    ? 'Firmware desconhecido'
+                    : 'Firmware $firmwareVersion',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),

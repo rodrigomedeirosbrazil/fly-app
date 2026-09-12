@@ -934,6 +934,102 @@ void main() {
     });
   });
 
+  group('the estimate', () {
+    /// A clock the test advances by hand, so a minute-long transfer is
+    /// measured without waiting one.
+    late DateTime clock;
+
+    /// Drives a transfer that stops part-way, with [elapsed] on the clock.
+    Future<DfuSession> partialTransfer({
+      required int received,
+      required int total,
+      required Duration elapsed,
+    }) async {
+      clock = DateTime(2026);
+      final transport = FakeDfuTransport();
+      transport.queueOk();
+      transport.queueDfuStatus(
+        state: dfu_protocol.DfuState.receiving,
+        received: 0,
+      );
+      transport.queueDfuStatus(
+        state: dfu_protocol.DfuState.receiving,
+        received: received,
+      );
+      // Two more that move nothing, so the transfer stops with the session
+      // holding exactly `received`.
+      for (var i = 0; i < 3; i++) {
+        transport.queueDfuStatus(
+          state: dfu_protocol.DfuState.receiving,
+          received: received,
+        );
+      }
+
+      final session = DfuSession(
+        transport,
+        pollInterval: const Duration(milliseconds: 1),
+        maxRestarts: 2,
+        packetGap: Duration.zero,
+        clock: () => clock,
+      );
+      addTearDown(session.dispose);
+
+      await session.start(Uint8List(total)..[0] = 0xE9);
+      clock = clock.add(elapsed);
+      return session;
+    }
+
+    test('it comes from elapsed time, not from the progress fraction',
+        () async {
+      // A quarter of the image in 10 s means 30 s left. The old expression
+      // divided the image size by the acknowledged bytes AND by the progress
+      // fraction -- the same ratio twice, with no clock anywhere -- so it
+      // reduced to (1 - p) / (p^2 * 1024) and fell below one second at about
+      // 3,5 %. The row was hidden on `> 0`, which is why it flashed at the
+      // start of every transfer and then disappeared.
+      final session = await partialTransfer(
+        received: 1024,
+        total: 4096,
+        elapsed: const Duration(seconds: 10),
+      );
+
+      expect(session.estimatedRemaining, const Duration(seconds: 30));
+    });
+
+    test('it survives past the point the old one vanished', () async {
+      // 60 % in, which is deep inside the range where the old expression
+      // returned 0 and the row disappeared.
+      final session = await partialTransfer(
+        received: 6000,
+        total: 10000,
+        elapsed: const Duration(seconds: 30),
+      );
+
+      expect(session.estimatedRemaining, isNotNull);
+      expect(session.estimatedRemaining!.inSeconds, 20);
+    });
+
+    test('under a second of evidence it says nothing', () async {
+      // A rate measured over a few hundred milliseconds is noise, and a
+      // wildly wrong number is worse than no number.
+      final session = await partialTransfer(
+        received: 1024,
+        total: 4096,
+        elapsed: const Duration(milliseconds: 400),
+      );
+
+      expect(session.estimatedRemaining, isNull);
+    });
+
+    test('nothing acknowledged yet is not an estimate of zero', () async {
+      final transport = FakeDfuTransport();
+      final session = DfuSession(transport, clock: () => DateTime(2026));
+      addTearDown(session.dispose);
+
+      expect(session.estimatedRemaining, isNull);
+    });
+  });
+
   group('the diagnostic trail', () {
     test('names the step that failed and what it answered', () async {
       final transport = FakeDfuTransport();

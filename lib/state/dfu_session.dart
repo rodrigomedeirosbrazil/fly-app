@@ -198,7 +198,12 @@ class DfuSession extends ChangeNotifier {
     this._maxRestarts = 3,
     this._windowBytes = 8192,
     this._packetGap = const Duration(milliseconds: 3),
-  });
+    DateTime Function()? clock,
+  }) : _now = clock ?? DateTime.now;
+
+  /// Injected so the estimate is testable without waiting for real seconds,
+  /// the same seam `TelemetryRepository` uses.
+  final DateTime Function() _now;
 
   /// How much is sent before asking the controller what arrived.
   ///
@@ -227,6 +232,41 @@ class DfuSession extends ChangeNotifier {
   double get progress => _progress;
   int get bytesAcknowledged => _bytesAcknowledged;
   DfuOutcome? get outcome => _outcome;
+
+  /// How much longer the transfer should take, or null when there is not
+  /// enough evidence to say yet.
+  ///
+  /// **Measured, not derived from progress.** The first version computed
+  /// `(1 - p) / (p² · 1024)` from the progress fraction and the image size,
+  /// with no elapsed time anywhere in it — the two byte counts it divided
+  /// were the same ratio twice, so the whole expression reduced to a curve
+  /// that crossed below one second at about 3,5 % and stayed there. The row
+  /// was hidden on `> 0`, so it appeared for a moment at the start of every
+  /// transfer and then vanished, which is exactly what it was reported as.
+  ///
+  /// Throughput is averaged over the whole transfer rather than the last
+  /// window: the controller stalls for tens of milliseconds on every flash
+  /// erase, so a recent-rate estimate swings on each one. The average is both
+  /// steadier and, over a minute-long transfer, closer to the truth.
+  Duration? get estimatedRemaining {
+    final startedAt = _streamStartedAt;
+    if (startedAt == null || _imageBytes <= 0) return null;
+    if (_bytesAcknowledged <= 0 || _bytesAcknowledged >= _imageBytes) {
+      return null;
+    }
+
+    // Below a second of evidence the rate is mostly noise, and a wildly
+    // wrong number is worse than no number.
+    final elapsedMs = _now().difference(startedAt).inMilliseconds;
+    if (elapsedMs < 1000) return null;
+
+    final remainingBytes = _imageBytes - _bytesAcknowledged;
+    final ms = elapsedMs * remainingBytes / _bytesAcknowledged;
+    return Duration(milliseconds: ms.round());
+  }
+
+  DateTime? _streamStartedAt;
+  int _imageBytes = 0;
 
   /// What each step actually did, newest last.
   ///
@@ -276,6 +316,8 @@ class DfuSession extends ChangeNotifier {
     }
 
     _trail.clear();
+    _streamStartedAt = null;
+    _imageBytes = image.length;
     _note('imagem ${image.length} B, CRC '
         '0x${inspection.crc32.toRadixString(16).padLeft(8, '0')}');
 
@@ -421,6 +463,12 @@ class DfuSession extends ChangeNotifier {
   /// actually arrived.
   Future<void> _streamData(Uint8List image, int packetBytes) async {
     final payloadSize = payloadPerPacket(packetBytes);
+
+    // The clock starts here, not when the pilot tapped send: the PIN round
+    // trip and DFU_BEGIN are not transfer time, and counting them makes the
+    // first estimate too pessimistic on exactly the transfers that just had
+    // to ask for a PIN.
+    _streamStartedAt = _now();
 
     while (_bytesAcknowledged < image.length) {
       if (_state != DfuTransferState.sending) return;

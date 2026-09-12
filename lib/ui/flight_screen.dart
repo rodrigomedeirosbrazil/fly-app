@@ -23,6 +23,7 @@ class FlightScreen extends StatefulWidget {
     required this.frame,
     required this.stale,
     this.firmwareVersion,
+    this.firmwareBuild,
     this.thermalConfig,
     this.onOpenSettings,
     this.muted = false,
@@ -36,6 +37,9 @@ class FlightScreen extends StatefulWidget {
   final bool stale;
 
   final String? firmwareVersion;
+
+  /// When that firmware was built. Null on controllers that do not send it.
+  final String? firmwareBuild;
 
   /// This pilot's configured reduction thresholds, or null when they are not
   /// known. Null draws no band and changes nothing else.
@@ -107,6 +111,7 @@ class _FlightScreenState extends State<FlightScreen> {
                   frame: f,
                   onClose: () => setState(() => _drawerOpen = false),
                   firmwareVersion: widget.firmwareVersion,
+                  firmwareBuild: widget.firmwareBuild,
                   onOpenSettings: widget.onOpenSettings,
                   armed: f?.isArmed ?? false,
                   muted: widget.muted,
@@ -689,6 +694,7 @@ class _SecondaryData extends StatefulWidget {
     required this.frame,
     required this.onClose,
     this.firmwareVersion,
+    this.firmwareBuild,
     this.onOpenSettings,
     required this.armed,
     required this.muted,
@@ -699,6 +705,9 @@ class _SecondaryData extends StatefulWidget {
   final TelemetryFrame? frame;
   final VoidCallback onClose;
   final String? firmwareVersion;
+
+  /// When that firmware was built. Null on controllers that do not send it.
+  final String? firmwareBuild;
   final VoidCallback? onOpenSettings;
   final bool armed;
   final bool muted;
@@ -746,23 +755,6 @@ class _SecondaryDataState extends State<_SecondaryData> {
     return '$h:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
   }
 
-  /// Sensor health in the pilot's language. Only Valid is a working sensor —
-  /// zero is a legitimate reading, so the state is the only thing that
-  /// answers this.
-  static String _signal(SignalState? s) => switch (s) {
-    SignalState.valid => 'OK',
-    SignalState.stale => 'PARADO',
-    SignalState.invalid => 'INVÁLIDO',
-    SignalState.absent => 'AUSENTE',
-    null => '–',
-  };
-
-  String get _signals {
-    final f = frame;
-    if (f == null || f.motorTempState == null) return '–';
-    return '${_signal(f.motorTempState)} · ${_signal(f.escTempState)}'
-        ' · ${_signal(f.batteryVoltageState)}';
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -775,12 +767,16 @@ class _SecondaryDataState extends State<_SecondaryData> {
       ('Acelerador (bruto)', _or(f?.throttleRaw, '')),
       ('Temp. máx. BMS', _or(f?.bmsMaxTempC, ' °C')),
       ('Células mín / máx', _cells),
+      // Beside the two numbers it is derived from, not four rows away.
+      ('Delta de células', _or(f?.cellDeltaMv, ' mV')),
       ('Origem temp. motor', _source),
       ('Horímetro', _hours(f?.hourMeterSec)),
-      ('Delta de células', _or(f?.cellDeltaMv, ' mV')),
-      ('Sensores (mot · esc · bat)', _signals),
       ('Tempo ligado', _hours(f?.uptimeSec)),
       ('Firmware', widget.firmwareVersion ?? '–'),
+      // Hidden rather than dashed: on firmware that predates the field this
+      // is a reading that does not exist, and an empty row beside a version
+      // that did load reads as a failure to fetch it.
+      if (widget.firmwareBuild != null) ('Build', widget.firmwareBuild!),
     ];
 
     return Positioned.fill(

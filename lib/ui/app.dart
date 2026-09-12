@@ -135,6 +135,7 @@ class _FlyAppState extends State<FlyApp> {
             frame: frame,
             stale: _repo.isStale,
             firmwareVersion: _repo.firmwareVersion,
+            firmwareBuild: _repo.firmwareBuild,
             thermalConfig: _repo.thermalConfig,
             muted: _repo.muted,
               audioError: _repo.audioError,

@@ -18,6 +18,10 @@ void main() {
     expect(find.text('Térmica'), findsOneWidget);
     expect(find.text('BMS'), findsOneWidget);
     expect(find.text('Sistema'), findsOneWidget);
+    // Scrolled to, not assumed visible: a ListView builds only what is on
+    // screen, and five cards do not fit the 600px test surface. The claim
+    // here is that the five areas are listed, not that they fit at once.
+    await tester.scrollUntilVisible(find.text('Atualizar'), 100);
     expect(find.text('Atualizar'), findsOneWidget);
   });
 
@@ -51,7 +55,10 @@ void main() {
     await tester.pumpAndSettle();
     expect(system, isTrue);
 
-    await tester.ensureVisible(find.text('Atualizar'));
+    // scrollUntilVisible, not ensureVisible: the latter needs the widget
+    // already in the tree, and a ListView has not built the card that is
+    // still off screen.
+    await tester.scrollUntilVisible(find.text('Atualizar'), 100);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Atualizar'));
     await tester.pumpAndSettle();
@@ -71,6 +78,8 @@ void main() {
     expect(find.textContaining('Limites de proteção'), findsOneWidget);
     expect(find.textContaining('Tipo de BMS'), findsOneWidget);
     expect(find.textContaining('Volume do buzzer'), findsOneWidget);
+    await tester.scrollUntilVisible(
+        find.textContaining('Enviar novo firmware'), 100);
     expect(find.textContaining('Enviar novo firmware'), findsOneWidget);
   });
 
@@ -99,5 +108,35 @@ void main() {
         expect(tester.takeException(), isNull);
       });
     }
+  });
+
+  testWidgets('names the firmware the controller is running', (tester) async {
+    // The web portal shows this on its front page. In the app it lived only
+    // in the update screen and the flight-screen drawer, so "which firmware
+    // is on this aircraft" meant opening the screen that replaces it.
+    await tester.pumpWidget(wrap(SettingsIndexScreen(
+      onOpenPower: () {},
+      onOpenThermal: () {},
+      onOpenBms: () {},
+      onOpenSystem: () {},
+      onOpenFirmware: () {},
+      firmwareVersion: '2.4.1 · Tmotor',
+    )));
+
+    expect(find.text('Firmware 2.4.1 · Tmotor'), findsOneWidget);
+  });
+
+  testWidgets('says so when the version is unknown', (tester) async {
+    // The `$XCTOD` path never reads INFO. Blank space would read as a
+    // rendering fault rather than as a missing reading.
+    await tester.pumpWidget(wrap(SettingsIndexScreen(
+      onOpenPower: () {},
+      onOpenThermal: () {},
+      onOpenBms: () {},
+      onOpenSystem: () {},
+      onOpenFirmware: () {},
+    )));
+
+    expect(find.text('Firmware desconhecido'), findsOneWidget);
   });
 }
