@@ -68,13 +68,13 @@ void main() {
     await tester.pumpAndSettle();
 
     final save = find.byKey(const Key('save-power'));
-    expect(tester.widget<ElevatedButton>(save).onPressed, isNotNull,
+    expect(tester.widget<FilledButton>(save).onPressed, isNotNull,
         reason: 'disarmed with a config loaded, saving is available');
 
     link.feedBinary(binarySample(armed: true));
     await tester.pumpAndSettle();
 
-    expect(tester.widget<ElevatedButton>(save).onPressed, isNull,
+    expect(tester.widget<FilledButton>(save).onPressed, isNull,
         reason: 'the route must follow the repository, not a snapshot');
   });
 
@@ -209,13 +209,13 @@ void main() {
     await tester.pumpAndSettle();
 
     final save = find.byKey(const Key('save-system'));
-    expect(tester.widget<ElevatedButton>(save).onPressed, isNotNull,
+    expect(tester.widget<FilledButton>(save).onPressed, isNotNull,
         reason: 'disarmed with a config loaded, saving is available');
 
     link.feedBinary(binarySample(armed: true));
     await tester.pumpAndSettle();
 
-    expect(tester.widget<ElevatedButton>(save).onPressed, isNull,
+    expect(tester.widget<FilledButton>(save).onPressed, isNull,
         reason: 'the route must follow the repository, not a snapshot');
   });
 }
