@@ -47,22 +47,11 @@ void main() {
     expect(c.isPolling, isFalse);
   });
 
-  test('a poll that does not answer stops the scan and says so', () async {
-    final session = FakeSession();
-    final editor = ConfigEditor(session);
-    final c = BmsScanController(editor,
-        pollInterval: const Duration(milliseconds: 10));
-
-    session.queueOk();                       // AUTH
-    session.queueOk();                       // BMS_SCAN_START
-    session.queueOk([1, 0]);                 // scanning, first poll
-    // No response for the second poll, so FakeSession will return ControlTimeout
-
-    await c.start(pin: '1234');
-    await pumpUntil(() => c.status == BmsScanStatus.error);
-
-    expect(c.isPolling, isFalse);
-  });
+  // What used to be here asserted that ONE unanswered poll ends the scan.
+  // That was my specification and it was wrong on the aircraft: the
+  // controller scans with the same radio that carries this link, so silence
+  // during those 5 s is the normal case. The two cases below replace it --
+  // silence is tolerated, and only the deadline ends the wait.
 
   test('stop() cancels the timer', () async {
     final session = FakeSession();
@@ -94,6 +83,63 @@ void main() {
 
     expect(outcome, isA<SaveRefusedArmed>());
     expect(c.refusal, isA<SaveRefusedArmed>());
+    expect(c.isPolling, isFalse);
+  });
+
+  test('a missed poll is not a failed scan', () async {
+    // THE REGRESSION THIS COVERS.
+    //
+    // The controller runs its 5 s BLE scan on the same radio that carries
+    // this link, and stops advertising for the whole of it, so polls landing
+    // inside the scan are the ones most likely to go unanswered. Ending on
+    // the first silence made "Buscar BMS" look like it did nothing at all.
+    final session = FakeSession();
+    final editor = ConfigEditor(session);
+    final c = BmsScanController(
+      editor,
+      pollInterval: const Duration(milliseconds: 5),
+      deadline: const Duration(seconds: 5),
+    );
+    addTearDown(c.dispose);
+
+    session.queueOk();              // AUTH
+    session.queueOk();              // BMS_SCAN_START
+    // Nothing queued for the next polls: they time out, as a busy controller
+    // does. Then the scan answers.
+    await c.start(pin: '1234');
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+
+    expect(c.status, BmsScanStatus.scanning,
+        reason: 'silence during the scan must not end it');
+
+    session.queueOk([2, 1, 1, 2, 3, 4, 5, 6, (-50) & 0xFF, 1]);
+    for (var i = 0; i < 20 && c.status == BmsScanStatus.scanning; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+    }
+
+    expect(c.status, BmsScanStatus.complete);
+    expect(c.results, hasLength(1));
+  });
+
+  test('a scan that never answers gives up at the deadline', () async {
+    final session = FakeSession();
+    final editor = ConfigEditor(session);
+    final c = BmsScanController(
+      editor,
+      pollInterval: const Duration(milliseconds: 5),
+      deadline: const Duration(milliseconds: 25),
+    );
+    addTearDown(c.dispose);
+
+    session.queueOk();              // AUTH
+    session.queueOk();              // BMS_SCAN_START
+    await c.start(pin: '1234');
+
+    for (var i = 0; i < 40 && c.status == BmsScanStatus.scanning; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+    }
+
+    expect(c.status, BmsScanStatus.error);
     expect(c.isPolling, isFalse);
   });
 }

@@ -304,6 +304,33 @@ class _BmsSettingsScreenState extends State<BmsSettingsScreen> {
                             ],
                           ),
                         ],
+                        if (widget.scanController.status ==
+                            BmsScanStatus.error) ...[
+                          const SizedBox(height: 12),
+                          Text(
+                            key: const Key('scan-error'),
+                            'A busca não respondeu. O controlador pode ter '
+                            'ficado ocupado — tente de novo.',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Theme.of(context).colorScheme.error,
+                            ),
+                          ),
+                        ],
+                        if (widget.scanController.status ==
+                                BmsScanStatus.complete &&
+                            widget.scanController.results.isEmpty) ...[
+                          const SizedBox(height: 12),
+                          Text(
+                            key: const Key('scan-empty'),
+                            'Nenhum dispositivo encontrado. Ligue o BMS e '
+                            'tente de novo.',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
                         if (widget.scanController.results.isNotEmpty) ...[
                           const SizedBox(height: 12),
                           ...widget.scanController.results

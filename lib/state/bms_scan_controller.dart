@@ -14,13 +14,21 @@ import 'config_editor.dart';
 class BmsScanController extends ChangeNotifier {
   BmsScanController(
     this._editor, {
-    this.pollInterval = const Duration(milliseconds: 700),
+    this.pollInterval = const Duration(seconds: 1),
+    this.deadline = const Duration(seconds: 15),
   });
 
   final ConfigEditor _editor;
   final Duration pollInterval;
 
+  /// How long to keep asking before calling the scan lost.
+  ///
+  /// Generous against the controller's 5 s scan, because the polls that fall
+  /// inside it are the ones most likely to go unanswered.
+  final Duration deadline;
+
   Timer? _timer;
+  int _ticks = 0;
   BmsScanStatus _status = BmsScanStatus.idle;
   List<BmsScanResult> _results = const [];
   int _total = 0;
@@ -47,6 +55,7 @@ class BmsScanController extends ChangeNotifier {
     _refusal = null;
     _results = const [];
     _total = 0;
+    _ticks = 0;
     _status = BmsScanStatus.scanning;
     notifyListeners();
 
@@ -65,13 +74,24 @@ class BmsScanController extends ChangeNotifier {
   }
 
   Future<void> _poll() async {
+    _ticks++;
     final state = await _editor.readBmsScan();
+
     if (state == null) {
-      // An unanswered poll is not an empty scan. Stopping and saying so beats
-      // showing "nenhum dispositivo" for a link that simply is not replying.
-      _status = BmsScanStatus.error;
-      _stopTimer();
-      notifyListeners();
+      // A missed poll is the normal case here, not a failure. The controller
+      // is running a BLE scan with the same radio that carries this link --
+      // it stops advertising for the whole 5 s -- so the replies most likely
+      // to go missing are exactly the ones during the scan being watched.
+      //
+      // Ending the scan on the first silence is what made "Buscar BMS" look
+      // like it did nothing: the status went to error, and the screen drew
+      // nothing at all for that. Keep asking until the deadline; only then is
+      // it really lost.
+      if (_ticks * pollInterval.inMilliseconds >= deadline.inMilliseconds) {
+        _status = BmsScanStatus.error;
+        _stopTimer();
+        notifyListeners();
+      }
       return;
     }
 
