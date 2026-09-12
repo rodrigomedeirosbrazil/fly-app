@@ -176,12 +176,39 @@ class FlyControllerLink {
 
     // Checked last, deliberately: on API 31+ the permissions requested above
     // are what make the adapter readable in the first place.
-    if (await FlutterBluePlus.adapterState.first != BluetoothAdapterState.on) {
-      return LinkStatus.bluetoothOff;
-    }
+    //
+    // `.first` was wrong here. CoreBluetooth reports `unknown` until its
+    // central manager finishes starting, which on iOS is also *before the
+    // permission prompt has been shown* -- so the first tap of a fresh
+    // install read `unknown`, reported "Bluetooth desligado", and returned
+    // without ever scanning. No prompt appeared, and the second tap worked
+    // because the state had settled by then. Exactly the symptom reported.
+    //
+    // So wait for the adapter to say something definite. If it does not
+    // within the window, proceed: starting the scan is what makes iOS ask,
+    // and refusing to scan is what guarantees it never does.
+    final state = await FlutterBluePlus.adapterState
+        .firstWhere((s) => s != BluetoothAdapterState.unknown)
+        .timeout(
+          const Duration(seconds: 5),
+          onTimeout: () => BluetoothAdapterState.unknown,
+        );
 
-    return null;
+    return switch (verdictForAdapter(_adapterState(state))) {
+      BleAdapterVerdict.proceed => null,
+      BleAdapterVerdict.bluetoothOff => LinkStatus.bluetoothOff,
+      BleAdapterVerdict.unauthorized => LinkStatus.unauthorized,
+    };
   }
+
+  /// The plugin's state, narrowed to what the policy decides on. Anything
+  /// transient -- turning on, turning off -- is not yet an answer.
+  BleAdapterState _adapterState(BluetoothAdapterState s) => switch (s) {
+        BluetoothAdapterState.on => BleAdapterState.on,
+        BluetoothAdapterState.off => BleAdapterState.off,
+        BluetoothAdapterState.unauthorized => BleAdapterState.unauthorized,
+        _ => BleAdapterState.unknown,
+      };
 
   /// Opens the OS settings page for this app. The only route back from a
   /// permanently refused Android permission.

@@ -1,0 +1,457 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:fly_app/protocol/bms_scan.dart';
+import 'package:fly_app/protocol/config_groups.dart';
+import 'package:fly_app/protocol/mac_address.dart';
+import 'package:fly_app/state/bms_scan_controller.dart';
+import 'package:fly_app/state/config_editor.dart';
+import 'package:fly_app/ui/settings/bms_settings_screen.dart';
+
+const bmsConfig = BmsConfig(
+  bmsType: 1,
+  bmsMac: [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF],
+);
+
+/// A controller with no BMS configured. Scanning is only offered in this
+/// state, because the firmware cannot scan while it holds a BMS link.
+const noBmsConfig = BmsConfig(bmsType: 0, bmsMac: kUnsetMac);
+
+Widget wrap(Widget child) => MaterialApp(home: child);
+
+class RecordingEditor implements ConfigEditor {
+  @override
+  void Function(SaveOk)? get onGroupRead => null;
+
+  final saves = <BmsConfig>[];
+  SaveOutcome outcome = const SaveOk();
+
+  final queued = <SaveOutcome>[];
+
+  @override
+  bool get authenticated => true;
+
+  @override
+  Future<SaveOutcome> savePower(PowerConfig c, {String? pin}) async =>
+      const SaveOk();
+
+  @override
+  Future<SaveOutcome> saveThermal(ThermalConfig c, {String? pin}) async =>
+      const SaveOk();
+
+  @override
+  Future<SaveOutcome> saveBms(BmsConfig config, {String? pin}) async {
+    saves.add(config);
+    return queued.isEmpty ? outcome : queued.removeAt(0);
+  }
+
+  @override
+  Future<SaveOutcome> saveSystem(SystemConfig config, {String? pin}) async =>
+      const SaveOk();
+
+  @override
+  Future<SaveOutcome> startBmsScan({String? pin}) async => const SaveOk();
+
+  @override
+  Future<BmsScanState?> readBmsScan() async => null;
+
+  @override
+  Future<SystemConfig?> readSystemConfig() async => null;
+
+  @override
+  Future<SaveOutcome> pairRemote({String? pin}) async => const SaveOk();
+
+  @override
+  Future<SaveOutcome> forgetRemote({String? pin}) async => const SaveOk();
+
+  @override
+  Future<SaveOutcome> previewBuzzer(int volume, {String? pin}) async =>
+      const SaveOk();
+}
+
+/// Stands in for the controller's scanner. `next` is what the poll answers,
+/// so a test can hand the screen a real result list -- which is the only way
+/// to exercise the two rules that live in the results: an unidentified device
+/// must not move the type dropdown, and the count line must report the
+/// controller's total rather than the length of the truncated list.
+class _MockEditor implements ConfigEditor {
+  @override
+  void Function(SaveOk)? get onGroupRead => null;
+
+  BmsScanState? next;
+
+  /// What starting a scan answers. A real editor returns SaveNeedsPin until
+  /// the connection has been authenticated.
+  SaveOutcome scanOutcome = const SaveOk();
+  int scanStarts = 0;
+  final scanPins = <String?>[];
+
+  @override
+  bool get authenticated => true;
+  @override
+  Future<SaveOutcome> savePower(PowerConfig c, {String? pin}) async =>
+      const SaveOk();
+  @override
+  Future<SaveOutcome> saveThermal(ThermalConfig c, {String? pin}) async =>
+      const SaveOk();
+  @override
+  Future<SaveOutcome> saveBms(BmsConfig config, {String? pin}) async =>
+      const SaveOk();
+  @override
+  Future<SaveOutcome> saveSystem(SystemConfig config, {String? pin}) async =>
+      const SaveOk();
+  @override
+  Future<SaveOutcome> startBmsScan({String? pin}) async {
+    scanStarts++;
+    scanPins.add(pin);
+    return scanOutcome;
+  }
+  @override
+  Future<BmsScanState?> readBmsScan() async => next;
+  @override
+  Future<SystemConfig?> readSystemConfig() async => null;
+  @override
+  Future<SaveOutcome> pairRemote({String? pin}) async => const SaveOk();
+  @override
+  Future<SaveOutcome> forgetRemote({String? pin}) async => const SaveOk();
+  @override
+  Future<SaveOutcome> previewBuzzer(int volume, {String? pin}) async =>
+      const SaveOk();
+}
+
+void main() {
+  late RecordingEditor editor;
+  late BmsScanController scanController;
+  late _MockEditor scanEditor;
+
+  setUp(() {
+    editor = RecordingEditor();
+    scanEditor = _MockEditor();
+    scanController = BmsScanController(scanEditor,
+        pollInterval: const Duration(milliseconds: 10));
+  });
+
+  tearDown(() => scanController.dispose());
+
+  BmsSettingsScreen screen({
+    bool armed = false,
+    BmsConfig? config = bmsConfig,
+    bool? bmsConnected,
+    bool? bmsConfigured,
+  }) =>
+      BmsSettingsScreen(
+        editor: editor,
+        scanController: scanController,
+        config: config,
+        armed: armed,
+        bmsConnected: bmsConnected,
+        bmsConfigured: bmsConfigured,
+      );
+
+  Finder save() => find.byKey(const Key('save-bms'));
+  Finder scanButton() => find.byKey(const Key('scan-bms'));
+
+  Future<void> tapSave(WidgetTester tester) async {
+    await tester.ensureVisible(save());
+    await tester.pumpAndSettle();
+    await tester.tap(save());
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('shows the stored type and address', (tester) async {
+    await tester.pumpWidget(wrap(screen()));
+    expect(find.text('JBD'), findsOneWidget);
+    expect(find.text('AA:BB:CC:DD:EE:FF'), findsOneWidget);
+  });
+
+  testWidgets('an unset address reads as não configurado', (tester) async {
+    const unsetConfig = BmsConfig(bmsType: 0, bmsMac: kUnsetMac);
+    await tester.pumpWidget(wrap(screen(config: unsetConfig)));
+    expect(find.text('não configurado'), findsOneWidget);
+  });
+
+  testWidgets('a result with no address but valid MAC is accepted',
+      (tester) async {
+    const unsetConfig = BmsConfig(bmsType: 0, bmsMac: kUnsetMac);
+    await tester.pumpWidget(wrap(screen(config: unsetConfig)));
+
+    // Open manual entry and enter a valid MAC
+    await tester.tap(find.byKey(const Key('manual-mac-toggle')));
+    await tester.pump();
+
+    await tester.enterText(
+        find.byKey(const Key('manual-mac')), 'AA:BB:CC:DD:EE:FF');
+    await tester.pump();
+
+    // Save should now be enabled (type is 0, but MAC is set)
+    expect(tester.widget<FilledButton>(save()).onPressed, isNotNull);
+  });
+
+  testWidgets('a type with no address makes save inert, with the reason',
+      (tester) async {
+    const configWithType = BmsConfig(bmsType: 2, bmsMac: kUnsetMac);
+    await tester.pumpWidget(wrap(screen(config: configWithType)));
+
+    expect(tester.widget<FilledButton>(save()).onPressed, isNull);
+    expect(find.textContaining('endereço do BMS'), findsOneWidget);
+  });
+
+  testWidgets('armed makes save and the scan inert', (tester) async {
+    await tester.pumpWidget(wrap(screen(armed: true, config: noBmsConfig)));
+
+    expect(tester.widget<FilledButton>(save()).onPressed, isNull);
+    expect(tester.widget<OutlinedButton>(scanButton()).onPressed, isNull);
+    expect(find.textContaining('armada'), findsWidgets);
+  });
+
+  testWidgets('manual entry refuses a half-typed MAC', (tester) async {
+    await tester.pumpWidget(wrap(screen()));
+
+    // Open manual entry
+    await tester.tap(find.byKey(const Key('manual-mac-toggle')));
+    await tester.pump();
+
+    // Enter invalid MAC
+    await tester.enterText(find.byKey(const Key('manual-mac')), 'AA:BB:CC');
+    await tester.pump();
+
+    expect(tester.widget<FilledButton>(save()).onPressed, isNull);
+  });
+
+  testWidgets('the PIN round trip carries what is on screen', (tester) async {
+    editor.queued.add(const SaveNeedsPin());
+    await tester.pumpWidget(wrap(screen()));
+
+    // Change the type through the dropdown
+    await tester.tap(find.byType(DropdownButton<int>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Daly (D2 BLE)').last);
+    await tester.pumpAndSettle();
+
+    await tapSave(tester);
+
+    await tester.enterText(find.byType(TextField).last, '1234');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+
+    expect(editor.saves, hasLength(2));
+    expect(editor.saves.last.bmsType, 2,
+        reason: 'the re-save must carry the fields, not the original config');
+  });
+
+  /// Runs one scan to completion so [scanController] holds real results.
+  ///
+  /// The status is `complete`, so the first poll ends the scan and leaves no
+  /// timer running for pumpAndSettle to wait on.
+  Future<void> completeScan(
+    WidgetTester tester, {
+    required int total,
+    required List<List<int>> results,
+  }) async {
+    scanEditor.next = BmsScanState(
+      status: BmsScanStatus.complete,
+      total: total,
+      results: [
+        for (final r in results)
+          BmsScanResult(
+              mac: r.sublist(0, 6), rssi: r[6], detectedType: r[7]),
+      ],
+    );
+    await tester.runAsync(() async {
+      await scanController.start(pin: '1234');
+      while (scanController.status == BmsScanStatus.scanning) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+    });
+  }
+
+  testWidgets('tapping a result fills the address and the detected type',
+      (tester) async {
+    await completeScan(tester, total: 1, results: [
+      [0x11, 0x22, 0x33, 0x44, 0x55, 0x66, -62, 3],
+    ]);
+    await tester.pumpWidget(wrap(screen(config: noBmsConfig)));
+
+    final tile = find.byKey(const Key('scan-result-0'));
+    await tester.ensureVisible(tile);
+    await tester.pumpAndSettle();
+    await tester.tap(tile);
+    await tester.pumpAndSettle();
+
+    await tapSave(tester);
+    expect(editor.saves.single.bmsMac, [0x11, 0x22, 0x33, 0x44, 0x55, 0x66]);
+    expect(editor.saves.single.bmsType, 3);
+  });
+
+  testWidgets('a result with no detected type leaves the dropdown alone',
+      (tester) async {
+    // The app never sends BMS_DETECT -- it can block the firmware past its
+    // 10 s watchdog and reboot the controller -- so an unidentified device is
+    // one the pilot names. Overwriting the type with 0 here would silently
+    // turn the BMS off.
+    await completeScan(tester, total: 1, results: [
+      [0x11, 0x22, 0x33, 0x44, 0x55, 0x66, -88, 0],
+    ]);
+    await tester.pumpWidget(wrap(screen()));  // stored type is 1 (JBD)
+
+    final tile = find.byKey(const Key('scan-result-0'));
+    await tester.ensureVisible(tile);
+    await tester.pumpAndSettle();
+    await tester.tap(tile);
+    await tester.pumpAndSettle();
+
+    await tapSave(tester);
+    expect(editor.saves.single.bmsMac, [0x11, 0x22, 0x33, 0x44, 0x55, 0x66]);
+    expect(editor.saves.single.bmsType, 1, reason: 'the stored type must survive');
+  });
+
+  testWidgets('the count line reports the controller total, not the list '
+      'length', (tester) async {
+    // The firmware truncates the reply to one BLE frame while `count` still
+    // carries the true total. Believing the list would under-report what the
+    // scan saw.
+    await completeScan(tester, total: 30, results: [
+      [0x11, 0x22, 0x33, 0x44, 0x55, 0x66, -50, 1],
+    ]);
+    await tester.pumpWidget(wrap(screen()));
+
+    final line = find.byKey(const Key('scan-truncated'));
+    await tester.ensureVisible(line);
+    await tester.pumpAndSettle();
+    expect(tester.widget<Text>(line).data, contains('30'));
+  });
+
+  testWidgets('a list that matches the count shows no truncation line',
+      (tester) async {
+    await completeScan(tester, total: 1, results: [
+      [0x11, 0x22, 0x33, 0x44, 0x55, 0x66, -50, 1],
+    ]);
+    await tester.pumpWidget(wrap(screen()));
+
+    expect(find.byKey(const Key('scan-truncated')), findsNothing);
+  });
+
+  testWidgets('a scan with no session asks for the PIN instead of complaining',
+      (tester) async {
+    // THE REGRESSION THIS COVERS.
+    //
+    // Starting a scan is a write by the firmware's gate (opRequiresAuth does
+    // not exempt BMS_SCAN_START), so the first one of a connection needs the
+    // PIN. The screen used to call start() with none, take SaveNeedsPin, and
+    // print it as a refusal -- the pilot tapped "Buscar BMS" and was told the
+    // PIN was missing, with nowhere to type it.
+    scanEditor.scanOutcome = const SaveNeedsPin();
+    await tester.pumpWidget(wrap(screen(config: noBmsConfig)));
+
+    await tester.tap(find.byKey(const Key('scan-bms')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Digite o PIN'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField).last, '1234');
+    scanEditor.scanOutcome = const SaveOk();
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+
+    expect(scanEditor.scanPins.last, '1234',
+        reason: 'the retry carries the PIN that was just typed');
+    expect(scanEditor.scanStarts, 2);
+  });
+
+  testWidgets('a scan on an authenticated connection never prompts',
+      (tester) async {
+    await tester.pumpWidget(wrap(screen(config: noBmsConfig)));
+
+    await tester.tap(find.byKey(const Key('scan-bms')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Digite o PIN'), findsNothing);
+    expect(scanEditor.scanPins.single, isNull);
+  });
+
+  testWidgets('a scan the controller could not run names the likely cause',
+      (tester) async {
+    // The firmware tears down the BMS client link and calls scan->start() in
+    // the same breath. BLE disconnect is asynchronous, so the scan often
+    // loses that race -- which is why removing the configured BMS is what
+    // makes a scan work. Saying "erro" alone leaves the pilot nowhere.
+    await completeScan(tester, total: 0, results: []);
+    scanEditor.next = const BmsScanState(
+        status: BmsScanStatus.error, total: 0, results: []);
+    await tester.runAsync(() async {
+      await scanController.start(pin: '1234');
+      while (scanController.status == BmsScanStatus.scanning) {
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+    });
+    await tester.pumpWidget(wrap(screen()));
+
+    final line = find.byKey(const Key('scan-error'));
+    await tester.ensureVisible(line);
+    await tester.pumpAndSettle();
+    expect(tester.widget<Text>(line).data, contains('Nenhum'));
+    expect(scanController.lostContact, isFalse);
+  });
+
+  testWidgets('a scan that completes with nothing says so', (tester) async {
+    await completeScan(tester, total: 0, results: []);
+    await tester.pumpWidget(wrap(screen()));
+
+    expect(find.byKey(const Key('scan-empty')), findsOneWidget);
+  });
+
+  testWidgets('a configured BMS hides the scan and says why', (tester) async {
+    // The pilot found this before the app did: with a BMS configured the
+    // controller's scan finds nothing, every time. It disconnects its BMS
+    // client and calls scan->start() in the same loop iteration, and a BLE
+    // disconnect is asynchronous. Offering a button that cannot work is
+    // worse than not offering it.
+    await tester.pumpWidget(wrap(screen()));  // bmsType 1
+
+    expect(find.byKey(const Key('scan-bms')), findsNothing);
+    expect(tester.widget<Text>(find.byKey(const Key('scan-blocked'))).data,
+        contains('Nenhum'));
+  });
+
+  testWidgets('the gate is the saved type, not the dropdown', (tester) async {
+    // Choosing "Nenhum" is not enough: the controller still holds the BMS
+    // link until the write lands. The button appears when the controller
+    // says it has no BMS, not when the form does.
+    await tester.pumpWidget(wrap(screen()));  // saved type is JBD
+
+    await tester.tap(find.byKey(const Key('bms-type')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Nenhum').last);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('scan-bms')), findsNothing);
+  });
+
+  testWidgets('no BMS configured offers the scan', (tester) async {
+    await tester.pumpWidget(wrap(screen(config: noBmsConfig)));
+
+    expect(find.byKey(const Key('scan-bms')), findsOneWidget);
+    expect(find.byKey(const Key('scan-blocked')), findsNothing);
+  });
+
+  group('layout', () {
+    for (final size in const [
+      Size(393, 852),
+      Size(320, 480),
+      Size(852, 393),
+      Size(1280, 800),
+    ]) {
+      testWidgets('${size.width.toInt()}x${size.height.toInt()}',
+          (tester) async {
+        tester.view.physicalSize = size;
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+
+        await tester.pumpWidget(wrap(screen()));
+        await tester.pumpAndSettle();
+
+        expect(tester.takeException(), isNull);
+      });
+    }
+  });
+}

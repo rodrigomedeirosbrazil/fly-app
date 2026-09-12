@@ -336,8 +336,8 @@ borrowed it cannot outlive the screen that created it.
 
 ### The settings screens mirror the portal
 
-Four areas, per-cell voltage entry with the pack total beside it, a dropdown of
-the pack sizes the portal offers, and a voltage divider that is **derived, not
+Four areas — **all four live** — per-cell voltage entry with the pack total
+beside it, a dropdown of the pack sizes the portal offers, and a voltage divider that is **derived, not
 typed** — the formula comes from `src/WebServer/Pages/ConfigPowerPage.h`.
 A pilot who knows one surface should recognise the other.
 
@@ -369,6 +369,81 @@ The input filter is an allow-list of digits and separators, not a fixed-width
 mask — these fields have different lengths, and a mask would fix each one's
 shape in advance. It restricts the alphabet; the parse judges the format, and
 the parse is the half that covers paste, hardware keyboards and `1.2.3`.
+
+### `BMS_DETECT` is the one opcode this app refuses to send
+
+`BluetoothBms::detectBmsTypeByMac()` disables all three BMS drivers, pauses
+advertising, and performs a **blocking** `BLEClient::connect()`. On an
+unresponsive address that outlasts the 10 s task watchdog
+(`WDT_TIMEOUT_S`, panic=true) and **reboots the controller** — in flight, that
+cuts the motor. It is the only opcode in the protocol that can do that, and
+the only one the firmware pointedly excludes from `opAllowedWhileArmed`
+*despite reading like a query*.
+
+It is also unnecessary. `BMS_SCAN_STATUS` already carries a `detectedType` per
+result, read from the advertisement without connecting. A result that
+identified itself selects both the address and the type; one that did not
+selects **only the address**, and the pilot names it from the dropdown. The
+portal offers detection; this app does not, deliberately — the same family of
+divergence as the validation gap, and for the same reason.
+
+The test that pins it is `bms_settings_screen_test.dart`'s "a result with no
+detected type leaves the dropdown alone". Overwriting the type with 0 would
+look like a selection and silently turn the BMS off.
+
+### The scan is offered only with no BMS configured
+
+`startWebScan()` disconnects the BMS client and calls `scan->start()` in the
+same loop iteration. A BLE disconnect is asynchronous, so with a BMS
+configured the scan reliably loses that race and finds nothing — confirmed on
+the aircraft, where the workaround was to set the type to Nenhum, save, and
+only then scan.
+
+So the button appears only when the **saved** type is 0. The dropdown reading
+"Nenhum" is not enough: the controller still holds the BMS link until the
+write lands, which is what `bms_settings_screen_test.dart`'s "the gate is the
+saved type, not the dropdown" pins. Offering a button that cannot work is
+worse than not offering it.
+
+Manual entry stays available in both states — a BMS that is asleep never
+advertises, and without it that pilot is back at the portal.
+
+### A scan's count is not the length of its list
+
+`BMS_SCAN_STATUS` returns `[status u8][count u8]` then eight bytes per result,
+**truncated to fit one frame while `count` still reports the true total**. So
+`total > results.length` is normal, not corruption, and the screen says
+"Mostrando N de M" from `total`. Believing the list would under-report what the
+controller saw.
+
+The scan runs 5 s (`WEB_SCAN_DURATION_SECONDS`) and stores at most 16 results.
+**Advertising is suppressed for its whole duration**: an existing connection
+survives, but a client that drops cannot find the controller until it ends.
+The screen says so rather than looking frozen.
+
+### Pairing has no readback, no timeout and no cancel
+
+`REMOTE_PAIR` answers `Ok` the instant it raises a flag.
+`RemoteLink::onReceive` clears that flag when the **first remote packet
+arrives**, which may be never. There is no "is pairing" query, no cancel
+opcode, and no firmware timeout.
+
+So the only signal is **`remoteMac` in the System group turning non-zero**, and
+the only limit is this app's own 60 s deadline. When it expires — or when the
+pilot cancels — the controller is **still listening**, and the next remote
+powered on nearby will be paired. The screen says exactly that. Claiming a
+cancel the protocol cannot perform would be a lie the pilot acts on.
+
+`RemotePairingController._poll` therefore counts every tick and evaluates the
+deadline **even when the read does not answer**. Returning early on a null read
+looked like the right instinct — a missed poll is not a failure — but it meant
+a pairing on a link that went quiet waited forever, which is the one condition
+under which the pilot most needs to be told.
+
+**`REMOTE_FORGET` clears NVS, not the running peer.** `settings
+.clearRemoteMac()` saves, and nothing tells `RemoteLink` to drop `peerMac_`, so
+a remote already talking may keep working until the controller restarts. The
+screen says that instead of promising more.
 
 ### The Dart enum order does not match the firmware's
 

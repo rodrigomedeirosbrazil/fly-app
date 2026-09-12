@@ -49,8 +49,17 @@ from here the app is the lagging side of phase 2.
 
 **Configuration writes are done** (2026-09-11). The `Power` and `Thermal`
 groups can be changed from the app, authenticated per connection with the
-controller's PIN. `Bms` and `System` wait on subsystem 4, which produces the
-MAC addresses they carry.
+controller's PIN.
+
+**BMS and System are done** (2026-09-11). The BMS type and address come from a
+controller-driven scan, and the remote throttle pairs from the app. That closes
+every value the web portal writes except the PIN itself, and leaves buzzer
+mirroring as the last of phase 2.
+
+Two things the app refuses to do, both recorded in `CLAUDE.md`: it never sends
+`BMS_DETECT`, whose blocking connect can outlast the 10 s watchdog and reboot
+the controller, and it never claims to cancel a pairing, because the protocol
+has no opcode that does.
 
 This is the first piece of the web portal with a real alternative, and
 therefore the first step toward phase 4.
@@ -175,6 +184,48 @@ left in the 1.875 MB slot is unmeasured, and phase 3's OTA is additive — so
 the number matters before it is planned.
 
 ## Known issues in fly-controller
+
+**Changing the BMS type appears to clear the app's authentication.** Reported
+from the aircraft: after authenticating, setting the type to Nenhum asked for
+the PIN, and selecting a BMS again asked once more. `authenticated_` is only
+cleared in `BleControl::onCentralDisconnected()`, which `BleServerHost`'s
+`BLEServerCallbacks::onDisconnect` calls — so something in the BMS client's
+connect/disconnect is reaching the *server's* disconnect callback. Worth
+confirming with a log line in that callback: if it fires when no phone
+disconnected, the callback is being invoked for the client role and the auth
+reset belongs behind a check on which connection actually went away.
+
+**A BMS scan races the BMS link it just tore down.** `startWebScan()` calls
+`setEnabled(false)` on the three backends — which reaches
+`pClient_->disconnect()` — and then `scan->start()` in the same loop
+iteration. A BLE disconnect is asynchronous, so the scan begins while the
+client link is still tearing down, and on a controller with a BMS configured
+it commonly fails or finds nothing. Removing the configured BMS first is the
+workaround, and it is what the app now tells the pilot to do. The fix belongs
+in the firmware: wait for the disconnect before starting the scan.
+
+**The scan's failure reason never reaches the app.** `getWebScanError()` holds
+a string ("Failed to start BLE scan", "BLE stack is not initialized") that
+`BMS_SCAN_STATUS` does not carry — the reply is `[status][count]` and results.
+So the app can say a scan failed but never why. Worth appending to that reply.
+
+**`REMOTE_FORGET` does not drop the running peer.** `Settings::clearRemoteMac()`
+saves, but nothing tells `RemoteLink` to clear `peerMac_` or remove the ESP-NOW
+peer, so a remote already transmitting may keep working until the controller
+restarts. The app warns about this rather than working around it.
+
+**A BMS scan alongside a second connected central is unmeasured.** Advertising
+is suppressed for the 5 s a scan runs; XCTrack's existing link should survive,
+but that is the firmware's claim and not yet a measurement.
+
+**`REMOTE_FORGET` does not drop the running peer.** `Settings::clearRemoteMac()`
+saves, but nothing tells `RemoteLink` to clear `peerMac_` or remove the ESP-NOW
+peer, so a remote already transmitting may keep working until the controller
+restarts. The app warns about this rather than working around it.
+
+**A BMS scan alongside a second connected central is unmeasured.** Advertising
+is suppressed for the 5 s a scan runs; XCTrack's existing link should survive,
+but that is the firmware's claim and not yet a measurement.
 
 Neither is fixed, and both belong to the other repo.
 

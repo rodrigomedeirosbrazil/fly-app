@@ -10,6 +10,7 @@ import '../protocol/control_telemetry_codec.dart';
 import '../protocol/line_assembler.dart';
 import '../protocol/telemetry_frame.dart';
 import '../protocol/xctod_parser.dart';
+import 'config_editor.dart';
 import 'control_session.dart';
 import 'link_health.dart';
 import 'telemetry_source_policy.dart';
@@ -72,19 +73,39 @@ class TelemetryRepository extends ChangeNotifier {
     return '${i.appVersion} · $type';
   }
 
-  /// The live request channel, or null on the `$XCTOD` path. Exposed so the
-  /// settings screen can build a [ConfigEditor] for this connection; the
-  /// repository stays glue and owns no editing rules of its own.
+  /// The live request channel, or null on the `$XCTOD` path.
   ControlSession? get session => _session;
+
+  /// The one editor for this connection, or null on the `$XCTOD` path.
+  ///
+  /// **One per connection, not one per screen.** `ConfigEditor` carries the
+  /// authenticated flag, and the firmware clears its own `authenticated_` in
+  /// `onCentralDisconnected()` — so the connection is the unit the PIN
+  /// belongs to on both sides. Building an editor per route made every screen,
+  /// and even the scan and the save button on the *same* screen, hold a
+  /// separate flag: the pilot was asked for the PIN again on each one.
+  ConfigEditor? get editor => _editor;
 
   /// Whether the controller reports a selectable motor temperature source.
   /// False when INFO was never read.
   bool get selectableMotorTempSource =>
       _link.info?.hasSelectableMotorTempSource ?? false;
 
+  /// Whether the controller supports remote pairing. False when INFO was never
+  /// read.
+  bool get hasRemoteLink => _link.info?.hasRemoteLink ?? false;
+
   /// The `Power` group, fetched alongside the thermal one.
   PowerConfig? get powerConfig => _powerConfig;
   PowerConfig? _powerConfig;
+
+  /// The `Bms` group, fetched after the power one.
+  BmsConfig? get bmsConfig => _bmsConfig;
+  BmsConfig? _bmsConfig;
+
+  /// The `System` group, fetched after the BMS one.
+  SystemConfig? get systemConfig => _systemConfig;
+  SystemConfig? _systemConfig;
 
   Future<void> start() async {
     final blocked = await _link.blockingCondition();
@@ -111,6 +132,7 @@ class TelemetryRepository extends ChangeNotifier {
   bool _anyFrameRendered = false;
 
   ControlSession? _session;
+  ConfigEditor? _editor;
 
   /// This pilot's configured thermal thresholds, or null when they are not
   /// known: the sentence path, firmware that refuses `CFG_GET`, or a fetch
@@ -151,7 +173,7 @@ class TelemetryRepository extends ChangeNotifier {
     return result;
   }
 
-  /// Asks for the thermal and power groups once per connection.
+  /// Asks for all four config groups once per connection.
   ///
   /// Triggered by the first decoded binary frame rather than by connecting:
   /// at that point the source is settled and the service has demonstrably
@@ -178,6 +200,32 @@ class TelemetryRepository extends ChangeNotifier {
       _powerConfig = PowerConfig.decode(power.payload);
       notifyListeners();
     }
+
+    final bms = await _requestGroup(session, ConfigGroup.bms);
+    if (bms is ControlOk) {
+      _bmsConfig = BmsConfig.decode(bms.payload);
+      notifyListeners();
+    }
+
+    final system = await _requestGroup(session, ConfigGroup.system);
+    if (system is ControlOk) {
+      _systemConfig = SystemConfig.decode(system.payload);
+      notifyListeners();
+    }
+  }
+
+  /// Takes what the controller reported after a write.
+  ///
+  /// The re-read is the authority, not the values the app sent — the same
+  /// rule `_fetchConfig` follows. Without this the cache stayed at whatever
+  /// the connection opened with, so a saved threshold was invisible until the
+  /// next reconnect and the dials kept their old band.
+  void _applyGroupRead(SaveOk read) {
+    if (read.thermal != null) _thermalConfig = read.thermal;
+    if (read.power != null) _powerConfig = read.power;
+    if (read.bms != null) _bmsConfig = read.bms;
+    if (read.system != null) _systemConfig = read.system;
+    notifyListeners();
   }
 
   void _onStatus(LinkStatus s) {
@@ -191,9 +239,13 @@ class TelemetryRepository extends ChangeNotifier {
       // after a reconnect must not reach a request from the previous one.
       _session?.dispose();
       _session = null;
+      // With the session, because the PIN it holds is per connection.
+      _editor = null;
       _thermalRequested = false;
       _thermalConfig = null;
       _powerConfig = null;
+      _bmsConfig = null;
+      _systemConfig = null;
     }
     if (s == LinkStatus.idle) {
       // Only an explicit stop() forgets the last frame. A drop must keep it:
@@ -240,6 +292,7 @@ class TelemetryRepository extends ChangeNotifier {
               _link.sendCommand,
               incoming: _link.responses,
             );
+            _editor ??= ConfigEditor(session, onGroupRead: _applyGroupRead);
             unawaited(_fetchConfig(session));
           }
         }

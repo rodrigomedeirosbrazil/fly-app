@@ -236,4 +236,86 @@ void main() {
           reason: 'thermal sent again after reconnect');
     });
   });
+
+  group('all four groups', () {
+    test('all four groups are fetched on the first binary frame', () async {
+      link.emit(LinkStatus.connected);
+      link.feedBinary(binarySample());
+      await pumpEventQueue();
+
+      expect(link.commands, hasLength(1),
+          reason: 'thermal is requested first');
+      expect(link.commands[0][3], ConfigGroup.thermal.id);
+      link.replyThermal(0);
+      await pumpEventQueue();
+
+      expect(link.commands, hasLength(2),
+          reason: 'power is requested after thermal succeeds');
+      expect(link.commands[1][3], ConfigGroup.power.id);
+      link.replyPower(1);
+      await pumpEventQueue();
+
+      expect(link.commands, hasLength(3),
+          reason: 'bms is requested after power succeeds');
+      expect(link.commands[2][3], ConfigGroup.bms.id);
+      link.replyStatus(2, 0); // Reply OK with no payload — BMS will decode as null
+      await pumpEventQueue();
+
+      expect(link.commands, hasLength(4),
+          reason: 'system is requested after bms succeeds');
+      expect(link.commands[3][3], ConfigGroup.system.id);
+      link.replyStatus(3, 0); // Reply OK with no payload — System will decode as null
+      await pumpEventQueue();
+
+      expect(repo.thermalConfig, isNotNull,
+          reason: 'thermal was fetched and decoded');
+      expect(repo.thermalConfig!.motorBandStartC, closeTo(80.0, 1e-9));
+      expect(repo.powerConfig, isNotNull,
+          reason: 'power was fetched and decoded');
+      expect(repo.powerConfig!.capacityMah, 18000);
+      // BMS and System configs are null because replyStatus sends empty payload,
+      // but the requests were still sent, which is what this test verifies
+    });
+
+    test('ErrBadOp on the first group stops the whole sequence', () async {
+      // A controller without CFG_GET refuses all four identically. Finding that
+      // out once is enough, and asking three more times costs radio time on a
+      // link that is already carrying telemetry.
+      link.emit(LinkStatus.connected);
+      link.feedBinary(binarySample());
+      await pumpEventQueue();
+
+      link.replyStatus(0, 2); // ErrBadOp
+      await pumpEventQueue();
+
+      expect(link.commands, hasLength(1),
+          reason: 'only thermal was requested; power, bms and system were not');
+      expect(repo.thermalConfig, isNull);
+      expect(repo.powerConfig, isNull);
+      expect(repo.bmsConfig, isNull);
+      expect(repo.systemConfig, isNull);
+    });
+  });
+
+  group('the editor is per connection', () {
+    test('a disconnect drops it, because the PIN does not survive one',
+        () async {
+      final link = FakeLink();
+      final repo = TelemetryRepository(link: link, clock: DateTime.now);
+      addTearDown(repo.dispose);
+
+      link.emit(LinkStatus.connected);
+      link.feedBinary(binarySample());
+      await pumpEventQueue();
+      expect(repo.editor, isNotNull);
+
+      // The firmware clears authenticated_ in onCentralDisconnected(), so
+      // holding an editor across a reconnect would have the app believing in
+      // a session the controller has already forgotten.
+      link.emit(LinkStatus.disconnected);
+      await pumpEventQueue();
+
+      expect(repo.editor, isNull);
+    });
+  });
 }

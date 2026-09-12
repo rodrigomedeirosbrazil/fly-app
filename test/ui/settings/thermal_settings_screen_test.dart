@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:fly_app/protocol/bms_scan.dart';
 import 'package:fly_app/protocol/config_groups.dart';
 import 'package:fly_app/state/config_editor.dart';
 import 'package:fly_app/ui/settings/thermal_settings_screen.dart';
@@ -15,6 +16,9 @@ const thermal = ThermalConfig(
 Widget wrap(Widget child) => MaterialApp(home: child);
 
 class RecordingEditor implements ConfigEditor {
+  @override
+  void Function(SaveOk)? get onGroupRead => null;
+
   final saves = <ThermalConfig>[];
   SaveOutcome outcome = const SaveOk();
 
@@ -34,6 +38,33 @@ class RecordingEditor implements ConfigEditor {
     saves.add(c);
     return queued.isEmpty ? outcome : queued.removeAt(0);
   }
+
+  @override
+  Future<SaveOutcome> saveBms(BmsConfig config, {String? pin}) async =>
+      const SaveOk();
+
+  @override
+  Future<SaveOutcome> saveSystem(SystemConfig config, {String? pin}) async =>
+      const SaveOk();
+
+  @override
+  Future<SaveOutcome> startBmsScan({String? pin}) async => const SaveOk();
+
+  @override
+  Future<BmsScanState?> readBmsScan() async => null;
+
+  @override
+  Future<SystemConfig?> readSystemConfig() async => null;
+
+  @override
+  Future<SaveOutcome> pairRemote({String? pin}) async => const SaveOk();
+
+  @override
+  Future<SaveOutcome> forgetRemote({String? pin}) async => const SaveOk();
+
+  @override
+  Future<SaveOutcome> previewBuzzer(int volume, {String? pin}) async =>
+      const SaveOk();
 }
 
 void main() {
@@ -85,7 +116,7 @@ void main() {
     await tester.enterText(find.byKey(const Key('motor-start')), '100');
     await tester.pump();
 
-    expect(tester.widget<ElevatedButton>(save()).onPressed, isNull);
+    expect(tester.widget<FilledButton>(save()).onPressed, isNull);
     expect(find.textContaining('precisa ser menor'), findsOneWidget);
   });
 
@@ -95,7 +126,7 @@ void main() {
     await tester.enterText(find.byKey(const Key('motor-max')), '200');
     await tester.pump();
 
-    expect(tester.widget<ElevatedButton>(save()).onPressed, isNull);
+    expect(tester.widget<FilledButton>(save()).onPressed, isNull);
     expect(find.textContaining('0 a 150'), findsOneWidget);
   });
 
@@ -107,7 +138,7 @@ void main() {
     await tester.enterText(find.byKey(const Key('motor-start')), 'abc');
     await tester.pump();
 
-    expect(tester.widget<ElevatedButton>(save()).onPressed, isNull);
+    expect(tester.widget<FilledButton>(save()).onPressed, isNull);
     expect(find.textContaining('números válidos'), findsOneWidget);
   });
 
@@ -116,7 +147,7 @@ void main() {
     await tester.enterText(find.byKey(const Key('esc-start')), '');
     await tester.pump();
 
-    expect(tester.widget<ElevatedButton>(save()).onPressed, isNull);
+    expect(tester.widget<FilledButton>(save()).onPressed, isNull);
   });
 
   testWidgets('a comma is a decimal separator, not a rejection',
@@ -131,7 +162,7 @@ void main() {
 
   testWidgets('armed makes save inert and says so', (tester) async {
     await tester.pumpWidget(wrap(screen(armed: true)));
-    expect(tester.widget<ElevatedButton>(save()).onPressed, isNull);
+    expect(tester.widget<FilledButton>(save()).onPressed, isNull);
     expect(find.textContaining('armada'), findsWidgets);
   });
 
@@ -146,7 +177,7 @@ void main() {
   testWidgets('no config means nothing to edit and nothing to overwrite',
       (tester) async {
     await tester.pumpWidget(wrap(screen(config: null)));
-    expect(tester.widget<ElevatedButton>(save()).onPressed, isNull);
+    expect(tester.widget<FilledButton>(save()).onPressed, isNull);
   });
 
   testWidgets('the PIN round trip carries what is on screen', (tester) async {

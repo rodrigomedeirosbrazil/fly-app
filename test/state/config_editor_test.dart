@@ -1,39 +1,14 @@
-import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:fly_app/protocol/bms_scan.dart';
 import 'package:fly_app/protocol/config_groups.dart';
 import 'package:fly_app/protocol/control_frame.dart';
+import 'package:fly_app/protocol/mac_address.dart';
 import 'package:fly_app/state/config_editor.dart';
 import 'package:fly_app/state/control_session.dart';
 
-/// Answers requests with whatever the test queued, in order.
-class FakeSession implements ControlSession {
-  final sent = <({int op, List<int> payload})>[];
-  final _queued = <ControlResult>[];
-
-  void queue(ControlResult r) => _queued.add(r);
-
-  void queueOk([List<int> payload = const []]) => queue(ControlOk(payload));
-
-  @override
-  Future<ControlResult> request({
-    required int op,
-    List<int> payload = const [],
-  }) async {
-    sent.add((op: op, payload: payload));
-    return _queued.isEmpty ? const ControlTimeout() : _queued.removeAt(0);
-  }
-
-  @override
-  Stream<ControlResponse> get events => const Stream.empty();
-
-  @override
-  Duration get timeout => const Duration(seconds: 2);
-
-  @override
-  void dispose() {}
-}
+import 'fake_session.dart';
 
 /// A valid 17-byte Thermal group: motor 80–100 °C, ESC 70–95 °C.
 Uint8List thermalBytes({int motorStartMc = 80000}) {
@@ -240,5 +215,187 @@ void main() {
 
     expect(await editor.savePower(power, pin: '1234'), isA<SaveOk>());
     expect(session.sent[1].payload.first, ConfigGroup.power.id);
+  });
+
+  group('the action opcodes', () {
+    test('a scan start needs the PIN, like any other write', () async {
+      expect(await editor.startBmsScan(), isA<SaveNeedsPin>());
+      expect(session.sent, isEmpty);
+    });
+
+    test('a scan start while armed never asks for a PIN', () async {
+      session.queue(const ControlRefused(ControlStatus.errState));
+
+      expect(await editor.startBmsScan(pin: '1234'), isA<SaveRefusedArmed>());
+      // AUTH went out and was refused as armed; the scan itself never did.
+      expect(session.sent, hasLength(1));
+    });
+
+    test('ErrBusy means a scan is already running', () async {
+      session.queueOk();                                       // AUTH
+      session.queue(const ControlRefused(ControlStatus.errBusy));
+
+      expect(await editor.startBmsScan(pin: '1234'), isA<SaveBusy>());
+      expect(session.sent.last.op, 0x21);
+    });
+
+    test('reading the scan status needs no PIN and no session', () async {
+      session.queueOk([2, 0]);
+
+      final state = await editor.readBmsScan();
+
+      expect(state, isNotNull);
+      expect(state!.status, BmsScanStatus.complete);
+      expect(session.sent.single.op, 0x22);
+      expect(editor.authenticated, isFalse);
+    });
+
+    test('a scan status that does not answer is null, not an empty scan',
+        () async {
+      // Nothing queued, so FakeSession answers ControlTimeout.
+      expect(await editor.readBmsScan(), isNull);
+    });
+
+    test('the status read is not retried', () async {
+      await editor.readBmsScan();
+      expect(session.sent, hasLength(1));
+    });
+
+    test('pairing maps refusals like every other write', () async {
+      session.queueOk();                                        // AUTH
+      session.queue(const ControlRefused(ControlStatus.errBadOp));
+
+      expect(await editor.pairRemote(pin: '1234'), isA<SaveUnsupported>());
+      expect(session.sent.last.op, 0x24);
+    });
+
+    test('forgetting sends REMOTE_FORGET', () async {
+      session.queueOk();                                        // AUTH
+      session.queueOk();
+
+      expect(await editor.forgetRemote(pin: '1234'), isA<SaveOk>());
+      expect(session.sent.last.op, 0x25);
+    });
+
+    test('a buzzer preview past 100 is refused before it is sent', () async {
+      expect(await editor.previewBuzzer(101, pin: '1234'),
+          isA<SaveRejectedByController>());
+      expect(session.sent, isEmpty);
+    });
+
+    test('a buzzer preview is never retried, because it makes a sound',
+        () async {
+      session.queueOk();                        // AUTH
+      // Nothing queued for the preview, so it times out.
+      expect(await editor.previewBuzzer(70, pin: '1234'), isA<SaveFailed>());
+      expect(session.sent.where((s) => s.op == 0x26), hasLength(1));
+    });
+
+    test('the BMS group saves and re-reads through the same path', () async {
+      session.queueOk();                                        // AUTH
+      session.queueOk();                                        // CFG_SET
+      session.queueOk([1, 1, 2, 3, 4, 5, 6]);                   // CFG_GET
+
+      final outcome = await editor.saveBms(
+          const BmsConfig(bmsType: 1, bmsMac: [1, 2, 3, 4, 5, 6]),
+          pin: '1234') as SaveOk;
+
+      expect(outcome.bms!.bmsType, 1);
+      expect(session.sent[1].payload.first, ConfigGroup.bms.id);
+    });
+
+    test('the System group saves through the same path', () async {
+      session.queueOk();                                        // AUTH
+      session.queueOk();                                        // CFG_SET
+      session.queueOk([70, 1, 0, 0, 0, 0, 0, 0]);               // CFG_GET
+
+      final outcome = await editor.saveSystem(
+          const SystemConfig(
+              buzzerVolume: 70, throttleSource: 1, remoteMac: kUnsetMac),
+          pin: '1234') as SaveOk;
+
+      expect(outcome.system!.buzzerVolume, 70);
+    });
+
+    test('readSystemConfig is a plain open read', () async {
+      session.queueOk([70, 1, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]);
+
+      final config = await editor.readSystemConfig();
+
+      expect(config!.remoteMac, [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF]);
+      expect(session.sent.single.op, 0x10);
+    });
+  });
+
+  group('the re-read reaches whoever cached the group', () {
+    test('a successful write hands the new values up', () async {
+      // THE REGRESSION THIS COVERS.
+      //
+      // The repository fetched all four groups once per connection and
+      // nothing ever updated them, so a saved threshold was invisible the
+      // moment you left the screen and came back -- and the dials kept
+      // drawing the thermal band from the values the connection opened with,
+      // for the rest of that connection. A band from stale thresholds is the
+      // one CLAUDE.md calls worse than no band, because it looks like
+      // information.
+      final reads = <SaveOk>[];
+      final editor = ConfigEditor(session, onGroupRead: reads.add);
+
+      session.queueOk();                            // AUTH
+      session.queueOk();                            // CFG_SET
+      session.queueOk(thermalBytes(motorStartMc: 70000));  // CFG_GET
+
+      await editor.saveThermal(thermalPayload, pin: '1234');
+
+      expect(reads, hasLength(1));
+      expect(reads.single.thermal!.motorReductionStartC, closeTo(70, 1e-9));
+    });
+
+    test('a write whose re-read fails hands nothing up', () async {
+      // The write landed; only the confirmation is missing. Publishing the
+      // values the app *sent* would be assumed data, which is what the
+      // re-read exists to avoid in the first place.
+      final reads = <SaveOk>[];
+      final editor = ConfigEditor(session, onGroupRead: reads.add);
+
+      session.queueOk();   // AUTH
+      session.queueOk();   // CFG_SET
+      // Nothing for CFG_GET: it times out.
+
+      final outcome = await editor.saveThermal(thermalPayload, pin: '1234');
+
+      expect(outcome, isA<SaveOk>());
+      expect(reads, isEmpty);
+    });
+  });
+
+  group('a lost session is told apart from never having had one', () {
+    test('the first save of a connection just asks', () async {
+      final outcome = await editor.saveThermal(thermalPayload);
+
+      expect(outcome, isA<SaveNeedsPin>());
+      expect((outcome as SaveNeedsPin).sessionLost, isFalse);
+    });
+
+    test('ErrAuth after authenticating reports the session as lost', () async {
+      // The controller clears authenticated_ in onCentralDisconnected(), and
+      // that callback fires on the BLE server's disconnect -- which the
+      // firmware also reaches when its own BMS client link changes. So a
+      // pilot who authenticated a minute ago can be asked again, and a silent
+      // second prompt reads as the app having lost the PIN it was given.
+      session.queueOk();                                        // AUTH
+      session.queueOk();                                        // CFG_SET
+      session.queueOk(thermalBytes());                          // CFG_GET
+      await editor.saveThermal(thermalPayload, pin: '1234');
+      expect(editor.authenticated, isTrue);
+
+      session.queue(const ControlRefused(ControlStatus.errAuth));
+
+      final outcome = await editor.saveThermal(thermalPayload);
+
+      expect(outcome, isA<SaveNeedsPin>());
+      expect((outcome as SaveNeedsPin).sessionLost, isTrue);
+      expect(editor.authenticated, isFalse);
+    });
   });
 }

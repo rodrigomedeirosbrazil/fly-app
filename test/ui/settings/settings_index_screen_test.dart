@@ -9,6 +9,8 @@ void main() {
     await tester.pumpWidget(wrap(SettingsIndexScreen(
       onOpenPower: () {},
       onOpenThermal: () {},
+      onOpenBms: () {},
+      onOpenSystem: () {},
     )));
 
     expect(find.text('Energia'), findsOneWidget);
@@ -17,12 +19,16 @@ void main() {
     expect(find.text('Sistema'), findsOneWidget);
   });
 
-  testWidgets('the two implemented areas open', (tester) async {
+  testWidgets('all four areas open', (tester) async {
     var power = false;
     var thermal = false;
+    var bms = false;
+    var system = false;
     await tester.pumpWidget(wrap(SettingsIndexScreen(
       onOpenPower: () => power = true,
       onOpenThermal: () => thermal = true,
+      onOpenBms: () => bms = true,
+      onOpenSystem: () => system = true,
     )));
 
     await tester.tap(find.text('Energia'));
@@ -32,19 +38,28 @@ void main() {
     await tester.tap(find.text('Térmica'));
     await tester.pumpAndSettle();
     expect(thermal, isTrue);
+
+    await tester.tap(find.text('BMS'));
+    await tester.pumpAndSettle();
+    expect(bms, isTrue);
+
+    await tester.tap(find.text('Sistema'));
+    await tester.pumpAndSettle();
+    expect(system, isTrue);
   });
 
-  testWidgets('the unimplemented areas are present, inert, and say why',
-      (tester) async {
+  testWidgets('all four cards have descriptions', (tester) async {
     await tester.pumpWidget(wrap(SettingsIndexScreen(
       onOpenPower: () {},
       onOpenThermal: () {},
+      onOpenBms: () {},
+      onOpenSystem: () {},
     )));
 
-    // Present rather than hidden, so a pilot learns what exists instead of
-    // discovering it in a browser.
-    expect(find.textContaining('pareamento'), findsOneWidget);
-    expect(find.textContaining('busca'), findsOneWidget);
+    expect(find.textContaining('Capacidade da bateria'), findsOneWidget);
+    expect(find.textContaining('Limites de proteção'), findsOneWidget);
+    expect(find.textContaining('Tipo de BMS'), findsOneWidget);
+    expect(find.textContaining('Volume do buzzer'), findsOneWidget);
   });
 
   group('layout', () {
@@ -63,6 +78,8 @@ void main() {
         await tester.pumpWidget(wrap(SettingsIndexScreen(
           onOpenPower: () {},
           onOpenThermal: () {},
+          onOpenBms: () {},
+          onOpenSystem: () {},
         )));
         await tester.pumpAndSettle();
 

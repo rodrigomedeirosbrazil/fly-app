@@ -5,10 +5,14 @@ class SettingsIndexScreen extends StatelessWidget {
     super.key,
     required this.onOpenPower,
     required this.onOpenThermal,
+    required this.onOpenBms,
+    required this.onOpenSystem,
   });
 
   final VoidCallback onOpenPower;
   final VoidCallback onOpenThermal;
+  final VoidCallback onOpenBms;
+  final VoidCallback onOpenSystem;
 
   @override
   Widget build(BuildContext context) {
@@ -36,15 +40,15 @@ class SettingsIndexScreen extends StatelessWidget {
           _SettingsCard(
             label: 'BMS BLUETOOTH',
             title: 'BMS',
-            description: 'Tipo de BMS e endereço Bluetooth. Depende da busca de dispositivos.',
-            onTap: null,
+            description: 'Tipo de BMS e endereço Bluetooth.',
+            onTap: onOpenBms,
           ),
           const SizedBox(height: 12),
           _SettingsCard(
             label: 'SISTEMA',
             title: 'Sistema',
-            description: 'Volume do buzzer e origem do acelerador. Depende do pareamento do remoto.',
-            onTap: null,
+            description: 'Volume do buzzer e origem do acelerador.',
+            onTap: onOpenSystem,
           ),
         ],
       ),

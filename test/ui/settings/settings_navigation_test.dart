@@ -2,7 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fly_app/ble/fly_controller_link.dart';
 import 'package:fly_app/state/telemetry_repository.dart';
+import 'package:fly_app/ui/settings/bms_settings_screen.dart';
+import 'package:fly_app/ui/settings/power_settings_screen.dart';
 import 'package:fly_app/ui/settings/settings_navigation.dart';
+import 'package:fly_app/ui/settings/system_settings_screen.dart';
+import 'package:fly_app/ui/settings/thermal_settings_screen.dart';
 
 import '../../state/fake_link.dart';
 
@@ -68,13 +72,13 @@ void main() {
     await tester.pumpAndSettle();
 
     final save = find.byKey(const Key('save-power'));
-    expect(tester.widget<ElevatedButton>(save).onPressed, isNotNull,
+    expect(tester.widget<FilledButton>(save).onPressed, isNotNull,
         reason: 'disarmed with a config loaded, saving is available');
 
     link.feedBinary(binarySample(armed: true));
     await tester.pumpAndSettle();
 
-    expect(tester.widget<ElevatedButton>(save).onPressed, isNull,
+    expect(tester.widget<FilledButton>(save).onPressed, isNull,
         reason: 'the route must follow the repository, not a snapshot');
   });
 
@@ -130,5 +134,143 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('save-thermal')), findsOneWidget);
+  });
+
+  testWidgets('the bms screen keeps seeing the aircraft arm', (tester) async {
+    link.emit(LinkStatus.connected);
+    link.feedBinary(binarySample(armed: false));
+    await tester.pumpAndSettle();
+
+    // Wait for and reply to CFG_GET requests for configs.
+    await tester.pump(const Duration(milliseconds: 50));
+    if (link.commands.isNotEmpty) link.replyThermal(0);
+    await tester.runAsync(() => pumpEventQueue());
+    await tester.pumpAndSettle();
+
+    await tester.pump(const Duration(milliseconds: 50));
+    if (link.commands.length > 1) link.replyPower(1);
+    await tester.runAsync(() => pumpEventQueue());
+    await tester.pumpAndSettle();
+
+    await tester.pump(const Duration(milliseconds: 50));
+    if (link.commands.length > 2) link.replyBms(2);
+    await tester.runAsync(() => pumpEventQueue());
+    await tester.pumpAndSettle();
+
+    await tester.pump(const Duration(milliseconds: 50));
+    if (link.commands.length > 3) link.replySystem(3);
+    await tester.runAsync(() => pumpEventQueue());
+    await tester.pumpAndSettle();
+
+    await pumpHost(tester);
+    await tester.tap(find.text('abrir'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('BMS'));
+    await tester.pumpAndSettle();
+
+    final save = find.byKey(const Key('save-bms'));
+    expect(tester.widget<FilledButton>(save).onPressed, isNotNull,
+        reason: 'disarmed with a config loaded, saving is available');
+
+    link.feedBinary(binarySample(armed: true));
+    await tester.pumpAndSettle();
+
+    expect(tester.widget<FilledButton>(save).onPressed, isNull,
+        reason: 'the route must follow the repository, not a snapshot');
+  });
+
+  testWidgets('the system screen keeps seeing the aircraft arm',
+      (tester) async {
+    link.emit(LinkStatus.connected);
+    link.feedBinary(binarySample(armed: false));
+    await tester.pumpAndSettle();
+
+    // Wait for and reply to CFG_GET requests for configs.
+    await tester.pump(const Duration(milliseconds: 50));
+    if (link.commands.isNotEmpty) link.replyThermal(0);
+    await tester.runAsync(() => pumpEventQueue());
+    await tester.pumpAndSettle();
+
+    await tester.pump(const Duration(milliseconds: 50));
+    if (link.commands.length > 1) link.replyPower(1);
+    await tester.runAsync(() => pumpEventQueue());
+    await tester.pumpAndSettle();
+
+    await tester.pump(const Duration(milliseconds: 50));
+    if (link.commands.length > 2) link.replyBms(2);
+    await tester.runAsync(() => pumpEventQueue());
+    await tester.pumpAndSettle();
+
+    await tester.pump(const Duration(milliseconds: 50));
+    if (link.commands.length > 3) link.replySystem(3);
+    await tester.runAsync(() => pumpEventQueue());
+    await tester.pumpAndSettle();
+
+    await pumpHost(tester);
+    await tester.tap(find.text('abrir'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Sistema'));
+    await tester.pumpAndSettle();
+
+    final save = find.byKey(const Key('save-system'));
+    expect(tester.widget<FilledButton>(save).onPressed, isNotNull,
+        reason: 'disarmed with a config loaded, saving is available');
+
+    link.feedBinary(binarySample(armed: true));
+    await tester.pumpAndSettle();
+
+    expect(tester.widget<FilledButton>(save).onPressed, isNull,
+        reason: 'the route must follow the repository, not a snapshot');
+  });
+
+  testWidgets('every screen is handed the connection\'s own editor',
+      (tester) async {
+    // THE REGRESSION THIS COVERS.
+    //
+    // Each route used to build its own ConfigEditor -- six of them across the
+    // four screens, one of which also gave the scan controller a seventh.
+    // ConfigEditor carries the authenticated flag, so the pilot was asked for
+    // the PIN again on every screen, and again for the scan on a screen
+    // already authenticated to save. The firmware authenticates per
+    // connection; so must this.
+    link.emit(LinkStatus.connected);
+    link.feedBinary(binarySample(armed: false));
+    await tester.pumpAndSettle();
+
+    for (var i = 0; i < 4; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+      if (link.commands.length > i) {
+        [link.replyThermal, link.replyPower, link.replyBms, link.replySystem][i](i);
+      }
+      await tester.runAsync(() => pumpEventQueue());
+      await tester.pumpAndSettle();
+    }
+
+    await pumpHost(tester);
+    await tester.tap(find.text('abrir'));
+    await tester.pumpAndSettle();
+
+    for (final entry in {
+      'Energia': (WidgetTester t) =>
+          t.widget<PowerSettingsScreen>(find.byType(PowerSettingsScreen)).editor,
+      'Térmica': (WidgetTester t) => t
+          .widget<ThermalSettingsScreen>(find.byType(ThermalSettingsScreen))
+          .editor,
+      'BMS': (WidgetTester t) =>
+          t.widget<BmsSettingsScreen>(find.byType(BmsSettingsScreen)).editor,
+      'Sistema': (WidgetTester t) => t
+          .widget<SystemSettingsScreen>(find.byType(SystemSettingsScreen))
+          .editor,
+    }.entries) {
+      await tester.tap(find.text(entry.key));
+      await tester.pumpAndSettle();
+
+      expect(identical(entry.value(tester), repo.editor), isTrue,
+          reason: '${entry.key} built its own editor, so it would prompt '
+              'for the PIN again');
+
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+    }
   });
 }

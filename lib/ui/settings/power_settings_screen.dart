@@ -4,6 +4,7 @@ import '../../protocol/config_groups.dart';
 import '../../protocol/settings_validation.dart';
 import '../../state/config_editor.dart';
 import 'number_input.dart';
+import 'settings_card.dart';
 
 class PowerSettingsScreen extends StatefulWidget {
   const PowerSettingsScreen({
@@ -276,7 +277,10 @@ class _PowerSettingsScreenState extends State<PowerSettingsScreen> {
                 (power.capacityMah / 1000).toString();
           }
         }
-      case SaveNeedsPin():
+      case SaveNeedsPin(:final sessionLost):
+        if (sessionLost) {
+          _showSnackBar('O controlador encerrou a sessão. Digite o PIN de novo.');
+        }
         _showPinDialog();
       case SaveWrongPin():
         _showSnackBar('PIN incorreto');
@@ -287,8 +291,12 @@ class _PowerSettingsScreenState extends State<PowerSettingsScreen> {
             'O controlador recusou o valor — o app e o firmware discordam sobre a faixa válida');
       case SaveUnsupported():
         _showSnackBar('Este firmware não aceita gravação');
-      case SaveFailed():
-        _showSnackBar('Não foi possível gravar');
+      case SaveBusy():
+        _showSnackBar('O controlador está ocupado');
+      case SaveFailed(:final cause):
+        _showSnackBar(cause == SaveFailure.linkLost
+            ? 'A conexão caiu antes de gravar'
+            : 'O controlador não respondeu. Tente de novo.');
     }
   }
 
@@ -369,185 +377,217 @@ class _PowerSettingsScreenState extends State<PowerSettingsScreen> {
     final computedRatio = _getComputedCalibrationRatio();
     final calibrationValid = _isCalibrationValid();
 
+    final calibrationRefError = !calibrationValid &&
+            _bmsReferenceController.text.isNotEmpty
+        ? messageFor(validateCalibrationReference(
+            parseSetting(_bmsReferenceController.text) ?? 0))
+        : null;
+
+    final messages = <String>[
+      ?powerErrorMessage,
+      ?calibrationRefError,
+      if (widget.armed)
+        'Não é possível gravar enquanto a aeronave está armada',
+    ];
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Bateria e Energia'),
       ),
-      body: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Capacity section
-              Text(
-                'Capacidade da Bateria',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 12),
-              DropdownButton<int?>(
-                value: _selectedCapacityPreset,
-                isExpanded: true,
-                onChanged: (value) {
-                  setState(() {
-                    _selectedCapacityPreset = value;
-                    _showCustomCapacity = value == null;
-                  });
-                },
-                items: [
-                  const DropdownMenuItem(value: 18000, child: Text('18 Ah')),
-                  const DropdownMenuItem(value: 34000, child: Text('34 Ah')),
-                  const DropdownMenuItem(value: 65000, child: Text('65 Ah')),
-                  const DropdownMenuItem(
-                    value: null,
-                    child: Text('Personalizado (inserir valor)'),
-                  ),
-                ],
-              ),
-              if (_showCustomCapacity) ...[
-                const SizedBox(height: 12),
-                TextField(
-                  key: const Key('capacity-custom'),
-                  controller: _capacityCustomController,
-                  decoration: const InputDecoration(
-                    labelText: 'Capacidade (Ah)',
-                    border: OutlineInputBorder(),
-                  ),
-                  keyboardType: kSettingsKeyboard,
-                  inputFormatters: kSettingsFormatters,
-                ),
-              ],
-              const SizedBox(height: 24),
-              // Voltage section
-              Text(
-                'Tensões por Célula',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                key: const Key('min-voltage-cell'),
-                controller: _minVoltageCellController,
-                decoration: InputDecoration(
-                  labelText: 'Tensão Mínima (V)',
-                  border: const OutlineInputBorder(),
-                  helperText: 'Total: ${minPackVoltage.toStringAsFixed(2)} V (14 células)',
-                ),
-                keyboardType: kSettingsKeyboard,
-                inputFormatters: kSettingsFormatters,
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                key: const Key('max-voltage-cell'),
-                controller: _maxVoltageCellController,
-                decoration: InputDecoration(
-                  labelText: 'Tensão Máxima (V)',
-                  border: const OutlineInputBorder(),
-                  helperText: 'Total: ${maxPackVoltage.toStringAsFixed(2)} V (14 células)',
-                ),
-                keyboardType: kSettingsKeyboard,
-                inputFormatters: kSettingsFormatters,
-              ),
-              const SizedBox(height: 12),
-              if (powerErrorMessage != null)
-                Text(
-                  powerErrorMessage,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                ),
-              const SizedBox(height: 24),
-              // Power control section
-              Text(
-                'Controle de Energia',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
-              CheckboxListTile(
-                value: _powerControlEnabled,
-                onChanged: (v) =>
-                    setState(() => _powerControlEnabled = v ?? false),
-                title: const Text('Ativar Controle de Energia'),
-                subtitle: const Text(
-                  'Quando ativado, a saída de energia é limitada com base na tensão da bateria, temperatura do motor e temperatura do ESC. Quando desativado, a energia total está disponível sem limitações.',
-                ),
-              ),
-              const SizedBox(height: 24),
-              // Calibration section
-              Text(
-                'Calibração de Tensão',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'Leitura atual do sensor: ${widget.sensorVolts != null ? widget.sensorVolts!.toStringAsFixed(2) : 'Sem leitura'} V',
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                key: const Key('bms-reference'),
-                controller: _bmsReferenceController,
-                decoration: InputDecoration(
-                  labelText: 'Tensão de Referência do BMS (V)',
-                  border: const OutlineInputBorder(),
-                  helperText:
-                      'Tensão que o BMS mostra. O sistema calculará o fator de correção automaticamente.',
-                ),
-                keyboardType: kSettingsKeyboard,
-                inputFormatters: kSettingsFormatters,
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'Divisor de Tensão Atual: ${widget.config?.voltageDividerRatio.toStringAsFixed(2) ?? '--'}',
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-              if (computedRatio != null && calibrationValid)
-                Text(
-                  'Novo Divisor: ${computedRatio.toStringAsFixed(2)}',
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.primary,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              const SizedBox(height: 4),
-              if (!calibrationValid &&
-                  _bmsReferenceController.text.isNotEmpty)
-                Text(
-                  messageFor(validateCalibrationReference(
-                          parseSetting(_bmsReferenceController.text) ?? 0))
-                      .toString(),
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                ),
-              const SizedBox(height: 12),
-              ElevatedButton(
-                key: const Key('calibrate'),
-                onPressed: calibrationValid ? _applyCalibration : null,
-                child: const Text('Calibrar'),
-              ),
-              const SizedBox(height: 24),
-              // Save button
-              Row(
+      body: Column(
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(
-                    child: ElevatedButton(
-                      key: const Key('save-power'),
-                      onPressed: saveDisabled ? null : _savePower,
-                      child: const Text('Salvar'),
-                    ),
+                  // Capacity section
+                  SettingsCard(
+                    title: 'CAPACIDADE',
+                    children: [
+                      DropdownButton<int?>(
+                        value: _selectedCapacityPreset,
+                        isExpanded: true,
+                        onChanged: (value) {
+                          setState(() {
+                            _selectedCapacityPreset = value;
+                            _showCustomCapacity = value == null;
+                          });
+                        },
+                        items: [
+                          const DropdownMenuItem(value: 18000, child: Text('18 Ah')),
+                          const DropdownMenuItem(value: 34000, child: Text('34 Ah')),
+                          const DropdownMenuItem(value: 65000, child: Text('65 Ah')),
+                          const DropdownMenuItem(
+                            value: null,
+                            child: Text('Personalizado (inserir valor)'),
+                          ),
+                        ],
+                      ),
+                      if (_showCustomCapacity) ...[
+                        const SizedBox(height: 12),
+                        TextField(
+                          key: const Key('capacity-custom'),
+                          controller: _capacityCustomController,
+                          decoration: const InputDecoration(
+                            labelText: 'Capacidade (Ah)',
+                            border: OutlineInputBorder(),
+                          ),
+                          keyboardType: kSettingsKeyboard,
+                          inputFormatters: kSettingsFormatters,
+                        ),
+                      ],
+                    ],
+                  ),
+                  // Voltage section
+                  SettingsCard(
+                    title: 'TENSÕES POR CÉLULA',
+                    children: [
+                      TextField(
+                        key: const Key('min-voltage-cell'),
+                        controller: _minVoltageCellController,
+                        decoration: InputDecoration(
+                          labelText: 'Tensão Mínima (V)',
+                          border: const OutlineInputBorder(),
+                          helperText:
+                              'Total: ${minPackVoltage.toStringAsFixed(2)} V (14 células)',
+                        ),
+                        keyboardType: kSettingsKeyboard,
+                        inputFormatters: kSettingsFormatters,
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        key: const Key('max-voltage-cell'),
+                        controller: _maxVoltageCellController,
+                        decoration: InputDecoration(
+                          labelText: 'Tensão Máxima (V)',
+                          border: const OutlineInputBorder(),
+                          helperText:
+                              'Total: ${maxPackVoltage.toStringAsFixed(2)} V (14 células)',
+                        ),
+                        keyboardType: kSettingsKeyboard,
+                        inputFormatters: kSettingsFormatters,
+                      ),
+                    ],
+                  ),
+                  // Power control section
+                  SettingsCard(
+                    title: 'CONTROLE DE ENERGIA',
+                    children: [
+                      Material(
+                        color: Colors.transparent,
+                        child: CheckboxListTile(
+                          value: _powerControlEnabled,
+                          onChanged: (v) =>
+                              setState(() => _powerControlEnabled = v ?? false),
+                          title: const Text('Ativar Controle de Energia'),
+                          subtitle: const Text(
+                            'Quando ativado, a saída de energia é limitada com base na tensão da bateria, temperatura do motor e temperatura do ESC. Quando desativado, a energia total está disponível sem limitações.',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  // Calibration section
+                  SettingsCard(
+                    title: 'CALIBRAÇÃO',
+                    children: [
+                      Text(
+                        'Leitura atual do sensor: ${widget.sensorVolts != null ? widget.sensorVolts!.toStringAsFixed(2) : 'Sem leitura'} V',
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        key: const Key('bms-reference'),
+                        controller: _bmsReferenceController,
+                        decoration: InputDecoration(
+                          labelText: 'Tensão de Referência do BMS (V)',
+                          border: const OutlineInputBorder(),
+                          helperText:
+                              'Tensão que o BMS mostra. O sistema calculará o fator de correção automaticamente.',
+                        ),
+                        keyboardType: kSettingsKeyboard,
+                        inputFormatters: kSettingsFormatters,
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Divisor de Tensão Atual: ${widget.config?.voltageDividerRatio.toStringAsFixed(2) ?? '--'}',
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                      if (computedRatio != null && calibrationValid) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          'Novo Divisor: ${computedRatio.toStringAsFixed(2)}',
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.primary,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 12),
+                      OutlinedButton(
+                        key: const Key('calibrate'),
+                        onPressed: calibrationValid ? _applyCalibration : null,
+                        child: const Text('Aplicar calibração'),
+                      ),
+                    ],
                   ),
                 ],
               ),
-              if (widget.armed)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8.0),
-                  child: Text(
-                    'A aeronave está armada',
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
-                    ),
-                  ),
-                ),
-              const SizedBox(height: 24),
-            ],
+            ),
           ),
+          _SaveFooter(
+            messages: messages,
+            child: FilledButton(
+              key: const Key('save-power'),
+              onPressed: saveDisabled ? null : _savePower,
+              child: const Text('Salvar'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The one action that writes to the aircraft, anchored where the thumb is,
+/// with whatever is stopping it directly above.
+///
+/// It used to be a small pill in the middle of the page with a screenful of
+/// nothing under it, carrying the same weight as the disclosure toggle two
+/// lines up.
+class _SaveFooter extends StatelessWidget {
+  const _SaveFooter({required this.messages, required this.child});
+
+  final List<String> messages;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        border: Border(
+          top: BorderSide(color: theme.colorScheme.outlineVariant),
         ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final m in messages)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                m,
+                style: TextStyle(color: theme.colorScheme.error, fontSize: 12),
+              ),
+            ),
+          child,
+        ],
       ),
     );
   }

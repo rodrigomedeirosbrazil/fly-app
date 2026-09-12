@@ -55,3 +55,29 @@ BleScanRequirements requirementsForAndroid(int apiLevel) =>
             needsLocationPermission: true,
             needsLocationServiceOn: true,
           );
+
+/// What a settled adapter state means for the link, or null to go ahead.
+///
+/// Pure and table-tested for the same reason the API-level branches are: the
+/// state this most needed to get right — CoreBluetooth's `unknown` — cannot be
+/// produced on a test machine at all.
+///
+/// **`unknown` is not "off".** It is the adapter not having answered yet, and
+/// on iOS that includes the whole window before the permission prompt has been
+/// shown. Treating it as off made the first tap of a fresh install report
+/// "Bluetooth desligado" and return without scanning — so the prompt never
+/// appeared, and the second tap worked only because the state had settled by
+/// then. Proceeding is what lets the scan raise the prompt.
+BleAdapterVerdict verdictForAdapter(BleAdapterState state) => switch (state) {
+      BleAdapterState.off => BleAdapterVerdict.bluetoothOff,
+      // iOS refusing Bluetooth to this app. It needs the Settings page, not
+      // the switch that the "turn Bluetooth on" copy points at.
+      BleAdapterState.unauthorized => BleAdapterVerdict.unauthorized,
+      BleAdapterState.on || BleAdapterState.unknown => BleAdapterVerdict.proceed,
+    };
+
+/// The subset of the plugin's adapter states this decision turns on, so the
+/// policy stays free of `flutter_blue_plus`.
+enum BleAdapterState { unknown, off, on, unauthorized }
+
+enum BleAdapterVerdict { proceed, bluetoothOff, unauthorized }
