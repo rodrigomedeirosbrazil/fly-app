@@ -13,7 +13,7 @@ fly-controller, and only listens.
 **Framework:** Flutter 3.47.3 (stable) · **Dart SDK:** ^3.13.3
 
 ```bash
-flutter test                  # 119 tests, no hardware needed
+flutter test                  # 566 tests, no hardware needed
 flutter analyze               # must be clean
 flutter build ios --release   # needs Xcode
 flutter build apk --release   # signed APK, ~45 MB (all three ABIs)
@@ -275,6 +275,30 @@ that would be refused either way.
 payload, lands on the same state — so `ConfigEditor` retries them on a timeout.
 `PIN_CHANGE` is not, which is why the session itself never retries and each
 caller decides.
+
+### The clock is set without asking
+
+`SET_TIME` (`0x27`) goes out once per connection on the first **disarmed**
+binary frame, the way the portal posts `/api/settime` on every page load. The
+controller's only clock consumer is the `Logger`, which dates file names and
+stamps rows in UTC, and it has no battery-backed clock — so every connection
+syncs again.
+
+It needs no PIN because fly-controller made it PIN-free, for parity with the
+portal route, which never checked one: the worst abuse is a wrong timestamp on
+a log. Firmware from before that answers `ErrAuth`, and `ClockSync` ends
+**silently** — the flight panel prompts for nothing, and a PIN prompt on
+connect to date a log file would be the wrong trade.
+
+It is still refused while armed, because a clock jump mid-flight splits one
+flight's log across two time bases. `ErrState` therefore waits for the next
+disarmed frame rather than giving up. A timeout retries three times, with the
+time **recomputed** on each attempt; resending the first payload would set the
+controller two seconds slow.
+
+`FakeLink` routes `SET_TIME` writes to `clockCommands` and answers them
+itself, so the config tests that answer by index into `commands` are
+untouched.
 
 ### The app validates more than the firmware, on purpose
 
@@ -991,8 +1015,8 @@ available only when the binary service is present:
 Nothing on that list is absent any more, and **firmware update over BLE is
 done and verified on the aircraft** (2026-09-12).
 
-What is still not sent is `SESSION_RESET` (`0x20`), `SET_TIME` (`0x27`),
-`PIN_CHANGE` (`0x28`) and the two Tmotor direction opcodes (`0x29`/`0x2A`).
+What is still not sent is `SESSION_RESET` (`0x20`), `PIN_CHANGE` (`0x28`) and
+the two Tmotor direction opcodes (`0x29`/`0x2A`).
 None of them is telemetry. `PIN_CHANGE` alone deserves care: it is the one
 write that is **not idempotent**, so it cannot use the retry every other write
 here depends on.
