@@ -52,9 +52,10 @@ class ClockSync {
       if (result is ControlTimeout) continue;
 
       // ErrState means the aircraft armed between the frame and the request.
-      // Only an armed controller sends it, and armed frames do not trigger a
-      // send, so going back to idle cannot loop. Every other answer — Ok,
-      // ErrAuth from older firmware, ErrBadOp, a dropped link — ends it.
+      // Going back to idle retries on the next disarmed frame, so it is
+      // bounded by the 1 Hz telemetry and stops as soon as an armed frame
+      // arrives. Every other answer — Ok, ErrAuth from older firmware,
+      // ErrBadOp, a dropped link — ends it.
       _phase =
           result is ControlRefused && result.status == ControlStatus.errState
           ? _Phase.idle
