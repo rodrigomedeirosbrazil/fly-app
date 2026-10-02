@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:fly_app/ble/fly_controller_link.dart';
 import 'package:fly_app/protocol/control_info.dart';
+import 'package:fly_app/protocol/set_time.dart';
 import 'package:fly_app/state/telemetry_source_policy.dart';
 
 /// A minimal valid binary frame: struct version 1, armed/disarmed, all three
@@ -32,6 +33,18 @@ class FakeLink extends FlyControllerLink {
   final _payloads = StreamController<TelemetryPayload>.broadcast();
   final _responses = StreamController<List<int>>.broadcast();
   final commands = <List<int>>[];
+
+  /// `SET_TIME` writes, kept out of [commands] on purpose: tests answer
+  /// config requests by their index in [commands], and a clock sync landing
+  /// between them would shift every index for a reason unrelated to what
+  /// those tests check.
+  final clockCommands = <List<int>>[];
+
+  /// The status [sendCommand] answers a `SET_TIME` with, or null to leave it
+  /// unanswered. Answering by default matters in widget tests: an unanswered
+  /// request leaves the session's timeout timer pending.
+  int? clockReplyStatus = 0;
+
   final dfuWrites = <List<int>>[];
 
   @override
@@ -67,6 +80,17 @@ class FakeLink extends FlyControllerLink {
   @override
   Future<void> sendCommand(List<int> bytes) async {
     if (rejectCommands) throw StateError('no CMD characteristic');
+    if (bytes[0] == kOpSetTime) {
+      clockCommands.add(bytes);
+      final status = clockReplyStatus;
+      // Timer.run, not a direct add: the session installs its timeout timer
+      // only after this write returns, and a reply that beat it would leave
+      // that timer orphaned and pending.
+      if (status != null) {
+        Timer.run(() => _responses.add([bytes[0], bytes[1], status, 0]));
+      }
+      return;
+    }
     commands.add(bytes);
   }
 

@@ -69,10 +69,14 @@ Latency is unmeasured and will be audible: a beep travels a 1 Hz firmware
 loop, a BLE notification, a decode and an audio session before it sounds. Fine
 for a warning, useless for anything the pilot times.
 
-What phase 2 still does not send is `SET_TIME` (`0x27`), `PIN_CHANGE` (`0x28`)
-and the two Tmotor direction opcodes — none of them telemetry, and
+What phase 2 still does not send is `PIN_CHANGE` (`0x28`) and the two Tmotor
+direction opcodes — none of them telemetry, and
 `PIN_CHANGE` alone deserves care because it is the one write that is **not
 idempotent**, so it cannot use the retry every other write here depends on.
+
+`SET_TIME` (`0x27`) is sent automatically on every connection, with no PIN —
+which depends on fly-controller having taken it off the auth list. Older
+firmware answers `ErrAuth` and the app stays silent.
 
 This is the first piece of the web portal with a real alternative, and
 therefore the first step toward phase 4.
