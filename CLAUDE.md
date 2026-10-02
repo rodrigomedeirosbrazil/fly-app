@@ -292,9 +292,9 @@ connect to date a log file would be the wrong trade.
 
 It is still refused while armed, because a clock jump mid-flight splits one
 flight's log across two time bases. `ErrState` therefore waits for the next
-disarmed frame rather than giving up. A timeout retries three times, with the
-time **recomputed** on each attempt; resending the first payload would set the
-controller two seconds slow.
+disarmed frame rather than giving up. A timeout is tried up to three times in
+all, with the time **recomputed** on each attempt; resending the first payload
+would set the controller two seconds slow.
 
 `FakeLink` routes `SET_TIME` writes to `clockCommands` and answers them
 itself, so the config tests that answer by index into `commands` are
