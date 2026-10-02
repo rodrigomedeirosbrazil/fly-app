@@ -5,6 +5,7 @@ import 'package:fly_app/audio/tone_player.dart';
 import 'package:fly_app/ble/fly_controller_link.dart';
 import 'package:fly_app/protocol/config_groups.dart';
 import 'package:fly_app/protocol/control_info.dart';
+import 'package:fly_app/protocol/set_time.dart';
 import 'package:fly_app/state/buzzer_mirror.dart';
 import 'package:fly_app/state/telemetry_repository.dart';
 
@@ -332,6 +333,72 @@ void main() {
       expect(repo.powerConfig, isNull);
       expect(repo.bmsConfig, isNull);
       expect(repo.systemConfig, isNull);
+    });
+  });
+
+  group('clock sync', () {
+    // FakeLink keeps SET_TIME writes in clockCommands and answers Ok itself.
+
+    test('a disarmed binary connection sets the clock once', () async {
+      link.emit(LinkStatus.connected);
+      link.feedBinary(binarySample(armed: false));
+      await pumpEventQueue();
+
+      expect(link.clockCommands, hasLength(1));
+      expect(link.clockCommands.single[0], kOpSetTime);
+      expect(link.clockCommands.single.sublist(3), encodeSetTime(now),
+          reason: "the repository's clock, so the test can pin the bytes");
+
+      link.feedBinary(binarySample(armed: false));
+      await pumpEventQueue();
+      expect(link.clockCommands, hasLength(1),
+          reason: 'once per connection');
+    });
+
+    test('an armed connection waits for the first disarmed frame', () async {
+      link.emit(LinkStatus.connected);
+      link.feedBinary(binarySample(armed: true));
+      await pumpEventQueue();
+      expect(link.clockCommands, isEmpty,
+          reason: 'the firmware refuses SET_TIME while armed');
+
+      link.feedBinary(binarySample(armed: false));
+      await pumpEventQueue();
+      expect(link.clockCommands, hasLength(1));
+    });
+
+    test('a reconnection sets it again', () async {
+      // No battery-backed clock: every power cycle loses the time.
+      link.emit(LinkStatus.connected);
+      link.feedBinary(binarySample(armed: false));
+      await pumpEventQueue();
+      expect(link.clockCommands, hasLength(1));
+
+      link.emit(LinkStatus.disconnected);
+      await pumpEventQueue();
+      link.emit(LinkStatus.connected);
+      link.feedBinary(binarySample(armed: false));
+      await pumpEventQueue();
+      expect(link.clockCommands, hasLength(2));
+    });
+
+    test('older firmware refusing it changes nothing else', () async {
+      link.clockReplyStatus = 1; // ErrAuth: SET_TIME still behind the PIN
+      link.emit(LinkStatus.connected);
+      link.feedBinary(binarySample(armed: false));
+      await pumpEventQueue();
+
+      expect(link.commands, hasLength(1),
+          reason: 'the thermal fetch still goes out');
+      link.feedBinary(binarySample(armed: false));
+      await pumpEventQueue();
+      expect(link.clockCommands, hasLength(1), reason: 'no second try');
+    });
+
+    test('is never sent on the sentence path', () async {
+      await receiveOneFrame();
+      expect(link.clockCommands, isEmpty,
+          reason: 'firmware without the service has no CMD to write to');
     });
   });
 

@@ -13,6 +13,7 @@ import '../protocol/line_assembler.dart';
 import '../protocol/telemetry_frame.dart';
 import '../protocol/xctod_parser.dart';
 import 'buzzer_mirror.dart';
+import 'clock_sync.dart';
 import 'config_editor.dart';
 import 'control_session.dart';
 import 'dfu_session.dart';
@@ -235,6 +236,10 @@ class TelemetryRepository extends ChangeNotifier {
   bool _anyFrameRendered = false;
 
   ControlSession? _session;
+
+  /// Per connection, with the session. Sets the controller's clock on the
+  /// first disarmed frame; see [ClockSync].
+  ClockSync? _clockSync;
   ConfigEditor? _editor;
 
   /// This pilot's configured thermal thresholds, or null when they are not
@@ -368,6 +373,7 @@ class TelemetryRepository extends ChangeNotifier {
       // after a reconnect must not reach a request from the previous one.
       _session?.dispose();
       _session = null;
+      _clockSync = null;
       // With the session, because the PIN it holds is per connection.
       _editor = null;
       _dfuTransport = null;
@@ -427,12 +433,16 @@ class TelemetryRepository extends ChangeNotifier {
             );
             _eventsSub ??= session.events.listen(_onEvent);
             _editor ??= ConfigEditor(session, onGroupRead: _applyGroupRead);
+            _clockSync ??= ClockSync(session, now: _now);
             // DFU transport is available when the characteristic exists
             _dfuTransport ??= _link.canUpdateFirmware
                 ? _DfuTransportImpl(session, _link, _editor!)
                 : null;
             unawaited(_fetchConfig(session));
           }
+          // Every frame, not only the first: a connection that starts armed
+          // is synced when the pilot disarms.
+          _clockSync?.onFrame(armed: frame!.isArmed);
         }
     }
 
