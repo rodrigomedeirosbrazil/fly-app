@@ -240,6 +240,7 @@ class TelemetryRepository extends ChangeNotifier {
   /// Per connection, with the session. Sets the controller's clock on the
   /// first disarmed frame; see [ClockSync].
   ClockSync? _clockSync;
+
   ConfigEditor? _editor;
 
   /// This pilot's configured thermal thresholds, or null when they are not

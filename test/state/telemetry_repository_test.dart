@@ -390,6 +390,11 @@ void main() {
 
       expect(link.commands, hasLength(1),
           reason: 'the thermal fetch still goes out');
+      link.replyThermal(0);
+      await pumpEventQueue();
+      expect(repo.thermalConfig, isNotNull,
+          reason: 'a refused clock sync must not disturb the config fetch');
+
       link.feedBinary(binarySample(armed: false));
       await pumpEventQueue();
       expect(link.clockCommands, hasLength(1), reason: 'no second try');
