@@ -143,4 +143,19 @@ void main() {
     final loaded = b.state as LogListLoaded;
     expect(loaded.files.map((f) => f.name), ['20261002_001.csv']);
   });
+
+  test('a cursor the encoder refuses fails the list instead of throwing',
+      () async {
+    // The last name of a page becomes the next cursor. A name the firmware
+    // listed but the validator rejects would throw out of refresh() and leave
+    // the screen on its spinner forever.
+    final s = FakeSession()
+      ..queueOk(page(more: true, entries: [('has space.csv', 1)]));
+    final b = LogBrowser(s);
+
+    await b.refresh();
+
+    expect((b.state as LogListFailed).reason, LogListFailure.malformed);
+    expect(s.sent, hasLength(1), reason: 'the second request never goes out');
+  });
 }

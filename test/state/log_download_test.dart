@@ -116,4 +116,12 @@ void main() {
     expect(outcome, isA<LogDownloadCancelled>());
     expect(s.sent, hasLength(1));
   });
+
+  test('a name the encoder refuses fails without sending', () async {
+    // Throwing would leave the screen's _downloading flag set for good.
+    final s = FakeSession();
+    final outcome = await LogDownload(s, maxChunk: 2).fetch('a b.csv');
+    expect((outcome as LogDownloadFailed).reason, LogDownloadFailure.malformed);
+    expect(s.sent, isEmpty);
+  });
 }

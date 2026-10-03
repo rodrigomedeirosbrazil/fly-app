@@ -88,6 +88,11 @@ class LogDownload {
     String name, {
     void Function(int received, int total)? onProgress,
   }) async {
+    // A name listed by the controller can still be one the encoder refuses;
+    // letting that throw would leave the caller's busy flag set for good.
+    if (!isValidLogName(name)) {
+      return const LogDownloadFailed(LogDownloadFailure.malformed);
+    }
     final out = BytesBuilder(copy: false);
     var offset = 0;
     int? size;

@@ -515,6 +515,14 @@ void main() {
       expect(s.sent[1].payload, [5, ...'a.csv'.codeUnits]);
     });
 
+    test('a name the encoder refuses fails without sending', () async {
+      final s = FakeSession();
+      final editor = ConfigEditor(s);
+
+      expect(await editor.deleteLog('a b.csv', pin: '1234'), isA<SaveFailed>());
+      expect(s.sent, isEmpty);
+    });
+
     test('a file already gone counts as deleted', () async {
       // A retried delete whose first reply was lost finds nothing: that is
       // the outcome the pilot asked for.

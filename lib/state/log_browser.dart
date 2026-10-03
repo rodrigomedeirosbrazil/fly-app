@@ -83,7 +83,16 @@ class LogBrowser extends ChangeNotifier {
     var total = 0;
 
     for (var pageNo = 0; pageNo < maxPages; pageNo++) {
-      final result = await _list(cursor);
+      final ControlResult result;
+      try {
+        result = await _list(cursor);
+      } on ArgumentError {
+        // The cursor is a name the controller listed, and the encoder refuses
+        // names the firmware would not accept back. Throwing would leave the
+        // screen on its spinner; this is a reply we cannot use, like any other.
+        if (_disposed || generation != _generation) return;
+        return _set(const LogListFailed(LogListFailure.malformed));
+      }
       if (_disposed || generation != _generation) return;
 
       switch (result) {

@@ -285,13 +285,19 @@ class ConfigEditor {
   /// Deletes one log file. Idempotent, so retried on a timeout — and a file
   /// already gone is success, because that is how a retry looks when the
   /// first reply was the thing lost.
-  Future<SaveOutcome> deleteLog(String name, {String? pin}) =>
-      _authenticatedAction(
-        op: kOpLogDelete,
-        payload: encodeLogDelete(name),
-        pin: pin,
-        notFoundIsOk: true,
-      );
+  ///
+  /// A name the encoder refuses is a failure without a request, not a throw:
+  /// the name came from the controller's own listing, and an exception here
+  /// would leave the screen's busy flag set.
+  Future<SaveOutcome> deleteLog(String name, {String? pin}) async {
+    if (!isValidLogName(name)) return const SaveFailed();
+    return _authenticatedAction(
+      op: kOpLogDelete,
+      payload: encodeLogDelete(name),
+      pin: pin,
+      notFoundIsOk: true,
+    );
+  }
 
   /// Deletes every log file. Idempotent, so retried on a timeout.
   Future<SaveOutcome> deleteAllLogs({String? pin}) => _authenticatedAction(
