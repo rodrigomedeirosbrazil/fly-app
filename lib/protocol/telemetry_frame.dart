@@ -35,6 +35,11 @@ enum DisarmReason {
 /// Which limiter is currently cutting available power.
 enum LimitCause { battery, motorTemp, escTemp }
 
+/// The controller's BLE link to the BMS, from `BluetoothBms`'s connection
+/// state. [unknown] is this repo's own member, so a value from newer
+/// firmware degrades instead of throwing.
+enum BmsLinkState { notConfigured, idle, connecting, connected, unknown }
+
 /// The short fixed-width codes, identical to the firmware's
 /// `disarmReasonCode()`. Manual and none are absent on purpose: the sentence
 /// folded a pilot-initiated disarm into plain `DISARMED`, and so does this.
@@ -94,6 +99,11 @@ class TelemetryFrame {
     this.powerControlEnabled,
     this.bmsConnected,
     this.bmsConfigured,
+    this.bmsPackVoltage,
+    this.bmsCurrentA,
+    this.bmsSoc,
+    this.bmsCellCount,
+    this.bmsLinkState,
   });
 
   /// State of charge from coulomb counting, percent. Both sources always
@@ -158,6 +168,19 @@ class TelemetryFrame {
   final bool? powerControlEnabled;
   final bool? bmsConnected;
   final bool? bmsConfigured;
+
+  /// The BMS's own pack figures — not the controller's divider reading.
+  /// Null on firmware without the telemetry tail, or when the BMS is not
+  /// reporting.
+  final double? bmsPackVoltage;
+
+  /// Amps, signed: charging is a legitimate reading.
+  final double? bmsCurrentA;
+  final int? bmsSoc;
+  final int? bmsCellCount;
+
+  /// Null only on firmware without the tail; otherwise always known.
+  final BmsLinkState? bmsLinkState;
 
   bool get isArmed => armState == ArmState.armed;
 

@@ -29,6 +29,10 @@ class ControlTelemetryCodec {
   /// this deliberately if a v0 struct ever turns out to exist.
   static const int kMinTelemetryLength = 56;
 
+  /// The struct up to and including `bmsLinkState`. Shorter is older
+  /// firmware, and the tail's readings are absent rather than zero.
+  static const int _bmsTailLength = 69;
+
   // Availability: does this build and configuration produce the reading at
   // all? Sensor *health* is a different question, answered by signalStates.
   static const int _vCurrent = 1 << 0;
@@ -74,6 +78,8 @@ class ControlTelemetryCodec {
     bool flag(int bit) => flags & bit != 0;
 
     final limits = d.getUint8(13);
+    final hasTail = bytes.length >= _bmsTailLength;
+    final bmsData = hasTail && has(_vBms);
 
     return TelemetryFrame(
       socCoulomb: d.getUint8(7),
@@ -123,8 +129,21 @@ class ControlTelemetryCodec {
       powerControlEnabled: flag(_fPowerControl),
       bmsConnected: flag(_fBmsConnected),
       bmsConfigured: flag(_fBmsConfigured),
+      bmsPackVoltage: bmsData ? d.getUint32(58, Endian.little) / 1000.0 : null,
+      bmsCurrentA: bmsData ? d.getInt32(62, Endian.little) / 1000.0 : null,
+      bmsSoc: bmsData ? d.getUint8(66) : null,
+      bmsCellCount: bmsData ? d.getUint8(67) : null,
+      bmsLinkState: hasTail ? _linkState(d.getUint8(68)) : null,
     );
   }
+
+  static BmsLinkState _linkState(int v) => switch (v) {
+        0 => BmsLinkState.notConfigured,
+        1 => BmsLinkState.idle,
+        2 => BmsLinkState.connecting,
+        3 => BmsLinkState.connected,
+        _ => BmsLinkState.unknown,
+      };
 
   /// Two bits per signal, packed by the firmware's `packSignalStates`.
   static SignalState _signal(int packed, int shift) =>

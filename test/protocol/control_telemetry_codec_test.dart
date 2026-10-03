@@ -79,6 +79,27 @@ TelemetryFrame decode(Uint8List b) {
 /// All three signals Valid. 0b11_11_11 in bits 5..0.
 const allValid = 0x3F;
 
+/// The 56-byte struct, `stateFreqHz` at 56, then the BMS tail at 58–68.
+/// Every setter is an offset assertion against Part 2 of the spec.
+Uint8List withBmsTail({
+  int validity = 0x0008,
+  int packMv = 0,
+  int currentMa = 0,
+  int soc = 0,
+  int cellCount = 0,
+  int linkState = 0,
+}) {
+  final head = bytes(validity: validity, signalStates: allValid);
+  final tail = ByteData(13)
+    ..setUint16(0, 0, Endian.little) // stateFreqHz
+    ..setUint32(2, packMv, Endian.little)
+    ..setInt32(6, currentMa, Endian.little)
+    ..setUint8(10, soc)
+    ..setUint8(11, cellCount)
+    ..setUint8(12, linkState);
+  return Uint8List.fromList([...head, ...tail.buffer.asUint8List()]);
+}
+
 void main() {
   group('rejection', () {
     test('a packet shorter than 56 bytes is rejected whole', () {
@@ -353,5 +374,48 @@ void main() {
 
   test('receivedAt is the app clock, never anything on the wire', () {
     expect(decode(bytes()).receivedAt, at);
+  });
+
+  group('BMS tail', () {
+    test('reads every field at its offset', () {
+      final f = decode(withBmsTail(
+        packMv: 57120,
+        currentMa: -12500,
+        soc: 81,
+        cellCount: 14,
+        linkState: 3,
+      ));
+      expect(f.bmsPackVoltage, closeTo(57.12, 1e-9));
+      expect(f.bmsCurrentA, closeTo(-12.5, 1e-9));
+      expect(f.bmsSoc, 81);
+      expect(f.bmsCellCount, 14);
+      expect(f.bmsLinkState, BmsLinkState.connected);
+    });
+
+    test('pack readings follow the BMS validity bit; the link state does not',
+        () {
+      final f = decode(withBmsTail(validity: 0, packMv: 57120, linkState: 2));
+      expect(f.bmsPackVoltage, isNull);
+      expect(f.bmsCurrentA, isNull);
+      expect(f.bmsSoc, isNull);
+      expect(f.bmsCellCount, isNull);
+      expect(f.bmsLinkState, BmsLinkState.connecting);
+    });
+
+    test('a frame without the tail has none of it', () {
+      final f = decode(bytes(validity: 0x0008, signalStates: allValid));
+      expect(f.bmsPackVoltage, isNull);
+      expect(f.bmsLinkState, isNull);
+    });
+
+    test('every link state maps, and a newer one degrades', () {
+      BmsLinkState? state(int v) =>
+          decode(withBmsTail(linkState: v)).bmsLinkState;
+      expect(state(0), BmsLinkState.notConfigured);
+      expect(state(1), BmsLinkState.idle);
+      expect(state(2), BmsLinkState.connecting);
+      expect(state(3), BmsLinkState.connected);
+      expect(state(9), BmsLinkState.unknown);
+    });
   });
 }
