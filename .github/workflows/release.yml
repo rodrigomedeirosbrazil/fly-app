@@ -47,6 +47,11 @@ jobs:
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
+          # Same rule as releaseBuildNumber in lib/state/app_update_policy.dart.
+          if ! [[ "$TAG" =~ ^2[0-9]{3}-[0-9]{2}-[0-9]{2}\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::tag $TAG is not AAAA-MM-DD.N with N written without leading zeros — the app's update notice would not read it."
+            exit 1
+          fi
           DATE="${TAG%.*}"
           N="${TAG##*.}"
           if [ "$N" -gt 99 ]; then
