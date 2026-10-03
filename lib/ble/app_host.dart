@@ -9,9 +9,12 @@ import 'android_host.dart';
 /// refused for `device_info_plus`. Same channel as [AndroidHost]; iOS answers
 /// it too, but only `buildNumber`.
 ///
-/// Every failure is swallowed: no number means no notice, and a URL that
-/// cannot open leaves the pilot where they were. Neither is worth an error on
-/// screen.
+/// Channel failures — a host that refuses the call or lacks the method — are
+/// swallowed: no number means no notice, and a URL that cannot open leaves the
+/// pilot where they were. Neither is worth an error on screen.
+///
+/// A reply of the wrong type is not a channel failure. It is a bug in the
+/// native half, and is deliberately left to surface rather than be hidden.
 class AppHost {
   const AppHost([this.channel = const MethodChannel(AndroidHost.channelName)]);
 
