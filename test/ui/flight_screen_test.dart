@@ -352,18 +352,19 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Horímetro'), findsOneWidget);
-      // Exactly the four rows only the binary service can fill: hour meter,
-      // cell delta, uptime, firmware. An exact count is the point --
+      // Exactly the five rows only the binary service can fill: hour meter,
+      // cell delta, uptime, firmware and the BMS link state. An exact count
+      // is the point --
       // findsAtLeast would still pass if a row the sentence DOES carry
       // silently started dashing.
       //
-      // Four, not five: the sensor-state readout is gone. The states are
+      // Five, not six: the sensor-state readout is gone. The states are
       // still decoded and still drive hide-don't-print-zero everywhere; only
       // this readout of them was removed. The build stamp does not count
       // either -- that row hides when absent rather than dashing, because on
       // firmware that predates the field it is a reading that does not
       // exist.
-      expect(find.text('–'), findsNWidgets(4));
+      expect(find.text('–'), findsNWidgets(5));
     });
 
     testWidgets('the settings entry is present and live when disarmed',
@@ -695,6 +696,10 @@ void main() {
 
       expect(find.text('LIGADO'), findsOneWidget);
 
+      // The extra drawer rows push the control below the scroll fold.
+      await tester.ensureVisible(find.byType(Switch));
+      await tester.pumpAndSettle();
+
       // Tap the switch to mute
       await tester.tap(find.byType(Switch));
       await tester.pumpAndSettle();
@@ -740,6 +745,64 @@ void main() {
 
       expect(find.text('DESLIGADO'), findsOneWidget);
       expect(find.text('LIGADO'), findsNothing);
+    });
+  });
+
+  group('the drawer names what the panel only implies', () {
+    Future<void> openDrawer(WidgetTester tester) async {
+      await tester.tap(find.text('MAIS DADOS'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('the drawer explains the latched fault', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(
+          armState: ArmState.disarmed,
+          disarmReason: DisarmReason.throttleLinkLost,
+        ),
+        stale: false,
+      )));
+      await openDrawer(tester);
+
+      expect(find.text('Desarmado: falha no acelerador (sem fio)'),
+          findsOneWidget);
+    });
+
+    testWidgets('a manual disarm explains nothing', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(
+            armState: ArmState.disarmed, disarmReason: DisarmReason.manual),
+        stale: false,
+      )));
+      await openDrawer(tester);
+
+      expect(find.byKey(const Key('fault-explanation')), findsNothing);
+    });
+
+    testWidgets('the drawer names where per-cell voltage comes from',
+        (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
+      await openDrawer(tester);
+      expect(find.text('BMS · menor célula'), findsOneWidget);
+    });
+
+    testWidgets('without a BMS cell the source is the pack divided by 14',
+        (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(cellMinMv: null, cellMaxMv: null),
+        stale: false,
+      )));
+      await openDrawer(tester);
+      expect(find.text('Calculado ÷14S'), findsOneWidget);
+    });
+
+    testWidgets('the drawer shows the BMS link state', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(bmsConfigured: true, bmsConnected: false),
+        stale: false,
+      )));
+      await openDrawer(tester);
+      expect(find.text('Sem conexão'), findsOneWidget);
     });
   });
 }

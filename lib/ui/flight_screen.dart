@@ -824,6 +824,25 @@ class _SecondaryDataState extends State<_SecondaryData> {
     _ => '–',
   };
 
+  /// Where the per-cell figure on the battery card comes from. The card only
+  /// shows a tilde for the computed one; the portal names both.
+  String get _cellSource {
+    final f = frame;
+    if (f == null) return '–';
+    if (f.cellMinMv != null) return 'BMS · menor célula';
+    if (f.voltage != null) return 'Calculado ÷${kSeriesCells}S';
+    return '–';
+  }
+
+  /// From the frame's flags. Null on the sentence path, which carries none.
+  String get _bmsState {
+    final f = frame;
+    if (f?.bmsConnected == true) return 'Conectado';
+    if (f?.bmsConfigured == true) return 'Sem conexão';
+    if (f?.bmsConfigured == false) return 'Não configurado';
+    return '–';
+  }
+
   /// `h:mm:ss`, for counters that run to hundreds of hours.
   static String _hours(Duration? d) {
     if (d == null) return '–';
@@ -832,7 +851,6 @@ class _SecondaryDataState extends State<_SecondaryData> {
     final s = d.inSeconds % 60;
     return '$h:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -847,6 +865,8 @@ class _SecondaryDataState extends State<_SecondaryData> {
       ('Células mín / máx', _cells),
       // Beside the two numbers it is derived from, not four rows away.
       ('Delta de células', _or(f?.cellDeltaMv, ' mV')),
+      ('Tensão por célula', _cellSource),
+      ('BMS', _bmsState),
       ('Origem temp. motor', _source),
       ('Horímetro', _hours(f?.hourMeterSec)),
       ('Tempo ligado', _hours(f?.uptimeSec)),
@@ -900,6 +920,13 @@ class _SecondaryDataState extends State<_SecondaryData> {
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
+                              if (f != null &&
+                                  f.disarmCode != null &&
+                                  kFaultExplanations[f.disarmReason] != null)
+                                _FaultExplanation(
+                                  key: const Key('fault-explanation'),
+                                  text: kFaultExplanations[f.disarmReason]!,
+                                ),
                               for (final (label, value) in rows)
                                 Padding(
                                   padding: const EdgeInsets.symmetric(
@@ -1113,3 +1140,42 @@ class _MuteControl extends StatelessWidget {
 
 bool _limiting(TelemetryFrame? f, LimitCause cause) =>
     f?.limitCauses?.contains(cause) ?? false;
+
+/// The latched fault, in words. The status row has room for the code only;
+/// this is the sentence behind it, one tap away, as on the portal.
+class _FaultExplanation extends StatelessWidget {
+  const _FaultExplanation({super.key, required this.text});
+
+  final ({String title, String detail}) text;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.error.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            text.title,
+            style: TextStyle(
+              fontWeight: FontWeight.w700,
+              color: theme.colorScheme.error,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            text.detail,
+            style: TextStyle(fontSize: 13, color: theme.colorScheme.onSurface),
+          ),
+        ],
+      ),
+    );
+  }
+}
