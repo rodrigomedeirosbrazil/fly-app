@@ -3,16 +3,19 @@ import 'dart:typed_data';
 import '../protocol/bms_scan.dart';
 import '../protocol/config_groups.dart';
 import '../protocol/control_frame.dart';
+import '../protocol/pin_change.dart';
 import 'control_session.dart';
 
 const int _opAuth = 0x01;
 const int _opCfgGet = 0x10;
 const int _opCfgSet = 0x11;
+const int _opSessionReset = 0x20;
 const int _opBmsScanStart = 0x21;
 const int _opBmsScanStatus = 0x22;
 const int _opRemotePair = 0x24;
 const int _opRemoteForget = 0x25;
 const int _opBuzzerPreview = 0x26;
+const int _opPinChange = 0x28;
 
 /// How many times an idempotent request is resent after a timeout.
 const int _attempts = 3;
@@ -204,6 +207,61 @@ class ConfigEditor {
     );
   }
 
+  /// Zeroes the flight clock (`sessionSec`). The hour meter is untouched.
+  ///
+  /// Not retried: `ControlSession` lists `SESSION_RESET` among the requests
+  /// that are not safe to repeat, and a reset that lands twice could zero a
+  /// clock the aircraft started counting in between.
+  Future<SaveOutcome> resetSession({String? pin}) => _authenticatedAction(
+        op: _opSessionReset,
+        payload: const [],
+        pin: pin,
+        retry: false,
+      );
+
+  /// Replaces the controller's PIN.
+  ///
+  /// `PIN_CHANGE` needs an authenticated connection *and* carries the current
+  /// PIN, so the current PIN doubles as the one to authenticate with — the
+  /// pilot types it once.
+  ///
+  /// **Sent once, never retried.** It is the one write here that is not
+  /// idempotent: after a lost reply the controller may already hold the new
+  /// PIN, and resending with the old one as "current" would be refused. A
+  /// timeout is reported as exactly that, and the screen says the PIN may
+  /// have changed.
+  Future<SaveOutcome> changePin({
+    required String current,
+    required String next,
+  }) async {
+    if (!isValidNewPin(next)) return const SaveRejectedByController();
+
+    if (!_authenticated) {
+      final auth = await _authenticate(current);
+      if (auth != null) return auth;
+    }
+
+    final result = await _session.request(
+      op: _opPinChange,
+      payload: encodePinChange(current: current, next: next),
+    );
+
+    return switch (result) {
+      ControlOk() => const SaveOk(),
+      ControlRefused(:final status) => switch (status) {
+          ControlStatus.errState => const SaveRefusedArmed(),
+          // The handler's own answer to a current PIN that does not match.
+          ControlStatus.errAuth => _lostSession(SaveWrongPin.new),
+          ControlStatus.errBadArg => const SaveRejectedByController(),
+          ControlStatus.errBadOp => const SaveUnsupported(),
+          ControlStatus.errBusy => const SaveBusy(),
+          _ => const SaveFailed(),
+        },
+      ControlTimeout() => const SaveFailed(SaveFailure.noAnswer),
+      ControlDropped() => const SaveFailed(SaveFailure.linkLost),
+    };
+  }
+
   /// The shared body of every authenticated action.
   ///
   /// Identical refusal mapping to `_save`, deliberately: armed reported
@@ -360,8 +418,8 @@ class ConfigEditor {
   ///
   /// Safe for exactly the two opcodes used here: `AUTH` with the same correct
   /// PIN and `CFG_SET` with the same payload both land on the same state. It
-  /// would not be safe for `PIN_CHANGE`, which is why the session itself
-  /// never retries and each caller decides.
+  /// would not be safe for PIN_CHANGE or SESSION_RESET, which is why the session
+  /// itself never retries and each caller decides.
   Future<ControlResult> _retrying({
     required int op,
     required List<int> payload,

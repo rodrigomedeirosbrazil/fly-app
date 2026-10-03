@@ -398,4 +398,108 @@ void main() {
       expect(editor.authenticated, isFalse);
     });
   });
+
+  group('resetSession', () {
+    test('authenticates, then sends SESSION_RESET once', () async {
+      final s = FakeSession()
+        ..queueOk() // AUTH
+        ..queueOk(); // SESSION_RESET
+      final editor = ConfigEditor(s);
+
+      final outcome = await editor.resetSession(pin: '1234');
+
+      expect(outcome, isA<SaveOk>());
+      expect(s.sent.map((r) => r.op), [0x01, 0x20]);
+    });
+
+    test('is not retried on a timeout', () async {
+      final s = FakeSession()..queueOk(); // AUTH, then nothing
+      final editor = ConfigEditor(s);
+
+      final outcome = await editor.resetSession(pin: '1234');
+
+      expect(outcome, isA<SaveFailed>());
+      expect(s.sent.where((r) => r.op == 0x20), hasLength(1));
+    });
+
+    test('asks for the PIN on a fresh connection', () async {
+      final editor = ConfigEditor(FakeSession());
+      expect(await editor.resetSession(), isA<SaveNeedsPin>());
+    });
+  });
+
+  group('changePin', () {
+    test('authenticates with the current PIN and sends both', () async {
+      final s = FakeSession()
+        ..queueOk() // AUTH
+        ..queueOk(); // PIN_CHANGE
+      final editor = ConfigEditor(s);
+
+      final outcome = await editor.changePin(current: '0000', next: '4321');
+
+      expect(outcome, isA<SaveOk>());
+      expect(s.sent[0].op, 0x01);
+      expect(s.sent[0].payload, '0000'.codeUnits);
+      expect(s.sent[1].op, 0x28);
+      expect(s.sent[1].payload, [4, ...'0000'.codeUnits, 4, ...'4321'.codeUnits]);
+    });
+
+    test('a wrong current PIN is reported as wrong, not as a lost session',
+        () async {
+      final s = FakeSession()
+        ..queue(const ControlRefused(ControlStatus.errAuth)); // AUTH refused
+      final editor = ConfigEditor(s);
+
+      expect(
+        await editor.changePin(current: '9999', next: '4321'),
+        isA<SaveWrongPin>(),
+      );
+    });
+
+    test('on an authenticated connection a wrong current PIN is still wrong',
+        () async {
+      final s = FakeSession()
+        ..queueOk() // AUTH from an earlier save
+        ..queue(const ControlRefused(ControlStatus.errAuth)); // PIN_CHANGE
+      final editor = ConfigEditor(s);
+      await editor.authenticate('0000');
+
+      expect(
+        await editor.changePin(current: '1111', next: '4321'),
+        isA<SaveWrongPin>(),
+      );
+    });
+
+    test('is sent once and never retried', () async {
+      final s = FakeSession()..queueOk(); // AUTH, then PIN_CHANGE times out
+      final editor = ConfigEditor(s);
+
+      final outcome = await editor.changePin(current: '0000', next: '4321');
+
+      expect(outcome, isA<SaveFailed>());
+      expect(s.sent.where((r) => r.op == 0x28), hasLength(1));
+    });
+
+    test('an invalid new PIN never leaves the phone', () async {
+      final s = FakeSession();
+      final editor = ConfigEditor(s);
+
+      expect(
+        await editor.changePin(current: '0000', next: '12'),
+        isA<SaveRejectedByController>(),
+      );
+      expect(s.sent, isEmpty);
+    });
+
+    test('armed is reported as armed', () async {
+      final s = FakeSession()
+        ..queue(const ControlRefused(ControlStatus.errState)); // AUTH refused
+      final editor = ConfigEditor(s);
+
+      expect(
+        await editor.changePin(current: '0000', next: '4321'),
+        isA<SaveRefusedArmed>(),
+      );
+    });
+  });
 }
