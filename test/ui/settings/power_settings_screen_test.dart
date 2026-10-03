@@ -16,7 +16,7 @@ const power = PowerConfig(
 
 Widget wrap(Widget child) => MaterialApp(home: child);
 
-class RecordingEditor implements ConfigEditor {
+class RecordingEditor extends Fake implements ConfigEditor {
   @override
   Future<SaveOutcome?> authenticate(String pin) async => null;
 

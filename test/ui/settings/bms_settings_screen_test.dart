@@ -18,7 +18,7 @@ const noBmsConfig = BmsConfig(bmsType: 0, bmsMac: kUnsetMac);
 
 Widget wrap(Widget child) => MaterialApp(home: child);
 
-class RecordingEditor implements ConfigEditor {
+class RecordingEditor extends Fake implements ConfigEditor {
   @override
   Future<SaveOutcome?> authenticate(String pin) async => null;
 
@@ -76,7 +76,7 @@ class RecordingEditor implements ConfigEditor {
 /// to exercise the two rules that live in the results: an unidentified device
 /// must not move the type dropdown, and the count line must report the
 /// controller's total rather than the length of the truncated list.
-class _MockEditor implements ConfigEditor {
+class _MockEditor extends Fake implements ConfigEditor {
   @override
   Future<SaveOutcome?> authenticate(String pin) async => null;
 
