@@ -521,8 +521,14 @@ class _SystemSettingsScreenState extends State<SystemSettingsScreen> {
         },
       ),
     ).then((ok) async {
+      final current = _currentPinController.text;
+      final next = _newPinController.text;
+      // Not left sitting in memory until the dialog is next opened.
+      _currentPinController.clear();
+      _newPinController.clear();
+      _confirmPinController.clear();
       if (ok != true || !mounted) return;
-      await _changePin(_currentPinController.text, _newPinController.text);
+      await _changePin(current, next);
     });
   }
 
