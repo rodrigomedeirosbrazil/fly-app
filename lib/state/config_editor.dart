@@ -101,9 +101,21 @@ enum SaveFailure {
 
 /// Nothing came back, or the link went away.
 class SaveFailed extends SaveOutcome {
-  const SaveFailed([this.cause = SaveFailure.noAnswer]);
+  const SaveFailed([this.cause = SaveFailure.noAnswer])
+      : mayHaveApplied = false;
+
+  /// Dart cannot mix an optional positional with a named parameter, and every
+  /// existing `SaveFailed()` relies on the positional one -- so the rarer case
+  /// gets its own constructor.
+  const SaveFailed.mayHaveApplied(this.cause) : mayHaveApplied = true;
 
   final SaveFailure cause;
+
+  /// The request that was lost may still have landed. True only for a request
+  /// that is not idempotent and was actually sent -- today `PIN_CHANGE`'s own
+  /// timeout or drop. A failure before it left the phone, such as its
+  /// authenticate step, is false: nothing could have changed.
+  final bool mayHaveApplied;
 }
 
 /// Owns the authenticate → write → re-read sequence for one connection.
@@ -277,8 +289,8 @@ class ConfigEditor {
           ControlStatus.errBusy => const SaveBusy(),
           _ => const SaveFailed(),
         },
-      ControlTimeout() => const SaveFailed(SaveFailure.noAnswer),
-      ControlDropped() => const SaveFailed(SaveFailure.linkLost),
+      ControlTimeout() => const SaveFailed.mayHaveApplied(SaveFailure.noAnswer),
+      ControlDropped() => const SaveFailed.mayHaveApplied(SaveFailure.linkLost),
     };
   }
 

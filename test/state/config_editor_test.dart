@@ -480,6 +480,31 @@ void main() {
       expect(s.sent.where((r) => r.op == 0x28), hasLength(1));
     });
 
+    test('only a PIN_CHANGE that went unanswered may have applied',
+        () async {
+      // AUTH times out: PIN_CHANGE was never sent, so the PIN cannot have
+      // changed and the screen must not say it may have.
+      final authLost = ConfigEditor(FakeSession());
+      final early = await authLost.changePin(current: '0000', next: '4321');
+      expect((early as SaveFailed).mayHaveApplied, isFalse);
+
+      final authDropped = ConfigEditor(FakeSession()..queue(const ControlDropped()));
+      final dropped = await authDropped.changePin(current: '0000', next: '4321');
+      expect((dropped as SaveFailed).mayHaveApplied, isFalse);
+
+      // AUTH answers, PIN_CHANGE does not.
+      final late = await ConfigEditor(FakeSession()..queueOk())
+          .changePin(current: '0000', next: '4321');
+      expect((late as SaveFailed).mayHaveApplied, isTrue);
+
+      final lateDrop = await ConfigEditor(FakeSession()
+            ..queueOk()
+            ..queue(const ControlDropped()))
+          .changePin(current: '0000', next: '4321');
+      expect((lateDrop as SaveFailed).mayHaveApplied, isTrue);
+      expect(lateDrop.cause, SaveFailure.linkLost);
+    });
+
     test('an invalid new PIN never leaves the phone', () async {
       final s = FakeSession();
       final editor = ConfigEditor(s);

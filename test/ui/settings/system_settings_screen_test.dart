@@ -357,7 +357,8 @@ void main() {
 
   testWidgets('a PIN change with no answer says the PIN may have changed',
       (tester) async {
-    editor.pinChangeOutcome = const SaveFailed(SaveFailure.noAnswer);
+    editor.pinChangeOutcome =
+        const SaveFailed.mayHaveApplied(SaveFailure.noAnswer);
     await tester.pumpWidget(wrap(screen()));
 
     await tapVisible(tester, find.byKey(const Key('change-pin')));
@@ -369,6 +370,33 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('pode ter sido alterado'), findsOneWidget);
+  });
+
+  testWidgets('a failure before PIN_CHANGE was sent does not claim a change',
+      (tester) async {
+    // The authenticate step timed out or dropped; the request that changes
+    // the PIN never left the phone, so "may have changed" would be false.
+    for (final (cause, text) in [
+      (SaveFailure.noAnswer, 'O controlador não respondeu'),
+      (SaveFailure.linkLost, 'A conexão caiu'),
+    ]) {
+      editor.pinChangeOutcome = SaveFailed(cause);
+      await tester.pumpWidget(wrap(screen()));
+
+      await tapVisible(tester, find.byKey(const Key('change-pin')));
+      await tester.enterText(find.byKey(const Key('pin-current')), '0000');
+      await tester.enterText(find.byKey(const Key('pin-new')), '4321');
+      await tester.enterText(find.byKey(const Key('pin-confirm')), '4321');
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('pin-change-ok')));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining(text), findsOneWidget);
+      expect(find.textContaining('pode ter sido alterado'), findsNothing);
+
+      // Fresh tree for the next cause, so the old snack bar cannot answer.
+      await tester.pumpWidget(const SizedBox());
+    }
   });
 
   testWidgets('a wrong current PIN is named', (tester) async {

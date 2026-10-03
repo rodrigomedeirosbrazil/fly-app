@@ -553,10 +553,17 @@ class _SystemSettingsScreenState extends State<SystemSettingsScreen> {
       // Never retried, so silence is reported as what it is: the request may
       // have landed. Claiming it failed would send the pilot back with the
       // old PIN to a controller that already holds the new one.
-      case SaveFailed(:final cause):
-        _showSnackBar(cause == SaveFailure.linkLost
-            ? 'A conexão caiu — o PIN pode ter sido alterado. Confira com o PIN novo.'
-            : 'Sem confirmação do controlador — o PIN pode ter sido alterado.');
+      case SaveFailed(:final cause, :final mayHaveApplied):
+        // Only when PIN_CHANGE itself was sent. A failure while authenticating
+        // never reached it, so claiming a change would be false.
+        _showSnackBar(switch ((cause, mayHaveApplied)) {
+          (SaveFailure.linkLost, true) =>
+            'A conexão caiu — o PIN pode ter sido alterado. Confira com o PIN novo.',
+          (_, true) =>
+            'Sem confirmação do controlador — o PIN pode ter sido alterado.',
+          (SaveFailure.linkLost, false) => 'A conexão caiu antes de gravar',
+          (_, false) => 'O controlador não respondeu. Tente de novo.',
+        });
       case SaveNeedsPin():
         // changePin authenticates with the current PIN itself; this outcome
         // cannot come back. Listed so the switch stays exhaustive.
