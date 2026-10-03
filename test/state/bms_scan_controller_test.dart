@@ -142,4 +142,48 @@ void main() {
     expect(c.status, BmsScanStatus.error);
     expect(c.isPolling, isFalse);
   });
+
+  List<int> detailBytes(List<int> mac, String name) =>
+      [...mac, 0xC3, 3, name.length, ...name.codeUnits, 0];
+
+  test('a completed scan fetches each result\'s name', () async {
+    final session = FakeSession();
+    final editor = ConfigEditor(session);
+    final c = BmsScanController(editor,
+        pollInterval: const Duration(milliseconds: 10));
+
+    session.queueOk(); // AUTH
+    session.queueOk(); // BMS_SCAN_START
+    session.queueOk([2, 1, 1, 2, 3, 4, 5, 6, (-50) & 0xFF, 3]); // complete
+    session.queueOk(detailBytes([1, 2, 3, 4, 5, 6], 'JK-B2A24S'));
+
+    await c.start(pin: '1234');
+    await pumpUntil(
+        () => c.results.isNotEmpty && c.detailFor(c.results.first) != null);
+
+    expect(c.detailFor(c.results.first)!.name, 'JK-B2A24S');
+    expect(session.sent.last.op, 0x2B);
+    expect(session.sent.last.payload, [0]);
+  });
+
+  test('old firmware is asked once and then left alone', () async {
+    final session = FakeSession();
+    final editor = ConfigEditor(session);
+    final c = BmsScanController(editor,
+        pollInterval: const Duration(milliseconds: 10));
+
+    session.queueOk(); // AUTH
+    session.queueOk(); // BMS_SCAN_START
+    session.queueOk([2, 2,
+      1, 2, 3, 4, 5, 6, (-50) & 0xFF, 0,
+      7, 8, 9, 10, 11, 12, (-70) & 0xFF, 0]); // complete, two results
+    session.queue(const ControlRefused(ControlStatus.errBadOp));
+
+    await c.start(pin: '1234');
+    await pumpUntil(() => c.status == BmsScanStatus.complete);
+    await pumpUntil(() => false, maxTicks: 10);
+
+    expect(session.sent.where((r) => r.op == 0x2B), hasLength(1));
+    expect(c.detailFor(c.results.first), isNull);
+  });
 }

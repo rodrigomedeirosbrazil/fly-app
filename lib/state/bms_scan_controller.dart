@@ -34,6 +34,8 @@ class BmsScanController extends ChangeNotifier {
   int _total = 0;
   SaveOutcome? _refusal;
   bool _lostContact = false;
+  final Map<String, BmsScanDetail> _details = {};
+  bool _disposed = false;
 
   BmsScanStatus get status => _status;
 
@@ -58,8 +60,15 @@ class BmsScanController extends ChangeNotifier {
   /// to start scanning at all.
   bool get lostContact => _lostContact;
 
+  /// Name and services for [r], or null when not (yet) known — old firmware,
+  /// a reply that did not come, or a fetch still running.
+  BmsScanDetail? detailFor(BmsScanResult r) => _details[_key(r.mac)];
+
+  static String _key(List<int> mac) => mac.join(':');
+
   Future<SaveOutcome> start({String? pin}) async {
     _refusal = null;
+    _details.clear();
     _results = const [];
     _total = 0;
     _ticks = 0;
@@ -108,8 +117,30 @@ class BmsScanController extends ChangeNotifier {
     _total = state.total;
     _results = [...state.results]..sort((a, b) => b.rssi.compareTo(a.rssi));
 
-    if (state.status != BmsScanStatus.scanning) _stopTimer();
+    if (state.status != BmsScanStatus.scanning) {
+      _stopTimer();
+      if (state.status == BmsScanStatus.complete) {
+        unawaited(_fetchDetails(state.total));
+      }
+    }
     notifyListeners();
+  }
+
+  /// One request per result, in the controller's own order — `index` is the
+  /// firmware's storage index, which the sorted [results] no longer show.
+  ///
+  /// Stops at the first `ErrBadOp` (firmware without the opcode) and at the
+  /// first silence: details are decoration, and a link that went quiet right
+  /// after a scan does not need sixteen more timeouts queued on it.
+  Future<void> _fetchDetails(int count) async {
+    for (var i = 0; i < count && i < 16; i++) {
+      final r = await _editor.readBmsScanDetail(i);
+      if (_disposed) return;
+      final d = r.detail;
+      if (d == null) return;
+      _details[_key(d.mac)] = d;
+      notifyListeners();
+    }
   }
 
   void stop() {
@@ -125,6 +156,7 @@ class BmsScanController extends ChangeNotifier {
   @override
   void dispose() {
     _stopTimer();
+    _disposed = true;
     super.dispose();
   }
 }

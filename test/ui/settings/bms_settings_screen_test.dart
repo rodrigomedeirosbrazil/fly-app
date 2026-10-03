@@ -113,6 +113,14 @@ class _MockEditor extends Fake implements ConfigEditor {
   }
   @override
   Future<BmsScanState?> readBmsScan() async => next;
+
+  /// What BMS_SCAN_RESULT answers for index 0. Null is "no detail".
+  BmsScanDetail? nextDetail;
+
+  @override
+  Future<({BmsScanDetail? detail, bool unsupported})> readBmsScanDetail(
+          int index) async =>
+      (detail: index == 0 ? nextDetail : null, unsupported: false);
   @override
   Future<SystemConfig?> readSystemConfig() async => null;
   @override
