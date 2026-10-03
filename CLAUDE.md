@@ -13,7 +13,7 @@ fly-controller, and only listens.
 **Framework:** Flutter 3.47.3 (stable) · **Dart SDK:** ^3.13.3
 
 ```bash
-flutter test                  # 566 tests, no hardware needed
+flutter test                  # 695 tests, no hardware needed
 flutter analyze               # must be clean
 flutter build ios --release   # needs Xcode
 flutter build apk --release   # signed APK, ~45 MB (all three ABIs)
@@ -375,9 +375,11 @@ borrowed it cannot outlive the screen that created it.
 
 ### The settings screens mirror the portal
 
-Four areas — **all four live** — per-cell voltage entry with the pack total
-beside it, a dropdown of the pack sizes the portal offers, and a voltage divider that is **derived, not
-typed** — the formula comes from `src/WebServer/Pages/ConfigPowerPage.h`.
+Four configuration areas — **all four live** — and, on the same index,
+**Registros de voo** and **Firmware**. The power screen has per-cell voltage
+entry with the pack total beside it, a dropdown of the pack sizes the portal
+offers, and a voltage divider that is **derived, not typed** — the formula
+comes from `src/WebServer/Pages/ConfigPowerPage.h`.
 A pilot who knows one surface should recognise the other.
 
 `kSeriesCells` is 14, mirroring the firmware's `BATTERY_CELL_COUNT`. Both the
@@ -469,7 +471,7 @@ The screen says so rather than looking frozen.
 
 Each result's name and services come from `BMS_SCAN_RESULT` (0x2B), one request
 per result after the scan completes, keyed by MAC because the list is sorted by
-signal. `ErrBadOp` or silence stops the fetch.
+signal. `ErrBadOp`, silence, or a reply that does not decode stops the fetch.
 
 ### Pairing has no readback, no timeout and no cancel
 
@@ -769,12 +771,15 @@ reason from newer firmware degrades instead of throwing.
 ```
 lib/
 ├── protocol/   xctod_frame.dart · xctod_parser.dart · line_assembler.dart
+│               pin_change.dart · log_protocol.dart
 ├── state/      link_health.dart · telemetry_repository.dart
 │               ble_permission_policy.dart
+│               log_browser.dart · log_download.dart
 ├── audio/      tone_player.dart
 ├── ble/        fly_controller_link.dart · android_host.dart
 └── ui/         app.dart · connection_screen.dart · flight_screen.dart
-                widgets/dial.dart
+                reading_text.dart · widgets/dial.dart
+                settings/logs_screen.dart · settings/share_csv.dart
 ```
 
 The layering is the point, and it is worth preserving:
