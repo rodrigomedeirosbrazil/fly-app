@@ -225,31 +225,31 @@ class _PowerSettingsScreenState extends State<PowerSettingsScreen> {
     return true;
   }
 
-  Future<void> _savePower() async {
-    final config = PowerConfig(
-      capacityMah: _getSelectedCapacityMah(),
-      minVoltageMv: _getMinVoltageMv().round(),
-      maxVoltageMv: _getMaxVoltageMv().round(),
-      powerControlEnabled: _powerControlEnabled,
-      voltageDividerRatio: widget.config?.voltageDividerRatio ?? 0,
-    );
+  /// What the last save tried to write, so a save that needs the PIN resends
+  /// exactly that. Rebuilding from `widget.config` threw away a calibration;
+  /// rebuilding from the fields would lose the ratio, which is not a field.
+  PowerConfig? _pending;
 
-    await _handleSaveOutcome(await widget.editor.savePower(config));
+  PowerConfig _configWithRatio(double ratio) => PowerConfig(
+        capacityMah: _getSelectedCapacityMah(),
+        minVoltageMv: _getMinVoltageMv().round(),
+        maxVoltageMv: _getMaxVoltageMv().round(),
+        powerControlEnabled: _powerControlEnabled,
+        voltageDividerRatio: ratio,
+      );
+
+  Future<void> _save(PowerConfig config, {String? pin}) async {
+    _pending = config;
+    await _handleSaveOutcome(await widget.editor.savePower(config, pin: pin));
   }
+
+  Future<void> _savePower() =>
+      _save(_configWithRatio(widget.config?.voltageDividerRatio ?? 0));
 
   Future<void> _applyCalibration() async {
     final newRatio = _getComputedCalibrationRatio();
     if (newRatio == null) return;
-
-    final config = PowerConfig(
-      capacityMah: _getSelectedCapacityMah(),
-      minVoltageMv: _getMinVoltageMv().round(),
-      maxVoltageMv: _getMaxVoltageMv().round(),
-      powerControlEnabled: _powerControlEnabled,
-      voltageDividerRatio: newRatio,
-    );
-
-    await _handleSaveOutcome(await widget.editor.savePower(config));
+    await _save(_configWithRatio(newRatio));
   }
 
   Future<void> _handleSaveOutcome(SaveOutcome outcome) async {
@@ -349,21 +349,11 @@ class _PowerSettingsScreenState extends State<PowerSettingsScreen> {
     ).then((pin) async {
       if (pin == null || !mounted) return;
 
-      // Built from the fields, not from widget.config: the pilot may have
-      // changed something between the first save and entering the PIN, and
-      // rebuilding from the original would discard it while still reporting
-      // success.
-      final config = PowerConfig(
-        capacityMah: _getSelectedCapacityMah(),
-        minVoltageMv: _getMinVoltageMv().round(),
-        maxVoltageMv: _getMaxVoltageMv().round(),
-        powerControlEnabled: _powerControlEnabled,
-        voltageDividerRatio: widget.config?.voltageDividerRatio ?? 0,
-      );
-
-      await _handleSaveOutcome(
-        await widget.editor.savePower(config, pin: pin),
-      );
+      // Resends what the pilot asked to save, not a rebuild from widget.config:
+      // that discarded a calibration while still reporting success.
+      final pending = _pending;
+      if (pending == null) return;
+      await _save(pending, pin: pin);
     });
   }
 

@@ -220,6 +220,27 @@ void main() {
         reason: 'the re-save must carry the fields, not the original config');
   });
 
+  testWidgets('a calibration that needs the PIN writes the new ratio',
+      (tester) async {
+    // It used to re-save widget.config's ratio after the PIN, discarding the
+    // calibration and still reporting "Gravado".
+    editor.queued.add(const SaveNeedsPin());
+    await tester.pumpWidget(wrap(screen(sensorVolts: 50.0)));
+
+    await tester.enterText(find.byKey(const Key('bms-reference')), '55');
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('calibrate')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('calibrate')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).last, '1234');
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+
+    expect(editor.saves, hasLength(2));
+    expect(editor.saves.last.voltageDividerRatio, closeTo(12.1, 0.001));
+  });
+
   group('rounding', () {
     testWidgets('a per-cell voltage converts without losing a millivolt',
         (tester) async {
