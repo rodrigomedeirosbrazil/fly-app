@@ -46,6 +46,7 @@ void openSettings(BuildContext context, TelemetryRepository repo) {
               // codec already applies that rule, so calibration inherits it
               // rather than inventing a second one.
               sensorVolts: repo.frame?.voltage,
+              hasVoltageSensor: repo.hasVoltageSensor,
             ),
           ),
           onOpenThermal: () => _push(

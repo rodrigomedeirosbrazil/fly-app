@@ -195,6 +195,11 @@ class TelemetryRepository extends ChangeNotifier {
   /// read.
   bool get hasRemoteLink => _link.info?.hasRemoteLink ?? false;
 
+  /// Whether the controller has a battery-voltage divider to calibrate.
+  /// True when INFO was never read, which keeps the screen as it was before
+  /// the bit was consulted.
+  bool get hasVoltageSensor => _link.info?.hasVoltageSensor ?? true;
+
   /// Whether the controller supports firmware updates over BLE.
   /// False when INFO was never read or the DFU characteristic is absent.
   bool get canUpdateFirmware => _link.canUpdateFirmware;

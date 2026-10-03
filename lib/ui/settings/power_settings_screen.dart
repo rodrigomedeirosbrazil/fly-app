@@ -13,6 +13,7 @@ class PowerSettingsScreen extends StatefulWidget {
     required this.config,
     required this.armed,
     required this.sensorVolts,
+    this.hasVoltageSensor = true,
   });
 
   final ConfigEditor editor;
@@ -24,6 +25,10 @@ class PowerSettingsScreen extends StatefulWidget {
   /// moment it is applied, which is why this arrives live rather than as a
   /// snapshot.
   final double? sensorVolts;
+
+  /// INFO capability `0x0002`. A controller with no voltage divider has
+  /// nothing to calibrate, and the portal hides the section for it.
+  final bool hasVoltageSensor;
 
   @override
   State<PowerSettingsScreen> createState() => _PowerSettingsScreenState();
@@ -490,49 +495,50 @@ class _PowerSettingsScreenState extends State<PowerSettingsScreen> {
                     ],
                   ),
                   // Calibration section
-                  SettingsCard(
-                    title: 'CALIBRAÇÃO',
-                    children: [
-                      Text(
-                        'Leitura atual do sensor: ${widget.sensorVolts != null ? widget.sensorVolts!.toStringAsFixed(2) : 'Sem leitura'} V',
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        key: const Key('bms-reference'),
-                        controller: _bmsReferenceController,
-                        decoration: InputDecoration(
-                          labelText: 'Tensão de Referência do BMS (V)',
-                          border: const OutlineInputBorder(),
-                          helperText:
-                              'Tensão que o BMS mostra. O sistema calculará o fator de correção automaticamente.',
-                        ),
-                        keyboardType: kSettingsKeyboard,
-                        inputFormatters: kSettingsFormatters,
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        'Divisor de Tensão Atual: ${widget.config?.voltageDividerRatio.toStringAsFixed(2) ?? '--'}',
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      ),
-                      if (computedRatio != null && calibrationValid) ...[
-                        const SizedBox(height: 4),
+                  if (widget.hasVoltageSensor)
+                    SettingsCard(
+                      title: 'CALIBRAÇÃO',
+                      children: [
                         Text(
-                          'Novo Divisor: ${computedRatio.toStringAsFixed(2)}',
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.primary,
-                            fontWeight: FontWeight.bold,
+                          'Leitura atual do sensor: ${widget.sensorVolts != null ? widget.sensorVolts!.toStringAsFixed(2) : 'Sem leitura'} V',
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          key: const Key('bms-reference'),
+                          controller: _bmsReferenceController,
+                          decoration: InputDecoration(
+                            labelText: 'Tensão de Referência do BMS (V)',
+                            border: const OutlineInputBorder(),
+                            helperText:
+                                'Tensão que o BMS mostra. O sistema calculará o fator de correção automaticamente.',
                           ),
+                          keyboardType: kSettingsKeyboard,
+                          inputFormatters: kSettingsFormatters,
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          'Divisor de Tensão Atual: ${widget.config?.voltageDividerRatio.toStringAsFixed(2) ?? '--'}',
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                        if (computedRatio != null && calibrationValid) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            'Novo Divisor: ${computedRatio.toStringAsFixed(2)}',
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.primary,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 12),
+                        OutlinedButton(
+                          key: const Key('calibrate'),
+                          onPressed: calibrationValid ? _applyCalibration : null,
+                          child: const Text('Aplicar calibração'),
                         ),
                       ],
-                      const SizedBox(height: 12),
-                      OutlinedButton(
-                        key: const Key('calibrate'),
-                        onPressed: calibrationValid ? _applyCalibration : null,
-                        child: const Text('Aplicar calibração'),
-                      ),
-                    ],
-                  ),
+                    ),
                 ],
               ),
             ),

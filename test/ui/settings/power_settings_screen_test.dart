@@ -80,12 +80,14 @@ void main() {
     bool armed = false,
     PowerConfig? config = power,
     double? sensorVolts = 50.4,
+    bool hasVoltageSensor = true,
   }) =>
       PowerSettingsScreen(
         editor: editor,
         config: config,
         armed: armed,
         sensorVolts: sensorVolts,
+        hasVoltageSensor: hasVoltageSensor,
       );
 
   Finder save() => find.byKey(const Key('save-power'));
@@ -135,6 +137,12 @@ void main() {
       expect(editor.saves.single.minVoltageMv, 42000);
       expect(editor.saves.single.maxVoltageMv, 58100);
     });
+  });
+
+  testWidgets('no voltage sensor, no calibration', (tester) async {
+    await tester.pumpWidget(wrap(screen(hasVoltageSensor: false)));
+    expect(find.text('CALIBRAÇÃO'), findsNothing);
+    expect(find.byKey(const Key('calibrate')), findsNothing);
   });
 
   group('capacity', () {
