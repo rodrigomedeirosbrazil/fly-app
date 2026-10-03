@@ -163,6 +163,38 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  testWidgets('the status card shows BMS temperature and cell delta',
+      (tester) async {
+    await tester.pumpWidget(wrap(BmsSettingsScreen(
+      editor: RecordingEditor(),
+      scanController: BmsScanController(RecordingEditor()),
+      config: bmsConfig,
+      armed: false,
+      bmsConnected: true,
+      bmsConfigured: true,
+      bmsMaxTempC: 31,
+      cellDeltaMv: 12,
+    )));
+
+    expect(find.text('31 °C'), findsOneWidget);
+    expect(find.text('12 mV'), findsOneWidget);
+  });
+
+  testWidgets('without BMS data the rows are absent, not zero',
+      (tester) async {
+    await tester.pumpWidget(wrap(BmsSettingsScreen(
+      editor: RecordingEditor(),
+      scanController: BmsScanController(RecordingEditor()),
+      config: bmsConfig,
+      armed: false,
+      bmsConnected: false,
+      bmsConfigured: true,
+    )));
+
+    expect(find.text('Temperatura máxima'), findsNothing);
+    expect(find.text('Diferença entre células'), findsNothing);
+  });
+
   testWidgets('shows the stored type and address', (tester) async {
     await tester.pumpWidget(wrap(screen()));
     expect(find.text('JBD'), findsOneWidget);

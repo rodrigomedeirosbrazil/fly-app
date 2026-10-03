@@ -18,6 +18,8 @@ class BmsSettingsScreen extends StatefulWidget {
     required this.armed,
     required this.bmsConnected,
     required this.bmsConfigured,
+    this.bmsMaxTempC,
+    this.cellDeltaMv,
   });
 
   final ConfigEditor editor;
@@ -26,6 +28,11 @@ class BmsSettingsScreen extends StatefulWidget {
   final bool armed;
   final bool? bmsConnected;
   final bool? bmsConfigured;
+
+  /// Hottest BMS probe and spread between cells, from the frame. Null hides
+  /// the row: the BMS is not reporting, which is not the same as 0.
+  final int? bmsMaxTempC;
+  final int? cellDeltaMv;
 
   @override
   State<BmsSettingsScreen> createState() => _BmsSettingsScreenState();
@@ -423,6 +430,16 @@ class _BmsSettingsScreenState extends State<BmsSettingsScreen> {
                                 : Theme.of(context).colorScheme.outline,
                           ),
                         ),
+                        if (widget.bmsMaxTempC != null)
+                          _StatusLine(
+                            label: 'Temperatura máxima',
+                            value: '${widget.bmsMaxTempC} °C',
+                          ),
+                        if (widget.cellDeltaMv != null)
+                          _StatusLine(
+                            label: 'Diferença entre células',
+                            value: '${widget.cellDeltaMv} mV',
+                          ),
                       ],
                     ),
                   ],
@@ -570,6 +587,41 @@ class _SaveFooter extends StatelessWidget {
               ),
             ),
           child,
+        ],
+      ),
+    );
+  }
+}
+
+class _StatusLine extends StatelessWidget {
+  const _StatusLine({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
+            ),
+          ),
+          Text(
+            value,
+            maxLines: 1,
+            style: const TextStyle(
+              fontWeight: FontWeight.w700,
+              fontFeatures: [FontFeature.tabularFigures()],
+            ),
+          ),
         ],
       ),
     );
