@@ -34,10 +34,11 @@ abstract interface class FirmwareFeed {
 /// The only code in the app that talks to the internet — the same role
 /// `ble/` plays for the radio.
 ///
-/// `dart:io`'s `HttpClient` rather than `package:http`: one GET does not
-/// earn a dependency. Unauthenticated, GitHub allows 60 requests an hour per
-/// IP; this makes one per app launch. `/releases/latest` already excludes
-/// drafts and prereleases.
+/// `dart:io`'s `HttpClient` rather than `package:http`: a GET and a download
+/// do not earn a dependency. Unauthenticated, GitHub allows 60 requests an
+/// hour per IP; the app makes one per launch and one per visit to the
+/// Firmware screen, plus a download only when the pilot asks for it.
+/// `/releases/latest` already excludes drafts and prereleases.
 class GitHubReleaseFeed implements ReleaseFeed, FirmwareFeed {
   GitHubReleaseFeed({
     Uri? endpoint,
