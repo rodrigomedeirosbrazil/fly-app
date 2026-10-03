@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../protocol/config_groups.dart';
 import '../protocol/telemetry_frame.dart';
+import 'reading_text.dart';
 import 'widgets/dial.dart';
 import 'widgets/status_chip.dart';
 
@@ -128,10 +129,20 @@ class _FlightScreenState extends State<FlightScreen> {
 
 /// Rounded surface every band sits on.
 class _Card extends StatelessWidget {
-  const _Card({required this.child, this.padding = const EdgeInsets.all(10)});
+  const _Card({
+    super.key,
+    required this.child,
+    this.padding = const EdgeInsets.all(10),
+    this.highlight = false,
+  });
 
   final Widget child;
   final EdgeInsets padding;
+
+  /// Outlined in red while this card's reading is what limits power. The
+  /// border is always drawn — transparent when idle — so highlighting moves
+  /// nothing.
+  final bool highlight;
 
   @override
   Widget build(BuildContext context) {
@@ -140,6 +151,12 @@ class _Card extends StatelessWidget {
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surfaceContainer,
         borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          width: 2,
+          color: highlight
+              ? Theme.of(context).colorScheme.error
+              : Colors.transparent,
+        ),
       ),
       child: child,
     );
@@ -209,6 +226,15 @@ class _StatusRow extends StatelessWidget {
           ),
           const SizedBox(width: 10),
           _Chip(text: text, color: color),
+          // hasTelemetry is the controller saying none of its own readings
+          // arrived — no ESC over CAN, no sensors. Null is the sentence path,
+          // which cannot say, and shows nothing.
+          if (f != null && f.hasTelemetry == false) ...[
+            const SizedBox(width: 6),
+            Flexible(
+              child: _Chip(text: 'SEM DADOS', color: theme.colorScheme.outline),
+            ),
+          ],
           const Spacer(),
           if (f?.sessionSec != null) ...[
             // Flexible for the same reason the chip beside it is: this row is
@@ -337,7 +363,10 @@ class _BatteryCardState extends State<_BatteryCard> {
       }
     }
 
+    final limiting = _limiting(f, LimitCause.battery);
     return _Card(
+      key: limiting ? const Key('limiting-battery') : null,
+      highlight: limiting,
       child: Column(
         children: [
           Expanded(
@@ -364,6 +393,9 @@ class _BatteryCardState extends State<_BatteryCard> {
                     value: voltageText,
                     unit: voltageUnit,
                     onTap: f == null ? null : _toggle,
+                    note: voltageText == null
+                        ? signalNote(f?.batteryVoltageState)
+                        : null,
                   ),
                 ),
                 // No current sensing (XAG) drops the cell entirely and lets the
@@ -399,12 +431,16 @@ class _Reading extends StatelessWidget {
     required this.value,
     required this.unit,
     this.onTap,
+    this.note,
   });
 
   final String label;
   final String? value;
   final String unit;
   final VoidCallback? onTap;
+
+  /// Why [value] is missing. Takes the unit's place, so the row never grows.
+  final String? note;
 
   @override
   Widget build(BuildContext context) {
@@ -456,6 +492,20 @@ class _Reading extends StatelessWidget {
                     ),
                   ),
                 ],
+                if (value == null && note != null) ...[
+                  const SizedBox(width: 4),
+                  Text(
+                    note!,
+                    maxLines: 1,
+                    softWrap: false,
+                    style: TextStyle(
+                      fontSize: 11,
+                      letterSpacing: 1.0,
+                      fontWeight: FontWeight.w600,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -497,6 +547,10 @@ class _InstrumentRow extends StatelessWidget {
           if (f?.powerKw != null) const SizedBox(width: 8),
           Expanded(
             child: _Card(
+              key: _limiting(f, LimitCause.motorTemp)
+                  ? const Key('limiting-motor')
+                  : null,
+              highlight: _limiting(f, LimitCause.motorTemp),
               child: Dial(
                 value: f?.motorTempC,
                 max: 140,
@@ -507,6 +561,7 @@ class _InstrumentRow extends StatelessWidget {
                   MotorTempSource.ntc => 'NTC',
                   _ => null,
                 },
+                note: signalNote(f?.motorTempState),
                 bandStart: thermalConfig?.motorBandStartC,
                 bandEnd: thermalConfig?.motorBandEndC,
               ),
@@ -515,11 +570,16 @@ class _InstrumentRow extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(
             child: _Card(
+              key: _limiting(f, LimitCause.escTemp)
+                  ? const Key('limiting-esc')
+                  : null,
+              highlight: _limiting(f, LimitCause.escTemp),
               child: Dial(
                 value: f?.escTempC,
                 max: 140,
                 unit: '°C',
                 caption: 'ESC',
+                note: signalNote(f?.escTempState),
                 bandStart: thermalConfig?.escBandStartC,
                 bandEnd: thermalConfig?.escBandEndC,
               ),
@@ -619,13 +679,31 @@ class _ThrottleCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 6),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(5),
-            child: LinearProgressIndicator(
-              value: pct / 100,
-              minHeight: 10,
-              color: theme.colorScheme.secondary,
-              backgroundColor: theme.colorScheme.surfaceContainerHighest,
+          // The ceiling is where the throttle stops mattering: past powerPct
+          // the controller delivers no more. The portal draws the same tick.
+          LayoutBuilder(
+            builder: (context, constraints) => Stack(
+              clipBehavior: Clip.none,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(5),
+                  child: LinearProgressIndicator(
+                    value: pct / 100,
+                    minHeight: 10,
+                    color: theme.colorScheme.secondary,
+                    backgroundColor: theme.colorScheme.surfaceContainerHighest,
+                  ),
+                ),
+                if (f != null && f.isLimited)
+                  Positioned(
+                    key: const Key('throttle-ceiling'),
+                    left: (constraints.maxWidth * f.powerPct / 100)
+                        .clamp(0.0, constraints.maxWidth - 2),
+                    top: -3,
+                    bottom: -3,
+                    child: Container(width: 2, color: theme.colorScheme.error),
+                  ),
+              ],
             ),
           ),
         ],
@@ -746,6 +824,40 @@ class _SecondaryDataState extends State<_SecondaryData> {
     _ => '–',
   };
 
+  /// Where the per-cell figure on the battery card comes from. The card only
+  /// shows a tilde for the computed one; the portal names both.
+  String get _cellSource {
+    final f = frame;
+    if (f == null) return '–';
+    if (f.cellMinMv != null) return 'BMS · menor célula';
+    if (f.voltage != null) return 'Calculado ÷${kSeriesCells}S';
+    return '–';
+  }
+
+  /// From the frame's flags. Null on the sentence path, which carries none.
+  String get _bmsState {
+    final f = frame;
+    // The link state tells connecting from disconnected, which the two flags
+    // below cannot; they remain for firmware that predates it.
+    switch (f?.bmsLinkState) {
+      case BmsLinkState.connected:
+        return 'Conectado';
+      case BmsLinkState.connecting:
+        return 'Conectando';
+      case BmsLinkState.idle:
+        return 'Ocioso';
+      case BmsLinkState.notConfigured:
+        return 'Não configurado';
+      case BmsLinkState.unknown:
+      case null:
+        break;
+    }
+    if (f?.bmsConnected == true) return 'Conectado';
+    if (f?.bmsConfigured == true) return 'Sem conexão';
+    if (f?.bmsConfigured == false) return 'Não configurado';
+    return '–';
+  }
+
   /// `h:mm:ss`, for counters that run to hundreds of hours.
   static String _hours(Duration? d) {
     if (d == null) return '–';
@@ -754,7 +866,6 @@ class _SecondaryDataState extends State<_SecondaryData> {
     final s = d.inSeconds % 60;
     return '$h:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -769,6 +880,8 @@ class _SecondaryDataState extends State<_SecondaryData> {
       ('Células mín / máx', _cells),
       // Beside the two numbers it is derived from, not four rows away.
       ('Delta de células', _or(f?.cellDeltaMv, ' mV')),
+      ('Tensão por célula', _cellSource),
+      ('BMS', _bmsState),
       ('Origem temp. motor', _source),
       ('Horímetro', _hours(f?.hourMeterSec)),
       ('Tempo ligado', _hours(f?.uptimeSec)),
@@ -822,6 +935,18 @@ class _SecondaryDataState extends State<_SecondaryData> {
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
+                              if (f != null && f.disarmCode != null)
+                                _FaultExplanation(
+                                  key: const Key('fault-explanation'),
+                                  // A reason newer firmware sent has no
+                                  // sentence here; the portal falls back to
+                                  // the bare code rather than saying nothing.
+                                  text: kFaultExplanations[f.disarmReason] ??
+                                      (
+                                        title: 'Desarmado por falha',
+                                        detail: 'Código: ${f.disarmCode}',
+                                      ),
+                                ),
                               for (final (label, value) in rows)
                                 Padding(
                                   padding: const EdgeInsets.symmetric(
@@ -1027,6 +1152,48 @@ class _MuteControl extends StatelessWidget {
                 style: TextStyle(fontSize: 11, color: theme.colorScheme.error),
               ),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+bool _limiting(TelemetryFrame? f, LimitCause cause) =>
+    f?.limitCauses?.contains(cause) ?? false;
+
+/// The latched fault, in words. The status row has room for the code only;
+/// this is the sentence behind it, one tap away, as on the portal.
+class _FaultExplanation extends StatelessWidget {
+  const _FaultExplanation({super.key, required this.text});
+
+  final ({String title, String detail}) text;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.error.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            text.title,
+            style: TextStyle(
+              fontWeight: FontWeight.w700,
+              color: theme.colorScheme.error,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            text.detail,
+            style: TextStyle(fontSize: 13, color: theme.colorScheme.onSurface),
+          ),
         ],
       ),
     );

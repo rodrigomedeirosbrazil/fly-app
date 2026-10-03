@@ -358,4 +358,42 @@ void main() {
       await tester.pumpAndSettle();
     }
   });
+
+  testWidgets('the logs screen lists, and arming mid-screen makes it inert',
+      (tester) async {
+    link.logFiles = {'20261002_001.csv': List.filled(300, 0x41)};
+    link.emit(LinkStatus.connected);
+    link.feedBinary(binarySample(armed: false));
+    await tester.pumpAndSettle();
+
+    // The four CFG_GETs the repository sends on the first frame.
+    for (var i = 0; i < 4; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+      if (link.commands.length > i) {
+        [link.replyThermal, link.replyPower, link.replyBms, link.replySystem][i](i);
+      }
+      await tester.runAsync(() => pumpEventQueue());
+      await tester.pumpAndSettle();
+    }
+
+    await pumpHost(tester);
+    await tester.tap(find.text('abrir'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('Registros de voo'), 100);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Registros de voo'));
+    await tester.runAsync(() => pumpEventQueue());
+    await tester.pumpAndSettle();
+
+    expect(find.text('02/10/2026 · voo 1'), findsOneWidget);
+    final download = find.byKey(const Key('log-download-20261002_001.csv'));
+    expect(tester.widget<IconButton>(download).onPressed, isNotNull,
+        reason: 'disarmed with a list loaded, downloading is available');
+
+    link.feedBinary(binarySample(armed: true));
+    await tester.pumpAndSettle();
+
+    expect(tester.widget<IconButton>(download).onPressed, isNull,
+        reason: 'the route must follow the repository, not a snapshot');
+  });
 }

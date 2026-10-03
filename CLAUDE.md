@@ -13,7 +13,7 @@ fly-controller, and only listens.
 **Framework:** Flutter 3.47.3 (stable) · **Dart SDK:** ^3.13.3
 
 ```bash
-flutter test                  # 566 tests, no hardware needed
+flutter test                  # 695 tests, no hardware needed
 flutter analyze               # must be clean
 flutter build ios --release   # needs Xcode
 flutter build apk --release   # signed APK, ~45 MB (all three ABIs)
@@ -73,6 +73,7 @@ here — neither has a Bluetooth radio.
 | `flutter_svg` | 2.3.0 | Renders the tintable Aerovolt logo |
 | `audioplayers` | 6.8.1 | Mirrors the controller's buzzer. **See below.** |
 | `file_picker` | 12.3.0 | The pilot supplies the firmware `.bin` |
+| `share_plus` | 13.3.1 | Exports a downloaded flight log to the share sheet |
 | `flutter_launcher_icons` | 0.14.4 | **Dev only.** Generates the icon sets |
 
 Plugins resolve through **Swift Package Manager**, not CocoaPods — Flutter 3.47
@@ -187,6 +188,14 @@ because a percentage derived from a distrusted voltage is not a reading.
 All three collapse to `null` in `TelemetryFrame`, so every widget keeps the
 hide-don't-print-zero rule for free. The states themselves are carried
 alongside, so the decode stays lossless.
+
+### The BMS tail is the BMS's own numbers
+
+Telemetry bytes 58–68 carry the pack voltage, current, SoC and cell count
+**as the BMS reports them** — not the controller's divider reading — plus
+`bmsLinkState`. The four readings follow the existing BMS validity bit; the
+link state is always known. All five are read only when the packet is at
+least 69 bytes, so older firmware decodes exactly as before.
 
 ### The request channel answers nothing when it fails
 
@@ -338,6 +347,10 @@ assumed data is what this codebase refuses everywhere else. A failed re-read is
 still a success — the controller accepted the write; only the confirmation is
 missing.
 
+The flight-clock reset lives in Sistema, not in the drawer, although the
+firmware allows it armed: it needs the PIN, and **the flight screen never
+prompts for one**.
+
 ### A pushed route freezes unless its content listens
 
 `MaterialPageRoute`'s builder runs **once**. Anything read from the repository
@@ -362,9 +375,11 @@ borrowed it cannot outlive the screen that created it.
 
 ### The settings screens mirror the portal
 
-Four areas — **all four live** — per-cell voltage entry with the pack total
-beside it, a dropdown of the pack sizes the portal offers, and a voltage divider that is **derived, not
-typed** — the formula comes from `src/WebServer/Pages/ConfigPowerPage.h`.
+Four configuration areas — **all four live** — and, on the same index,
+**Registros de voo** and **Firmware**. The power screen has per-cell voltage
+entry with the pack total beside it, a dropdown of the pack sizes the portal
+offers, and a voltage divider that is **derived, not typed** — the formula
+comes from `src/WebServer/Pages/ConfigPowerPage.h`.
 A pilot who knows one surface should recognise the other.
 
 `kSeriesCells` is 14, mirroring the firmware's `BATTERY_CELL_COUNT`. Both the
@@ -373,9 +388,16 @@ it.
 
 Calibration goes inert when `frame.voltage` is null — the codec already nulls
 it unless the battery-voltage signal state is `Valid`, so "no trustworthy
-reading" is the frame's rule rather than a second one. There is no "reset to
-default": `BATTERY_DIVIDER_RATIO` is a compile-time constant per board and
-reaches neither `INFO` nor any config group, so the app cannot know it.
+reading" is the frame's rule rather than a second one.
+
+"Restaurar padrão" writes the factory ratio that `INFO` carries at offset 49
+(firmware from the portal-replacement release on). On older firmware it is
+absent and so is the button — the ratio is a per-board compile-time
+constant the app cannot otherwise know.
+
+A save that needs the PIN resends **exactly what was asked**, held in
+`_pending`. It used to rebuild from `widget.config`, which threw away a
+calibration and still said "Gravado".
 
 ### A number field that cannot be read is not a zero
 
@@ -446,6 +468,10 @@ The scan runs 5 s (`WEB_SCAN_DURATION_SECONDS`) and stores at most 16 results.
 **Advertising is suppressed for its whole duration**: an existing connection
 survives, but a client that drops cannot find the controller until it ends.
 The screen says so rather than looking frozen.
+
+Each result's name and services come from `BMS_SCAN_RESULT` (0x2B), one request
+per result after the scan completes, keyed by MAC because the list is sorted by
+signal. `ErrBadOp`, silence, or a reply that does not decode stops the fetch.
 
 ### Pairing has no readback, no timeout and no cancel
 
@@ -697,6 +723,41 @@ Transfer and commit are separate buttons for the same reason: the transfer is
 reversible until the moment it is not, and the irreversible half gets its own
 press.
 
+### Flight logs are read by offset, over the request channel
+
+`LOG_LIST` (`0x40`), `LOG_READ` (`0x41`), `LOG_DELETE` (`0x42`) and
+`LOG_DELETE_ALL` (`0x43`) — `lib/protocol/log_protocol.dart` is the
+**seventh** hand-copied fly-controller contract here. The design is
+`docs/superpowers/specs/2026-10-02-portal-replacement-design.md`, Part 1.
+
+Bulk travels on `CMD`/`RSP` rather than a streaming characteristic because the
+whole partition is 128 KB: one round trip per ≤ 232-byte chunk is tens of
+seconds at worst, and every read is **idempotent**, so a timeout simply asks
+for the same offset again. There is no CRC, deliberately: replies are
+acknowledged by the link layer, the echoed offset catches a misplaced chunk,
+and the file cannot change while disarmed because the Logger only writes
+armed. A `fileSize` that changes between chunks aborts the download rather
+than stitching two files together.
+
+The chunk is `logChunkLimit(MTU − 3)`, read per download — the MTU is not
+stable across connections. `LOG_LIST` pages by **cursor** (the last name
+received), so a delete between pages cannot skip or repeat a file.
+
+Deletes go through `ConfigEditor`, so the PIN prompt and the refusal mapping
+are the ones every save uses, and `ErrNotFound` on a delete is success — it
+is what a retried delete looks like when the first reply was lost.
+
+Every log opcode is refused while armed. Firmware without them answers
+`ErrBadOp`, and the screen says to update the firmware. Delete and delete-all
+also refuse **locally** when armed, before any request leaves the phone, so an
+armed aircraft never produces a PIN prompt for something the firmware would
+refuse anyway — the same `ErrState` rule every other write follows.
+
+`LogBrowser` stamps every refresh with a generation counter, and only the
+latest one may write the list. Listings are cursor-paged round trips that can
+overlap — the screen refreshes on disarm and again after a delete — and without
+it the older, slower one lands last and shows a file that is already gone.
+
 ### The Dart enum order does not match the firmware's
 
 `MotorTempSource` is declared `{can, ntc, none}` here; the firmware's
@@ -710,12 +771,15 @@ reason from newer firmware degrades instead of throwing.
 ```
 lib/
 ├── protocol/   xctod_frame.dart · xctod_parser.dart · line_assembler.dart
+│               pin_change.dart · log_protocol.dart
 ├── state/      link_health.dart · telemetry_repository.dart
 │               ble_permission_policy.dart
+│               log_browser.dart · log_download.dart
 ├── audio/      tone_player.dart
 ├── ble/        fly_controller_link.dart · android_host.dart
 └── ui/         app.dart · connection_screen.dart · flight_screen.dart
-                widgets/dial.dart
+                reading_text.dart · widgets/dial.dart
+                settings/logs_screen.dart · settings/share_csv.dart
 ```
 
 The layering is the point, and it is worth preserving:
@@ -824,6 +888,10 @@ presence. A fault shows as a chip in space the status row already reserves; a
 limiter shows as a `DISPONÍVEL xx %` chip. No banner, ever. An alert must not
 shift a number the pilot is in the middle of reading. Missing data collapses
 within its own card (no current → the cell drops and the voltage centres).
+
+The limiting card's red outline is a border every card always draws —
+transparent when idle — and a missing reading's reason takes the unit's
+place, so neither changes a size.
 
 ### The drawer is in the tree, not a route
 
@@ -1011,15 +1079,16 @@ available only when the binary service is present:
 - **Which limiter is acting** (`limitCauses`) — **done**, named on the chip
 - **The red reduction band** on the thermal dials — **done**, from `CFG_GET`
 - **Buzzer mirroring** — **done**, subsystem 5
+- **Flight-log download** — **done** (2026-10-02): list, export to the share sheet, delete one or all.
 
 Nothing on that list is absent any more, and **firmware update over BLE is
 done and verified on the aircraft** (2026-09-12).
 
-What is still not sent is `SESSION_RESET` (`0x20`), `PIN_CHANGE` (`0x28`) and
-the two Tmotor direction opcodes (`0x29`/`0x2A`).
-None of them is telemetry. `PIN_CHANGE` alone deserves care: it is the one
-write that is **not idempotent**, so it cannot use the retry every other write
-here depends on.
+`SESSION_RESET` (`0x20`) and `PIN_CHANGE` (`0x28`) are sent from the System
+screen. `PIN_CHANGE` is the one write that is **not idempotent**, so it is
+sent once and a timeout is reported as "the PIN may have changed" rather than
+as a failure. The two Tmotor direction opcodes (`0x29`/`0x2A`) are not sent,
+deliberately — the owner dropped them from the portal replacement.
 
 One duplication is now removable and has not been removed. The firmware
 appends `stateFreqHz` to the telemetry struct at offset 56 (58 bytes total),

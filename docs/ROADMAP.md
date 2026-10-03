@@ -69,17 +69,32 @@ Latency is unmeasured and will be audible: a beep travels a 1 Hz firmware
 loop, a BLE notification, a decode and an audio session before it sounds. Fine
 for a warning, useless for anything the pilot times.
 
-What phase 2 still does not send is `PIN_CHANGE` (`0x28`) and the two Tmotor
-direction opcodes — none of them telemetry, and
-`PIN_CHANGE` alone deserves care because it is the one write that is **not
-idempotent**, so it cannot use the retry every other write here depends on.
-
 `SET_TIME` (`0x27`) is sent automatically on every connection, with no PIN —
 which depends on fly-controller having taken it off the auth list. Older
 firmware answers `ErrAuth` and the app stays silent.
 
 This is the first piece of the web portal with a real alternative, and
 therefore the first step toward phase 4.
+
+**Portal parity, first slice, is done** (2026-10-02). The PIN can be changed
+and the flight clock reset from Sistema; `PIN_CHANGE` is sent once and a timeout
+reads "the PIN may have changed", because it cannot be retried. The Tmotor
+direction opcodes stay unsent, dropped by the owner. The rest is display: the
+readings that arrived in every frame and were never drawn — signal-state notes,
+`SEM DADOS`, the throttle ceiling, the limiting card's outline, the fault
+explanation, the voltage source, BMS state, BMS temperature and cell spread —
+and calibration, now gated on the capability bit instead of appearing on a
+controller with no voltage sensor. Flight logs are done (plan A1); the features that
+need new firmware are plan A3, below.
+
+**Portal parity is complete on the app side** (2026-10-02, plan A3). The BMS's
+own pack readings and link state, the name and services of each scan result,
+and whether the voltage divider is at its factory value — with a way back to
+it — are shown whenever the firmware sends them, and the screens are unchanged
+on firmware that does not: each is an appended field or an opcode old firmware
+answers with `ErrBadOp`, so there is no version bump. The firmware half is
+fly-controller PR 1; until it is flashed none of this is visible on an
+aircraft.
 
 A binary telemetry characteristic (roughly 200 B of CSV becomes ~40 B, and it
 can carry fields the sentence has no room for), plus a command characteristic
@@ -138,8 +153,12 @@ internet, and contradicts the brief that access is over Bluetooth.
 the app has been flown enough to trust, and retiring it is a later call made on
 evidence rather than a milestone to aim at.
 
-**Log download is out with it.** The `0x40–0x4F` opcode range and the
-`D4CF0006-…` characteristic stay reserved and unimplemented on both sides.
+**Log download is no longer out with it** (2026-10-02). It shipped over
+`CMD`/`RSP` with opcodes `0x40–0x43` (list, read by offset, delete, delete
+all), independent of the portal. A `D4CF0007`-style streaming characteristic was
+considered and rejected: the log partition is 128 KB, so one request per chunk
+is tens of seconds at worst, and every read is idempotent. `D4CF0006-…` stays
+the firmware-update characteristic; the rest of `0x44–0x4F` stays reserved.
 
 Kept here because the flash arithmetic still depends on it: retiring the portal
 frees 200–400 KB (ESPAsyncWebServer + ElegantOTA + the gzipped assets), which

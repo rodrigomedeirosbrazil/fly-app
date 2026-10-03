@@ -13,6 +13,8 @@ class PowerSettingsScreen extends StatefulWidget {
     required this.config,
     required this.armed,
     required this.sensorVolts,
+    this.hasVoltageSensor = true,
+    this.defaultDividerRatio,
   });
 
   final ConfigEditor editor;
@@ -24,6 +26,14 @@ class PowerSettingsScreen extends StatefulWidget {
   /// moment it is applied, which is why this arrives live rather than as a
   /// snapshot.
   final double? sensorVolts;
+
+  /// INFO capability `0x0002`. A controller with no voltage divider has
+  /// nothing to calibrate, and the portal hides the section for it.
+  final bool hasVoltageSensor;
+
+  /// The board's factory ratio from INFO, or null on firmware that does not
+  /// send it — then neither the label nor the restore button appears.
+  final double? defaultDividerRatio;
 
   @override
   State<PowerSettingsScreen> createState() => _PowerSettingsScreenState();
@@ -220,31 +230,73 @@ class _PowerSettingsScreenState extends State<PowerSettingsScreen> {
     return true;
   }
 
-  Future<void> _savePower() async {
-    final config = PowerConfig(
-      capacityMah: _getSelectedCapacityMah(),
-      minVoltageMv: _getMinVoltageMv().round(),
-      maxVoltageMv: _getMaxVoltageMv().round(),
-      powerControlEnabled: _powerControlEnabled,
-      voltageDividerRatio: widget.config?.voltageDividerRatio ?? 0,
-    );
+  /// What the last save tried to write, so a save that needs the PIN resends
+  /// exactly that. Rebuilding from `widget.config` threw away a calibration;
+  /// rebuilding from the fields would lose the ratio, which is not a field.
+  PowerConfig? _pending;
 
-    await _handleSaveOutcome(await widget.editor.savePower(config));
+  PowerConfig _configWithRatio(double ratio) => PowerConfig(
+        capacityMah: _getSelectedCapacityMah(),
+        minVoltageMv: _getMinVoltageMv().round(),
+        maxVoltageMv: _getMaxVoltageMv().round(),
+        powerControlEnabled: _powerControlEnabled,
+        voltageDividerRatio: ratio,
+      );
+
+  Future<void> _save(PowerConfig config, {String? pin}) async {
+    // Checked here rather than only on the buttons: a confirmation dialog or a
+    // PIN prompt can outlive the moment the aircraft arms, and the editor asks
+    // for the PIN before the firmware gets to refuse with ErrState.
+    if (widget.armed) {
+      _showSnackBar('Recusado: a aeronave está armada');
+      return;
+    }
+    _pending = config;
+    await _handleSaveOutcome(await widget.editor.savePower(config, pin: pin));
   }
+
+  /// Within half a hundredth: the wire carries hundredths, so anything closer
+  /// is the same number.
+  bool get _atDefault {
+    final d = widget.defaultDividerRatio;
+    final c = widget.config?.voltageDividerRatio;
+    return d != null && c != null && (c - d).abs() < 0.005;
+  }
+
+  Future<void> _confirmRestoreDivider() async {
+    final d = widget.defaultDividerRatio;
+    if (d == null) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Restaurar divisor padrão'),
+        content: Text(
+          'O divisor volta para ${d.toStringAsFixed(2)} e a calibração atual '
+          'é descartada.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Restaurar'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    await _save(_configWithRatio(d));
+  }
+
+  Future<void> _savePower() =>
+      _save(_configWithRatio(widget.config?.voltageDividerRatio ?? 0));
 
   Future<void> _applyCalibration() async {
     final newRatio = _getComputedCalibrationRatio();
     if (newRatio == null) return;
-
-    final config = PowerConfig(
-      capacityMah: _getSelectedCapacityMah(),
-      minVoltageMv: _getMinVoltageMv().round(),
-      maxVoltageMv: _getMaxVoltageMv().round(),
-      powerControlEnabled: _powerControlEnabled,
-      voltageDividerRatio: newRatio,
-    );
-
-    await _handleSaveOutcome(await widget.editor.savePower(config));
+    await _save(_configWithRatio(newRatio));
   }
 
   Future<void> _handleSaveOutcome(SaveOutcome outcome) async {
@@ -344,21 +396,11 @@ class _PowerSettingsScreenState extends State<PowerSettingsScreen> {
     ).then((pin) async {
       if (pin == null || !mounted) return;
 
-      // Built from the fields, not from widget.config: the pilot may have
-      // changed something between the first save and entering the PIN, and
-      // rebuilding from the original would discard it while still reporting
-      // success.
-      final config = PowerConfig(
-        capacityMah: _getSelectedCapacityMah(),
-        minVoltageMv: _getMinVoltageMv().round(),
-        maxVoltageMv: _getMaxVoltageMv().round(),
-        powerControlEnabled: _powerControlEnabled,
-        voltageDividerRatio: widget.config?.voltageDividerRatio ?? 0,
-      );
-
-      await _handleSaveOutcome(
-        await widget.editor.savePower(config, pin: pin),
-      );
+      // Resends what the pilot asked to save, not a rebuild from widget.config:
+      // that discarded a calibration while still reporting success.
+      final pending = _pending;
+      if (pending == null) return;
+      await _save(pending, pin: pin);
     });
   }
 
@@ -376,6 +418,12 @@ class _PowerSettingsScreenState extends State<PowerSettingsScreen> {
 
     final computedRatio = _getComputedCalibrationRatio();
     final calibrationValid = _isCalibrationValid();
+
+    // Calibrate and restore write the whole group built from the form, so they
+    // answer to the same gates as Salvar: an unreadable field is not a zero.
+    final canWriteGroup = !widget.armed &&
+        widget.config != null &&
+        powerError == SettingsError.none;
 
     final calibrationRefError = !calibrationValid &&
             _bmsReferenceController.text.isNotEmpty
@@ -490,49 +538,66 @@ class _PowerSettingsScreenState extends State<PowerSettingsScreen> {
                     ],
                   ),
                   // Calibration section
-                  SettingsCard(
-                    title: 'CALIBRAÇÃO',
-                    children: [
-                      Text(
-                        'Leitura atual do sensor: ${widget.sensorVolts != null ? widget.sensorVolts!.toStringAsFixed(2) : 'Sem leitura'} V',
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        key: const Key('bms-reference'),
-                        controller: _bmsReferenceController,
-                        decoration: InputDecoration(
-                          labelText: 'Tensão de Referência do BMS (V)',
-                          border: const OutlineInputBorder(),
-                          helperText:
-                              'Tensão que o BMS mostra. O sistema calculará o fator de correção automaticamente.',
-                        ),
-                        keyboardType: kSettingsKeyboard,
-                        inputFormatters: kSettingsFormatters,
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        'Divisor de Tensão Atual: ${widget.config?.voltageDividerRatio.toStringAsFixed(2) ?? '--'}',
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      ),
-                      if (computedRatio != null && calibrationValid) ...[
-                        const SizedBox(height: 4),
+                  if (widget.hasVoltageSensor)
+                    SettingsCard(
+                      title: 'CALIBRAÇÃO',
+                      children: [
                         Text(
-                          'Novo Divisor: ${computedRatio.toStringAsFixed(2)}',
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.primary,
-                            fontWeight: FontWeight.bold,
-                          ),
+                          'Leitura atual do sensor: ${widget.sensorVolts != null ? widget.sensorVolts!.toStringAsFixed(2) : 'Sem leitura'} V',
+                          style: Theme.of(context).textTheme.bodyMedium,
                         ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          key: const Key('bms-reference'),
+                          controller: _bmsReferenceController,
+                          decoration: InputDecoration(
+                            labelText: 'Tensão de Referência do BMS (V)',
+                            border: const OutlineInputBorder(),
+                            helperText:
+                                'Tensão que o BMS mostra. O sistema calculará o fator de correção automaticamente.',
+                          ),
+                          keyboardType: kSettingsKeyboard,
+                          inputFormatters: kSettingsFormatters,
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          'Divisor de Tensão Atual: '
+                          '${widget.config?.voltageDividerRatio.toStringAsFixed(2) ?? '--'}'
+                          '${widget.defaultDividerRatio == null || widget.config == null ? '' : _atDefault ? ' (padrão)' : ' (calibrado)'}',
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                        if (computedRatio != null && calibrationValid) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            'Novo Divisor: ${computedRatio.toStringAsFixed(2)}',
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.primary,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 12),
+                        OutlinedButton(
+                          key: const Key('calibrate'),
+                          onPressed: canWriteGroup && calibrationValid
+                              ? _applyCalibration
+                              : null,
+                          child: const Text('Aplicar calibração'),
+                        ),
+                        if (widget.defaultDividerRatio != null) ...[
+                          const SizedBox(height: 8),
+                          OutlinedButton(
+                            key: const Key('restore-divider'),
+                            onPressed: canWriteGroup && !_atDefault
+                                ? _confirmRestoreDivider
+                                : null,
+                            child: Text(
+                              'Restaurar padrão (${widget.defaultDividerRatio!.toStringAsFixed(2)})',
+                            ),
+                          ),
+                        ],
                       ],
-                      const SizedBox(height: 12),
-                      OutlinedButton(
-                        key: const Key('calibrate'),
-                        onPressed: calibrationValid ? _applyCalibration : null,
-                        child: const Text('Aplicar calibração'),
-                      ),
-                    ],
-                  ),
+                    ),
                 ],
               ),
             ),

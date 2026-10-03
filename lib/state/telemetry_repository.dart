@@ -10,6 +10,7 @@ import '../protocol/control_frame.dart';
 import '../protocol/control_info.dart';
 import '../protocol/control_telemetry_codec.dart';
 import '../protocol/line_assembler.dart';
+import '../protocol/log_protocol.dart';
 import '../protocol/telemetry_frame.dart';
 import '../protocol/xctod_parser.dart';
 import 'buzzer_mirror.dart';
@@ -195,9 +196,25 @@ class TelemetryRepository extends ChangeNotifier {
   /// read.
   bool get hasRemoteLink => _link.info?.hasRemoteLink ?? false;
 
+  /// Whether the controller has a battery-voltage divider to calibrate.
+  /// True when INFO was never read, which keeps the screen as it was before
+  /// the bit was consulted.
+  bool get hasVoltageSensor => _link.info?.hasVoltageSensor ?? true;
+
+  /// The factory divider ratio from INFO, or null when this firmware does
+  /// not send it.
+  double? get defaultDividerRatio => _link.info?.defaultDividerRatio;
+
   /// Whether the controller supports firmware updates over BLE.
   /// False when INFO was never read or the DFU characteristic is absent.
   bool get canUpdateFirmware => _link.canUpdateFirmware;
+
+  /// Data bytes per `LOG_READ` on this connection.
+  ///
+  /// `maxDfuWriteBytes` is this phone's ATT payload, MTU - 3, which is also
+  /// the most a notification it receives can carry. Read per download: the
+  /// MTU is not stable across connections.
+  int get logChunkBytes => logChunkLimit(_link.maxDfuWriteBytes);
 
   /// The `Power` group, fetched alongside the thermal one.
   PowerConfig? get powerConfig => _powerConfig;

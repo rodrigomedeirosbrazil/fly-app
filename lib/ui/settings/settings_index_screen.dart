@@ -8,6 +8,7 @@ class SettingsIndexScreen extends StatelessWidget {
     required this.onOpenBms,
     required this.onOpenSystem,
     required this.onOpenFirmware,
+    required this.onOpenLogs,
     this.firmwareVersion,
   });
 
@@ -20,6 +21,7 @@ class SettingsIndexScreen extends StatelessWidget {
   final VoidCallback onOpenBms;
   final VoidCallback onOpenSystem;
   final VoidCallback onOpenFirmware;
+  final VoidCallback onOpenLogs;
 
   @override
   Widget build(BuildContext context) {
@@ -85,6 +87,13 @@ class SettingsIndexScreen extends StatelessWidget {
             title: 'Sistema',
             description: 'Volume do buzzer e origem do acelerador.',
             onTap: onOpenSystem,
+          ),
+          const SizedBox(height: 12),
+          _SettingsCard(
+            label: 'REGISTROS',
+            title: 'Registros de voo',
+            description: 'Baixar e apagar os registros de voo.',
+            onTap: onOpenLogs,
           ),
           const SizedBox(height: 12),
           _SettingsCard(

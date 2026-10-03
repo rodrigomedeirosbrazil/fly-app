@@ -139,4 +139,27 @@ void main() {
       expect(info.appVersion, '1.2.3');
     });
   });
+
+  group('default divider ratio', () {
+    Uint8List withRatio(int x100) {
+      final base = bytes(); // 28 bytes
+      final stamp = Uint8List(21); // buildDate + buildTime, left blank
+      final r = ByteData(2)..setUint16(0, x100, Endian.little);
+      return Uint8List.fromList([...base, ...stamp, ...r.buffer.asUint8List()]);
+    }
+
+    test('is read at offset 49 in hundredths', () {
+      expect(ControlInfo.decode(withRatio(1100))!.defaultDividerRatio,
+          closeTo(11.0, 1e-9));
+    });
+
+    test('is absent on a 49-byte INFO', () {
+      final short = withRatio(1100).sublist(0, 49);
+      expect(ControlInfo.decode(short)!.defaultDividerRatio, isNull);
+    });
+
+    test('zero is no default, not a ratio of zero', () {
+      expect(ControlInfo.decode(withRatio(0))!.defaultDividerRatio, isNull);
+    });
+  });
 }

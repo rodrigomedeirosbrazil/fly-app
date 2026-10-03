@@ -633,6 +633,9 @@ class DfuSession extends ChangeNotifier {
           ControlStatus.errBadArg =>
             const DfuFailed(DfuFailureReason.rejected),
           ControlStatus.errBusy => const DfuFailed(DfuFailureReason.busy),
+          // Only the log opcodes produce it; a DFU reply carrying it is
+          // something this build cannot explain.
+          ControlStatus.errNotFound => const DfuFailed(),
           ControlStatus.unknown => const DfuFailed(),
           ControlStatus.ok => const DfuFailed(), // Should not happen
         },

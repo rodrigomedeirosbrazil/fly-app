@@ -67,4 +67,39 @@ void main() {
   test('an unknown status degrades instead of throwing', () {
     expect(BmsScanState.decode([9, 0])!.status, BmsScanStatus.unknown);
   });
+
+  group('BmsScanDetail', () {
+    List<int> detail({
+      String name = 'JK-B2A24S',
+      String services = '0000ffe0-0000-1000-8000-00805f9b34fb',
+    }) =>
+        [
+          1, 2, 3, 4, 5, 6, // mac
+          (-61) & 0xFF, // rssi
+          3, // type: JK
+          name.length, ...name.codeUnits,
+          services.length, ...services.codeUnits,
+        ];
+
+    test('reads every field', () {
+      final d = BmsScanDetail.decode(detail())!;
+      expect(d.mac, [1, 2, 3, 4, 5, 6]);
+      expect(d.rssi, -61);
+      expect(d.detectedType, 3);
+      expect(d.name, 'JK-B2A24S');
+      expect(d.services, '0000ffe0-0000-1000-8000-00805f9b34fb');
+    });
+
+    test('empty name and services are empty, not absent', () {
+      final d = BmsScanDetail.decode(detail(name: '', services: ''))!;
+      expect(d.name, '');
+      expect(d.services, '');
+    });
+
+    test('a length that runs past the end rejects the reply', () {
+      final full = detail();
+      expect(BmsScanDetail.decode(full.sublist(0, full.length - 1)), isNull);
+      expect(BmsScanDetail.decode(full.sublist(0, 8)), isNull);
+    });
+  });
 }

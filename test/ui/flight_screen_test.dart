@@ -22,6 +22,7 @@ TelemetryFrame frame({
   double? powerKw = 1.5,
   ArmState armState = ArmState.armed,
   DisarmReason disarmReason = DisarmReason.none,
+  String? rawDisarmCode,
   int powerPct = 100,
   int? cellMinMv = 3712,
   Set<LimitCause>? limitCauses,
@@ -32,6 +33,10 @@ TelemetryFrame frame({
   SignalState? motorTempState,
   SignalState? escTempState,
   SignalState? batteryVoltageState,
+  bool? hasTelemetry,
+  bool? bmsConnected,
+  bool? bmsConfigured,
+  BmsLinkState? bmsLinkState,
 }) =>
     TelemetryFrame(
       socCoulomb: 87,
@@ -48,6 +53,7 @@ TelemetryFrame frame({
       escTempC: escTempC,
       armState: armState,
       disarmReason: disarmReason,
+      rawDisarmCode: rawDisarmCode,
       bmsMaxTempC: bmsMaxTempC,
       cellMinMv: cellMinMv,
       cellMaxMv: cellMaxMv,
@@ -60,6 +66,10 @@ TelemetryFrame frame({
       motorTempState: motorTempState,
       escTempState: escTempState,
       batteryVoltageState: batteryVoltageState,
+      hasTelemetry: hasTelemetry,
+      bmsConnected: bmsConnected,
+      bmsConfigured: bmsConfigured,
+      bmsLinkState: bmsLinkState,
     );
 
 /// A wire-shaped Thermal group: motor 80–100 °C, ESC 70–95 °C.
@@ -102,6 +112,43 @@ void main() {
     expect(find.descendant(of: motorDial, matching: find.text('0')),
         findsNothing);
     expect(find.text('CAN'), findsNothing);
+  });
+
+  testWidgets('a stale motor sensor says so under the dash', (tester) async {
+    await tester.pumpWidget(wrap(FlightScreen(
+      frame: frame(
+        motorTempC: null,
+        source: MotorTempSource.none,
+        motorTempState: SignalState.stale,
+      ),
+      stale: false,
+    )));
+
+    final motorDial =
+        find.ancestor(of: find.text('MOTOR'), matching: find.byType(Dial));
+    expect(find.descendant(of: motorDial, matching: find.text('DESATUALIZADO')),
+        findsOneWidget);
+  });
+
+  testWidgets('an invalid voltage sensor says so beside the dash',
+      (tester) async {
+    await tester.pumpWidget(wrap(FlightScreen(
+      frame: frame(voltage: null, batteryVoltageState: SignalState.invalid),
+      stale: false,
+    )));
+
+    expect(find.text('INVÁLIDO'), findsOneWidget);
+  });
+
+  testWidgets('a valid reading carries no note', (tester) async {
+    await tester.pumpWidget(wrap(FlightScreen(
+      frame: frame(motorTempState: SignalState.valid),
+      stale: false,
+    )));
+
+    expect(find.text('DESATUALIZADO'), findsNothing);
+    expect(find.text('INVÁLIDO'), findsNothing);
+    expect(find.text('SEM SENSOR'), findsNothing);
   });
 
   testWidgets('a disarm code is shown in the space the status bar reserves',
@@ -309,18 +356,19 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Horímetro'), findsOneWidget);
-      // Exactly the four rows only the binary service can fill: hour meter,
-      // cell delta, uptime, firmware. An exact count is the point --
+      // Exactly the five rows only the binary service can fill: hour meter,
+      // cell delta, uptime, firmware and the BMS link state. An exact count
+      // is the point --
       // findsAtLeast would still pass if a row the sentence DOES carry
       // silently started dashing.
       //
-      // Four, not five: the sensor-state readout is gone. The states are
+      // Five, not six: the sensor-state readout is gone. The states are
       // still decoded and still drive hide-don't-print-zero everywhere; only
       // this readout of them was removed. The build stamp does not count
       // either -- that row hides when absent rather than dashing, because on
       // firmware that predates the field it is a reading that does not
       // exist.
-      expect(find.text('–'), findsNWidgets(4));
+      expect(find.text('–'), findsNWidgets(5));
     });
 
     testWidgets('the settings entry is present and live when disarmed',
@@ -461,6 +509,47 @@ void main() {
       // throttle and battery cards carry percentages of their own.
       expect(find.textContaining('DISPONÍVEL'), findsNothing);
       expect(find.textContaining('100 %'), findsNothing);
+    });
+  });
+
+  group('portal parity on the flight screen', () {
+    testWidgets('a controller with no telemetry says SEM DADOS',
+        (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(hasTelemetry: false),
+        stale: false,
+      )));
+      expect(find.text('SEM DADOS'), findsOneWidget);
+    });
+
+    testWidgets('the sentence path, which cannot say, shows no SEM DADOS',
+        (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
+      expect(find.text('SEM DADOS'), findsNothing);
+    });
+
+    testWidgets('a limited frame marks the ceiling on the throttle bar',
+        (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(powerPct: 60, limitCauses: {LimitCause.motorTemp}),
+        stale: false,
+      )));
+      expect(find.byKey(const Key('throttle-ceiling')), findsOneWidget);
+    });
+
+    testWidgets('an unlimited frame has no ceiling marker', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
+      expect(find.byKey(const Key('throttle-ceiling')), findsNothing);
+    });
+
+    testWidgets('the card that is limiting is outlined', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(powerPct: 60, limitCauses: {LimitCause.motorTemp}),
+        stale: false,
+      )));
+      expect(find.byKey(const Key('limiting-motor')), findsOneWidget);
+      expect(find.byKey(const Key('limiting-esc')), findsNothing);
+      expect(find.byKey(const Key('limiting-battery')), findsNothing);
     });
   });
 
@@ -611,6 +700,10 @@ void main() {
 
       expect(find.text('LIGADO'), findsOneWidget);
 
+      // The extra drawer rows push the control below the scroll fold.
+      await tester.ensureVisible(find.byType(Switch));
+      await tester.pumpAndSettle();
+
       // Tap the switch to mute
       await tester.tap(find.byType(Switch));
       await tester.pumpAndSettle();
@@ -656,6 +749,95 @@ void main() {
 
       expect(find.text('DESLIGADO'), findsOneWidget);
       expect(find.text('LIGADO'), findsNothing);
+    });
+  });
+
+  group('the drawer names what the panel only implies', () {
+    Future<void> openDrawer(WidgetTester tester) async {
+      await tester.tap(find.text('MAIS DADOS'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('the drawer explains the latched fault', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(
+          armState: ArmState.disarmed,
+          disarmReason: DisarmReason.throttleLinkLost,
+        ),
+        stale: false,
+      )));
+      await openDrawer(tester);
+
+      expect(find.text('Desarmado: falha no acelerador (sem fio)'),
+          findsOneWidget);
+    });
+
+    testWidgets('a code the app has no sentence for gets the portal fallback',
+        (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(
+          armState: ArmState.disarmed,
+          disarmReason: DisarmReason.unknown,
+          rawDisarmCode: 'NEW ERR',
+        ),
+        stale: false,
+      )));
+      await openDrawer(tester);
+
+      expect(find.byKey(const Key('fault-explanation')), findsOneWidget);
+      expect(find.text('Desarmado por falha'), findsOneWidget);
+      expect(find.text('Código: NEW ERR'), findsOneWidget);
+    });
+
+    testWidgets('a manual disarm explains nothing', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(
+            armState: ArmState.disarmed, disarmReason: DisarmReason.manual),
+        stale: false,
+      )));
+      await openDrawer(tester);
+
+      expect(find.byKey(const Key('fault-explanation')), findsNothing);
+    });
+
+    testWidgets('the drawer names where per-cell voltage comes from',
+        (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
+      await openDrawer(tester);
+      expect(find.text('BMS · menor célula'), findsOneWidget);
+    });
+
+    testWidgets('without a BMS cell the source is the pack divided by 14',
+        (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(cellMinMv: null, cellMaxMv: null),
+        stale: false,
+      )));
+      await openDrawer(tester);
+      expect(find.text('Calculado ÷14S'), findsOneWidget);
+    });
+
+    testWidgets('the drawer shows the BMS link state', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(bmsConfigured: true, bmsConnected: false),
+        stale: false,
+      )));
+      await openDrawer(tester);
+      expect(find.text('Sem conexão'), findsOneWidget);
+    });
+
+    testWidgets('the drawer says the BMS is connecting when it is',
+        (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(
+          bmsConfigured: true,
+          bmsConnected: false,
+          bmsLinkState: BmsLinkState.connecting,
+        ),
+        stale: false,
+      )));
+      await openDrawer(tester);
+      expect(find.text('Conectando'), findsOneWidget);
     });
   });
 }

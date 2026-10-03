@@ -3,16 +3,21 @@ import 'dart:typed_data';
 import '../protocol/bms_scan.dart';
 import '../protocol/config_groups.dart';
 import '../protocol/control_frame.dart';
+import '../protocol/log_protocol.dart';
+import '../protocol/pin_change.dart';
 import 'control_session.dart';
 
 const int _opAuth = 0x01;
 const int _opCfgGet = 0x10;
 const int _opCfgSet = 0x11;
+const int _opSessionReset = 0x20;
 const int _opBmsScanStart = 0x21;
 const int _opBmsScanStatus = 0x22;
 const int _opRemotePair = 0x24;
 const int _opRemoteForget = 0x25;
 const int _opBuzzerPreview = 0x26;
+const int _opPinChange = 0x28;
+const int _opBmsScanResult = 0x2B;
 
 /// How many times an idempotent request is resent after a timeout.
 const int _attempts = 3;
@@ -96,9 +101,21 @@ enum SaveFailure {
 
 /// Nothing came back, or the link went away.
 class SaveFailed extends SaveOutcome {
-  const SaveFailed([this.cause = SaveFailure.noAnswer]);
+  const SaveFailed([this.cause = SaveFailure.noAnswer])
+      : mayHaveApplied = false;
+
+  /// Dart cannot mix an optional positional with a named parameter, and every
+  /// existing `SaveFailed()` relies on the positional one -- so the rarer case
+  /// gets its own constructor.
+  const SaveFailed.mayHaveApplied(this.cause) : mayHaveApplied = true;
 
   final SaveFailure cause;
+
+  /// The request that was lost may still have landed. True only for a request
+  /// that is not idempotent and was actually sent -- today `PIN_CHANGE`'s own
+  /// timeout or drop. A failure before it left the phone, such as its
+  /// authenticate step, is false: nothing could have changed.
+  final bool mayHaveApplied;
 }
 
 /// Owns the authenticate → write → re-read sequence for one connection.
@@ -171,6 +188,24 @@ class ConfigEditor {
     return BmsScanState.decode(result.payload);
   }
 
+  /// One scan result's name and services.
+  ///
+  /// **Open**, like `BMS_SCAN_STATUS`: no PIN, answers while armed.
+  /// [unsupported] is true only for `ErrBadOp` — firmware without the
+  /// opcode — so a caller stops asking; silence is just no detail.
+  Future<({BmsScanDetail? detail, bool unsupported})> readBmsScanDetail(
+      int index) async {
+    final result =
+        await _session.request(op: _opBmsScanResult, payload: [index]);
+    return switch (result) {
+      ControlOk(:final payload) =>
+        (detail: BmsScanDetail.decode(payload), unsupported: false),
+      ControlRefused(status: ControlStatus.errBadOp) =>
+        (detail: null, unsupported: true),
+      _ => (detail: null, unsupported: false),
+    };
+  }
+
   /// Puts the controller into pairing mode.
   ///
   /// It answers `Ok` the moment the flag is set, which is **not** the moment a
@@ -204,6 +239,85 @@ class ConfigEditor {
     );
   }
 
+  /// Zeroes the flight clock (`sessionSec`). The hour meter is untouched.
+  ///
+  /// Not retried: `ControlSession` lists `SESSION_RESET` among the requests
+  /// that are not safe to repeat, and a reset that lands twice could zero a
+  /// clock the aircraft started counting in between.
+  Future<SaveOutcome> resetSession({String? pin}) => _authenticatedAction(
+        op: _opSessionReset,
+        payload: const [],
+        pin: pin,
+        retry: false,
+      );
+
+  /// Replaces the controller's PIN.
+  ///
+  /// `PIN_CHANGE` needs an authenticated connection *and* carries the current
+  /// PIN, so the current PIN doubles as the one to authenticate with — the
+  /// pilot types it once.
+  ///
+  /// **Sent once, never retried.** It is the one write here that is not
+  /// idempotent: after a lost reply the controller may already hold the new
+  /// PIN, and resending with the old one as "current" would be refused. A
+  /// timeout is reported as exactly that, and the screen says the PIN may
+  /// have changed.
+  Future<SaveOutcome> changePin({
+    required String current,
+    required String next,
+  }) async {
+    if (!isValidNewPin(next)) return const SaveRejectedByController();
+
+    if (!_authenticated) {
+      final auth = await _authenticate(current);
+      if (auth != null) return auth;
+    }
+
+    final result = await _session.request(
+      op: _opPinChange,
+      payload: encodePinChange(current: current, next: next),
+    );
+
+    return switch (result) {
+      ControlOk() => const SaveOk(),
+      ControlRefused(:final status) => switch (status) {
+          ControlStatus.errState => const SaveRefusedArmed(),
+          // The handler's own answer to a current PIN that does not match.
+          ControlStatus.errAuth => _lostSession(SaveWrongPin.new),
+          ControlStatus.errBadArg => const SaveRejectedByController(),
+          ControlStatus.errBadOp => const SaveUnsupported(),
+          ControlStatus.errBusy => const SaveBusy(),
+          _ => const SaveFailed(),
+        },
+      ControlTimeout() => const SaveFailed.mayHaveApplied(SaveFailure.noAnswer),
+      ControlDropped() => const SaveFailed.mayHaveApplied(SaveFailure.linkLost),
+    };
+  }
+
+  /// Deletes one log file. Idempotent, so retried on a timeout — and a file
+  /// already gone is success, because that is how a retry looks when the
+  /// first reply was the thing lost.
+  ///
+  /// A name the encoder refuses is a failure without a request, not a throw:
+  /// the name came from the controller's own listing, and an exception here
+  /// would leave the screen's busy flag set.
+  Future<SaveOutcome> deleteLog(String name, {String? pin}) async {
+    if (!isValidLogName(name)) return const SaveFailed();
+    return _authenticatedAction(
+      op: kOpLogDelete,
+      payload: encodeLogDelete(name),
+      pin: pin,
+      notFoundIsOk: true,
+    );
+  }
+
+  /// Deletes every log file. Idempotent, so retried on a timeout.
+  Future<SaveOutcome> deleteAllLogs({String? pin}) => _authenticatedAction(
+        op: kOpLogDeleteAll,
+        payload: const [],
+        pin: pin,
+      );
+
   /// The shared body of every authenticated action.
   ///
   /// Identical refusal mapping to `_save`, deliberately: armed reported
@@ -215,6 +329,7 @@ class ConfigEditor {
     required List<int> payload,
     required String? pin,
     bool retry = true,
+    bool notFoundIsOk = false,
   }) async {
     if (!_authenticated) {
       if (pin == null) return const SaveNeedsPin();
@@ -234,6 +349,7 @@ class ConfigEditor {
           ControlStatus.errBadArg => const SaveRejectedByController(),
           ControlStatus.errBadOp => const SaveUnsupported(),
           ControlStatus.errBusy => const SaveBusy(),
+          ControlStatus.errNotFound when notFoundIsOk => const SaveOk(),
           _ => const SaveFailed(),
         },
       ControlTimeout() => const SaveFailed(SaveFailure.noAnswer),
@@ -360,8 +476,8 @@ class ConfigEditor {
   ///
   /// Safe for exactly the two opcodes used here: `AUTH` with the same correct
   /// PIN and `CFG_SET` with the same payload both land on the same state. It
-  /// would not be safe for `PIN_CHANGE`, which is why the session itself
-  /// never retries and each caller decides.
+  /// would not be safe for `PIN_CHANGE` or `SESSION_RESET`, which is why the
+  /// session itself never retries and each caller decides.
   Future<ControlResult> _retrying({
     required int op,
     required List<int> payload,

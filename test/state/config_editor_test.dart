@@ -398,4 +398,214 @@ void main() {
       expect(editor.authenticated, isFalse);
     });
   });
+
+  group('resetSession', () {
+    test('authenticates, then sends SESSION_RESET once', () async {
+      final s = FakeSession()
+        ..queueOk() // AUTH
+        ..queueOk(); // SESSION_RESET
+      final editor = ConfigEditor(s);
+
+      final outcome = await editor.resetSession(pin: '1234');
+
+      expect(outcome, isA<SaveOk>());
+      expect(s.sent.map((r) => r.op), [0x01, 0x20]);
+    });
+
+    test('is not retried on a timeout', () async {
+      final s = FakeSession()..queueOk(); // AUTH, then nothing
+      final editor = ConfigEditor(s);
+
+      final outcome = await editor.resetSession(pin: '1234');
+
+      expect(outcome, isA<SaveFailed>());
+      expect(s.sent.where((r) => r.op == 0x20), hasLength(1));
+    });
+
+    test('asks for the PIN on a fresh connection', () async {
+      final editor = ConfigEditor(FakeSession());
+      expect(await editor.resetSession(), isA<SaveNeedsPin>());
+    });
+  });
+
+  group('changePin', () {
+    test('authenticates with the current PIN and sends both', () async {
+      final s = FakeSession()
+        ..queueOk() // AUTH
+        ..queueOk(); // PIN_CHANGE
+      final editor = ConfigEditor(s);
+
+      final outcome = await editor.changePin(current: '0000', next: '4321');
+
+      expect(outcome, isA<SaveOk>());
+      expect(s.sent[0].op, 0x01);
+      expect(s.sent[0].payload, '0000'.codeUnits);
+      expect(s.sent[1].op, 0x28);
+      expect(s.sent[1].payload, [4, ...'0000'.codeUnits, 4, ...'4321'.codeUnits]);
+    });
+
+    test('a wrong current PIN is reported as wrong, not as a lost session',
+        () async {
+      final s = FakeSession()
+        ..queue(const ControlRefused(ControlStatus.errAuth)); // AUTH refused
+      final editor = ConfigEditor(s);
+
+      expect(
+        await editor.changePin(current: '9999', next: '4321'),
+        isA<SaveWrongPin>(),
+      );
+    });
+
+    test('on an authenticated connection a wrong current PIN is still wrong',
+        () async {
+      final s = FakeSession()
+        ..queueOk() // AUTH from an earlier save
+        ..queue(const ControlRefused(ControlStatus.errAuth)); // PIN_CHANGE
+      final editor = ConfigEditor(s);
+      await editor.authenticate('0000');
+
+      expect(
+        await editor.changePin(current: '1111', next: '4321'),
+        isA<SaveWrongPin>(),
+      );
+    });
+
+    test('is sent once and never retried', () async {
+      final s = FakeSession()..queueOk(); // AUTH, then PIN_CHANGE times out
+      final editor = ConfigEditor(s);
+
+      final outcome = await editor.changePin(current: '0000', next: '4321');
+
+      expect(outcome, isA<SaveFailed>());
+      expect(s.sent.where((r) => r.op == 0x28), hasLength(1));
+    });
+
+    test('only a PIN_CHANGE that went unanswered may have applied',
+        () async {
+      // AUTH times out: PIN_CHANGE was never sent, so the PIN cannot have
+      // changed and the screen must not say it may have.
+      final authLost = ConfigEditor(FakeSession());
+      final early = await authLost.changePin(current: '0000', next: '4321');
+      expect((early as SaveFailed).mayHaveApplied, isFalse);
+
+      final authDropped = ConfigEditor(FakeSession()..queue(const ControlDropped()));
+      final dropped = await authDropped.changePin(current: '0000', next: '4321');
+      expect((dropped as SaveFailed).mayHaveApplied, isFalse);
+
+      // AUTH answers, PIN_CHANGE does not.
+      final late = await ConfigEditor(FakeSession()..queueOk())
+          .changePin(current: '0000', next: '4321');
+      expect((late as SaveFailed).mayHaveApplied, isTrue);
+
+      final lateDrop = await ConfigEditor(FakeSession()
+            ..queueOk()
+            ..queue(const ControlDropped()))
+          .changePin(current: '0000', next: '4321');
+      expect((lateDrop as SaveFailed).mayHaveApplied, isTrue);
+      expect(lateDrop.cause, SaveFailure.linkLost);
+    });
+
+    test('an invalid new PIN never leaves the phone', () async {
+      final s = FakeSession();
+      final editor = ConfigEditor(s);
+
+      expect(
+        await editor.changePin(current: '0000', next: '12'),
+        isA<SaveRejectedByController>(),
+      );
+      expect(s.sent, isEmpty);
+    });
+
+    test('armed is reported as armed', () async {
+      final s = FakeSession()
+        ..queue(const ControlRefused(ControlStatus.errState)); // AUTH refused
+      final editor = ConfigEditor(s);
+
+      expect(
+        await editor.changePin(current: '0000', next: '4321'),
+        isA<SaveRefusedArmed>(),
+      );
+    });
+  });
+
+  group('log deletes', () {
+    test('deleteLog authenticates and sends the name', () async {
+      final s = FakeSession()
+        ..queueOk() // AUTH
+        ..queueOk(); // LOG_DELETE
+      final editor = ConfigEditor(s);
+
+      expect(await editor.deleteLog('a.csv', pin: '1234'), isA<SaveOk>());
+      expect(s.sent[1].op, 0x42);
+      expect(s.sent[1].payload, [5, ...'a.csv'.codeUnits]);
+    });
+
+    test('a name the encoder refuses fails without sending', () async {
+      final s = FakeSession();
+      final editor = ConfigEditor(s);
+
+      expect(await editor.deleteLog('a b.csv', pin: '1234'), isA<SaveFailed>());
+      expect(s.sent, isEmpty);
+    });
+
+    test('a file already gone counts as deleted', () async {
+      // A retried delete whose first reply was lost finds nothing: that is
+      // the outcome the pilot asked for.
+      final s = FakeSession()
+        ..queueOk() // AUTH
+        ..queue(const ControlRefused(ControlStatus.errNotFound));
+      final editor = ConfigEditor(s);
+
+      expect(await editor.deleteLog('a.csv', pin: '1234'), isA<SaveOk>());
+    });
+
+    test('deleteAllLogs sends 0x43 and is retried on a timeout', () async {
+      final s = FakeSession()
+        ..queueOk() // AUTH
+        ..queue(const ControlTimeout())
+        ..queueOk();
+      final editor = ConfigEditor(s);
+
+      expect(await editor.deleteAllLogs(pin: '1234'), isA<SaveOk>());
+      expect(s.sent.where((r) => r.op == 0x43), hasLength(2));
+    });
+
+    test('ErrNotFound elsewhere is still a failure', () async {
+      final s = FakeSession()
+        ..queueOk() // AUTH
+        ..queue(const ControlRefused(ControlStatus.errNotFound));
+      final editor = ConfigEditor(s);
+
+      expect(await editor.forgetRemote(pin: '1234'), isA<SaveFailed>());
+    });
+  });
+
+  group('readBmsScanDetail', () {
+    test('sends the index, open and unauthenticated', () async {
+      final s = FakeSession()
+        ..queueOk([1, 2, 3, 4, 5, 6, 0xC3, 1, 0, 0]);
+      final editor = ConfigEditor(s);
+
+      final r = await editor.readBmsScanDetail(4);
+
+      expect(s.sent.single.op, 0x2B);
+      expect(s.sent.single.payload, [4]);
+      expect(r.detail!.mac, [1, 2, 3, 4, 5, 6]);
+      expect(r.unsupported, isFalse);
+    });
+
+    test('old firmware is unsupported', () async {
+      final s = FakeSession()
+        ..queue(const ControlRefused(ControlStatus.errBadOp));
+      final r = await ConfigEditor(s).readBmsScanDetail(0);
+      expect(r.detail, isNull);
+      expect(r.unsupported, isTrue);
+    });
+
+    test('silence is nothing, not unsupported', () async {
+      final r = await ConfigEditor(FakeSession()).readBmsScanDetail(0);
+      expect(r.detail, isNull);
+      expect(r.unsupported, isFalse);
+    });
+  });
 }

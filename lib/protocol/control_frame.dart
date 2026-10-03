@@ -4,8 +4,18 @@ import 'dart:typed_data';
 ///
 /// [unknown] is this repo's own trailing member, so a status from a newer
 /// firmware degrades instead of throwing — the same treatment `DisarmReason`
-/// gets in `telemetry_frame.dart`.
-enum ControlStatus { ok, errAuth, errBadOp, errBadArg, errState, errBusy, unknown }
+/// gets in `telemetry_frame.dart`. [errNotFound] (6) arrived with the log
+/// opcodes: a valid file name that names no file.
+enum ControlStatus {
+  ok,
+  errAuth,
+  errBadOp,
+  errBadArg,
+  errState,
+  errBusy,
+  errNotFound,
+  unknown,
+}
 
 /// `seq = 0` on `RSP` means "unsolicited event", never a reply. Request
 /// senders therefore start at 1, which is what makes demultiplexing free.

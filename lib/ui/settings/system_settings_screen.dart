@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../protocol/config_groups.dart';
 import '../../protocol/mac_address.dart';
+import '../../protocol/pin_change.dart';
 import '../../protocol/settings_validation.dart';
 import '../../state/config_editor.dart';
 import '../../state/remote_pairing_controller.dart';
@@ -124,6 +125,11 @@ class _SystemSettingsScreenState extends State<SystemSettingsScreen> {
   }
 
   final TextEditingController _pinController = TextEditingController();
+  // Owned by the screen, not the dialog: a dialog route that disposed these
+  // would do it while its TextFields are still mounted.
+  final TextEditingController _currentPinController = TextEditingController();
+  final TextEditingController _newPinController = TextEditingController();
+  final TextEditingController _confirmPinController = TextEditingController();
 
   /// Asks for the PIN, then runs [onPin].
   ///
@@ -388,10 +394,190 @@ class _SystemSettingsScreenState extends State<SystemSettingsScreen> {
     }
   }
 
+  Future<void> _confirmResetSession() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Zerar cronômetro de voo'),
+        content: const Text(
+          'O cronômetro volta a 00:00. O horímetro não muda.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Zerar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await _resetSession();
+  }
+
+  Future<void> _resetSession({String? pin}) async {
+    final outcome = await widget.editor.resetSession(pin: pin);
+    if (!mounted) return;
+
+    switch (outcome) {
+      case SaveOk():
+        _showSnackBar('Cronômetro zerado');
+      case SaveNeedsPin(:final sessionLost):
+        if (sessionLost) {
+          _showSnackBar('O controlador encerrou a sessão. Digite o PIN de novo.');
+        }
+        _askPin((pin) => _resetSession(pin: pin));
+      case SaveWrongPin():
+        _showSnackBar('PIN incorreto');
+      case SaveRefusedArmed():
+        _showSnackBar('Recusado: a aeronave está armada');
+      case SaveRejectedByController():
+        _showSnackBar('O controlador recusou o pedido');
+      case SaveUnsupported():
+        _showSnackBar('Este firmware não zera o cronômetro pelo app');
+      case SaveBusy():
+        _showSnackBar('O controlador está ocupado');
+      case SaveFailed(:final cause):
+        _showSnackBar(cause == SaveFailure.linkLost
+            ? 'A conexão caiu antes de zerar'
+            : 'O controlador não respondeu. Tente de novo.');
+    }
+  }
+
+  /// Three fields and a live verdict. The button stays inert until the new
+  /// PIN is one the firmware accepts and the confirmation repeats it, so a
+  /// typo cannot lock the pilot out.
+  void _showChangePinDialog() {
+    _currentPinController.clear();
+    _newPinController.clear();
+    _confirmPinController.clear();
+
+    showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) {
+          final problem = checkNewPin(
+            _newPinController.text,
+            _confirmPinController.text,
+          );
+          final showProblem = _newPinController.text.isNotEmpty &&
+              _confirmPinController.text.isNotEmpty &&
+              problem != null;
+          final canSubmit =
+              _currentPinController.text.isNotEmpty && problem == null;
+
+          TextField field(Key key, TextEditingController c, String label) =>
+              TextField(
+                key: key,
+                controller: c,
+                obscureText: true,
+                maxLength: kPinMaxLength,
+                decoration: InputDecoration(labelText: label, counterText: ''),
+                onChanged: (_) => setDialogState(() {}),
+              );
+
+          return AlertDialog(
+            title: const Text('Alterar PIN'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  field(const Key('pin-current'), _currentPinController,
+                      'PIN atual'),
+                  field(const Key('pin-new'), _newPinController,
+                      'Novo PIN (4 a 8 caracteres)'),
+                  field(const Key('pin-confirm'), _confirmPinController,
+                      'Repita o novo PIN'),
+                  if (showProblem)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        pinProblemMessage(problem),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(dialogContext).colorScheme.error,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancelar'),
+              ),
+              TextButton(
+                key: const Key('pin-change-ok'),
+                onPressed:
+                    canSubmit ? () => Navigator.pop(dialogContext, true) : null,
+                child: const Text('Alterar'),
+              ),
+            ],
+          );
+        },
+      ),
+    ).then((ok) async {
+      final current = _currentPinController.text;
+      final next = _newPinController.text;
+      // Not left sitting in memory until the dialog is next opened.
+      _currentPinController.clear();
+      _newPinController.clear();
+      _confirmPinController.clear();
+      if (ok != true || !mounted) return;
+      await _changePin(current, next);
+    });
+  }
+
+  Future<void> _changePin(String current, String next) async {
+    final outcome =
+        await widget.editor.changePin(current: current, next: next);
+    if (!mounted) return;
+
+    switch (outcome) {
+      case SaveOk():
+        _showSnackBar('PIN alterado');
+      case SaveWrongPin():
+        _showSnackBar('PIN atual incorreto');
+      case SaveRefusedArmed():
+        _showSnackBar('Recusado: a aeronave está armada');
+      case SaveRejectedByController():
+        _showSnackBar('O controlador recusou o novo PIN (4 a 8 caracteres)');
+      case SaveUnsupported():
+        _showSnackBar('Este firmware não troca o PIN pelo app');
+      case SaveBusy():
+        _showSnackBar('O controlador está ocupado');
+      // Never retried, so silence is reported as what it is: the request may
+      // have landed. Claiming it failed would send the pilot back with the
+      // old PIN to a controller that already holds the new one.
+      case SaveFailed(:final cause, :final mayHaveApplied):
+        // Only when PIN_CHANGE itself was sent. A failure while authenticating
+        // never reached it, so claiming a change would be false.
+        _showSnackBar(switch ((cause, mayHaveApplied)) {
+          (SaveFailure.linkLost, true) =>
+            'A conexão caiu — o PIN pode ter sido alterado. Confira com o PIN novo.',
+          (_, true) =>
+            'Sem confirmação do controlador — o PIN pode ter sido alterado.',
+          (SaveFailure.linkLost, false) => 'A conexão caiu antes de gravar',
+          (_, false) => 'O controlador não respondeu. Tente de novo.',
+        });
+      case SaveNeedsPin():
+        // changePin authenticates with the current PIN itself; this outcome
+        // cannot come back. Listed so the switch stays exhaustive.
+        _showSnackBar('PIN atual incorreto');
+    }
+  }
+
   @override
   void dispose() {
     widget.pairingController.removeListener(_onPairingChanged);
     _pinController.dispose();
+    _currentPinController.dispose();
+    _newPinController.dispose();
+    _confirmPinController.dispose();
     super.dispose();
   }
 
@@ -535,6 +721,42 @@ class _SystemSettingsScreenState extends State<SystemSettingsScreen> {
                         ),
                       ],
                     ),
+                  SettingsCard(
+                    title: 'CRONÔMETRO DE VOO',
+                    children: [
+                      Text(
+                        'Zera o tempo de voo mostrado no painel. O horímetro não muda.',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      OutlinedButton(
+                        key: const Key('reset-session'),
+                        onPressed: widget.armed ? null : _confirmResetSession,
+                        child: const Text('Zerar cronômetro'),
+                      ),
+                    ],
+                  ),
+                  SettingsCard(
+                    title: 'SEGURANÇA',
+                    children: [
+                      Text(
+                        'O PIN protege toda gravação no controlador.',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      OutlinedButton(
+                        key: const Key('change-pin'),
+                        onPressed: widget.armed ? null : _showChangePinDialog,
+                        child: const Text('Alterar PIN'),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),

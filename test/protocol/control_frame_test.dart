@@ -52,6 +52,7 @@ void main() {
         ControlStatus.errBadArg,
         ControlStatus.errState,
         ControlStatus.errBusy,
+        ControlStatus.errNotFound,
       ];
       for (var i = 0; i < expected.length; i++) {
         expect(decodeResponse([0x10, 0x01, i, 0x00])!.status, expected[i],
