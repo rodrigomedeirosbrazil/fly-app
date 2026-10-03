@@ -14,7 +14,7 @@ library;
 const String kReleaseRepo = 'rodrigomedeirosbrazil/fly-app';
 
 /// The tag format `.github/workflows/release.yml` builds: `AAAA-MM-DD.N`.
-final RegExp _tagPattern = RegExp(r'^(2\d{3})-(\d{2})-(\d{2})\.(\d+)$');
+final RegExp _tagPattern = RegExp(r'^(2\d{3})-(\d{2})-(\d{2})\.(0|[1-9]\d*)$');
 
 /// `2026-10-03.1` → `2026100301`, the same flattening CI applies.
 ///
@@ -24,8 +24,10 @@ final RegExp _tagPattern = RegExp(r'^(2\d{3})-(\d{2})-(\d{2})\.(\d+)$');
 int? releaseBuildNumber(String tag) {
   final match = _tagPattern.firstMatch(tag);
   if (match == null) return null;
-  final n = int.parse(match.group(4)!);
-  if (n > 99) return null;
+  // tryParse: the tag comes from the network, and a digit run too long for an
+  // int must be an unreadable tag, not a FormatException.
+  final n = int.tryParse(match.group(4)!);
+  if (n == null || n > 99) return null;
   final date = int.parse('${match.group(1)}${match.group(2)}${match.group(3)}');
   return date * 100 + n;
 }

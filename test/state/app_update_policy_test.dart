@@ -12,6 +12,8 @@ void main() {
       '2026-10-03.99': 2026100399,
       '2026-10-03.0': 2026100300, // CI accepts N = 0
       '2026-10-03.100': null, // CI refuses N > 99
+      '2026-10-03.99999999999999999999': null, // overflow must be null, not a throw
+      '2026-10-03.01': null, // one spelling per build number
       '2026-10-03': null,
       'v2026-10-03.1': null,
       '2026-10-03.1-beta': null,
@@ -70,6 +72,11 @@ void main() {
     test('a second release on the same day is available', () {
       expect(evaluateUpdate(installed: 2026100301, latestTag: '2026-10-03.2'),
           const UpdateAvailable('2026-10-03.2'));
+    });
+
+    test('different tags are different notices', () {
+      expect(const UpdateAvailable('2026-10-04.1'),
+          isNot(const UpdateAvailable('2026-10-04.2')));
     });
 
     test('no installed number is unknown, never a notice', () {
