@@ -6,7 +6,10 @@ import 'package:flutter/material.dart';
 import '../../state/control_session.dart';
 import '../../state/bms_scan_controller.dart';
 import '../../state/config_editor.dart';
+import '../../net/release_feed.dart';
 import '../../state/dfu_session.dart';
+import '../../state/firmware_update_checker.dart';
+import '../../state/firmware_update_policy.dart';
 import '../../state/log_browser.dart';
 import '../../state/log_download.dart';
 import '../../state/remote_pairing_controller.dart';
@@ -291,6 +294,7 @@ class _FirmwareScreenWrapper extends StatefulWidget {
 
 class _FirmwareScreenWrapperState extends State<_FirmwareScreenWrapper> {
   late final DfuSession _session;
+  late final FirmwareUpdateChecker _updates;
 
   @override
   void initState() {
@@ -302,10 +306,16 @@ class _FirmwareScreenWrapperState extends State<_FirmwareScreenWrapper> {
       // This should not happen in practice, but handle it gracefully.
       _session = DfuSession(_NoOpTransport());
     }
+    _updates = FirmwareUpdateChecker(
+      feed: GitHubReleaseFeed.forRepo(kFirmwareRepo),
+      installedVersion: widget.repo.installedFirmwareVersion,
+      controllerType: widget.repo.controllerType,
+    );
   }
 
   @override
   void dispose() {
+    _updates.dispose();
     _session.dispose();
     super.dispose();
   }
@@ -336,6 +346,7 @@ class _FirmwareScreenWrapperState extends State<_FirmwareScreenWrapper> {
       builder: (context, _) => FirmwareSettingsScreen(
         repo: widget.repo,
         session: _session,
+        updates: _updates,
         armed: widget.repo.frame?.isArmed ?? false,
         canUpdateFirmware: widget.repo.canUpdateFirmware,
         pickFile: _pickFile,
