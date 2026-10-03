@@ -13,6 +13,10 @@
          because neverForLocation on BLUETOOTH_SCAN replaces it from 31. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"
         android:maxSdkVersion="30" />
+    <!-- The update notice reads the latest release from api.github.com. It
+         is the only thing the release APK sends anywhere but the controller;
+         debug and profile already had it for the tooling. -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
     <application
         android:label="Aerovolt"
