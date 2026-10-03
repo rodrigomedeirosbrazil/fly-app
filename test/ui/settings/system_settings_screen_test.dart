@@ -82,6 +82,27 @@ class RecordingEditor extends Fake implements ConfigEditor {
     previewedVolumes.add(volume);
     return const SaveOk();
   }
+
+  final resetPins = <String?>[];
+  final resetQueue = <SaveOutcome>[];
+
+  @override
+  Future<SaveOutcome> resetSession({String? pin}) async {
+    resetPins.add(pin);
+    return resetQueue.isEmpty ? const SaveOk() : resetQueue.removeAt(0);
+  }
+
+  final pinChanges = <({String current, String next})>[];
+  SaveOutcome pinChangeOutcome = const SaveOk();
+
+  @override
+  Future<SaveOutcome> changePin({
+    required String current,
+    required String next,
+  }) async {
+    pinChanges.add((current: current, next: next));
+    return pinChangeOutcome;
+  }
 }
 
 void main() {
@@ -268,6 +289,101 @@ void main() {
       ).onPressed,
       isNull,
     );
+    expect(
+      tester.widget<OutlinedButton>(find.byKey(const Key('reset-session'))).onPressed,
+      isNull,
+    );
+    expect(
+      tester.widget<OutlinedButton>(find.byKey(const Key('change-pin'))).onPressed,
+      isNull,
+    );
+  });
+
+  Future<void> tapVisible(WidgetTester tester, Finder f) async {
+    await tester.ensureVisible(f);
+    await tester.pumpAndSettle();
+    await tester.tap(f);
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('resetting the clock confirms, then asks for the PIN',
+      (tester) async {
+    editor.resetQueue.add(const SaveNeedsPin());
+    await tester.pumpWidget(wrap(screen()));
+
+    await tapVisible(tester, find.byKey(const Key('reset-session')));
+    await tester.tap(find.text('Zerar'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField).last, '1234');
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+
+    expect(editor.resetPins, [null, '1234']);
+    expect(find.text('Cronômetro zerado'), findsOneWidget);
+  });
+
+  testWidgets('changing the PIN sends what was typed', (tester) async {
+    await tester.pumpWidget(wrap(screen()));
+
+    await tapVisible(tester, find.byKey(const Key('change-pin')));
+    await tester.enterText(find.byKey(const Key('pin-current')), '0000');
+    await tester.enterText(find.byKey(const Key('pin-new')), '4321');
+    await tester.enterText(find.byKey(const Key('pin-confirm')), '4321');
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('pin-change-ok')));
+    await tester.pumpAndSettle();
+
+    expect(editor.pinChanges.single, (current: '0000', next: '4321'));
+    expect(find.text('PIN alterado'), findsOneWidget);
+  });
+
+  testWidgets('a mismatched confirmation keeps the button inert',
+      (tester) async {
+    await tester.pumpWidget(wrap(screen()));
+
+    await tapVisible(tester, find.byKey(const Key('change-pin')));
+    await tester.enterText(find.byKey(const Key('pin-current')), '0000');
+    await tester.enterText(find.byKey(const Key('pin-new')), '4321');
+    await tester.enterText(find.byKey(const Key('pin-confirm')), '4322');
+    await tester.pump();
+
+    expect(
+      tester.widget<TextButton>(find.byKey(const Key('pin-change-ok'))).onPressed,
+      isNull,
+    );
+    expect(find.text('Os dois PINs novos não são iguais'), findsOneWidget);
+  });
+
+  testWidgets('a PIN change with no answer says the PIN may have changed',
+      (tester) async {
+    editor.pinChangeOutcome = const SaveFailed(SaveFailure.noAnswer);
+    await tester.pumpWidget(wrap(screen()));
+
+    await tapVisible(tester, find.byKey(const Key('change-pin')));
+    await tester.enterText(find.byKey(const Key('pin-current')), '0000');
+    await tester.enterText(find.byKey(const Key('pin-new')), '4321');
+    await tester.enterText(find.byKey(const Key('pin-confirm')), '4321');
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('pin-change-ok')));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('pode ter sido alterado'), findsOneWidget);
+  });
+
+  testWidgets('a wrong current PIN is named', (tester) async {
+    editor.pinChangeOutcome = const SaveWrongPin();
+    await tester.pumpWidget(wrap(screen()));
+
+    await tapVisible(tester, find.byKey(const Key('change-pin')));
+    await tester.enterText(find.byKey(const Key('pin-current')), '9999');
+    await tester.enterText(find.byKey(const Key('pin-new')), '4321');
+    await tester.enterText(find.byKey(const Key('pin-confirm')), '4321');
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('pin-change-ok')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('PIN atual incorreto'), findsOneWidget);
   });
 
   testWidgets('no config means nothing to edit and nothing to overwrite',
