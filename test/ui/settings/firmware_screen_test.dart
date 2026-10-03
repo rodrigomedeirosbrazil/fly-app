@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fly_app/net/release_feed.dart';
 import 'package:fly_app/protocol/control_info.dart';
+import 'package:fly_app/protocol/dfu_protocol.dart';
 import 'package:fly_app/state/control_session.dart';
 import 'package:fly_app/state/dfu_session.dart';
 import 'package:fly_app/state/firmware_update_checker.dart';
@@ -35,6 +37,22 @@ class SilentTransport implements DfuTransport {
 
   @override
   Future<bool> authenticate(String pin) async => true;
+}
+
+/// Answers everything instantly except DFU_BEGIN, which never answers. The
+/// session has left `idle` by then, so a transfer stays in flight for as long
+/// as the test needs.
+class HoldingTransport extends SilentTransport {
+  final begin = Completer<ControlResult>();
+
+  @override
+  Future<ControlResult> request({
+    required int op,
+    List<int> payload = const [],
+  }) =>
+      op == opDfuBegin
+          ? begin.future
+          : super.request(op: op, payload: payload);
 }
 
 Widget wrap(Widget child) => MaterialApp(home: child);
@@ -376,6 +394,7 @@ void main() {
 
     expect(find.text('Download incompleto'), findsOneWidget);
     expect(download(), findsOneWidget);
+    expect(find.text('Tentar de novo'), findsOneWidget);
   });
 
   testWidgets('a refused download says so and offers the button again',
@@ -387,6 +406,7 @@ void main() {
 
     expect(find.text('Falha no download'), findsOneWidget);
     expect(download(), findsOneWidget);
+    expect(find.text('Tentar de novo'), findsOneWidget);
   });
 
   testWidgets('a finished download says Baixado', (tester) async {
@@ -396,5 +416,62 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Baixado'), findsOneWidget);
+  });
+
+  testWidgets('during a transfer the download stays, disabled', (tester) async {
+    // Fixed presence, varying state: hiding the button would shift the send
+    // and progress area while the pilot watches it.
+    session.dispose();
+    final holding = HoldingTransport();
+    session = DfuSession(holding,
+        pollInterval: const Duration(milliseconds: 10), maxRestarts: 1);
+    await tester.pumpWidget(wrap(screen()));
+    await answerRelease(tester);
+    await pick(tester);
+
+    await tester.ensureVisible(send());
+    await tester.tap(send());
+    await tester.pump();
+    await tester.pump();
+    expect(session.isTransferring, isTrue,
+        reason: 'DFU_BEGIN is unanswered, so the transfer is in flight');
+
+    await tester.ensureVisible(download());
+    expect(download(), findsOneWidget);
+    expect(tester.widget<FilledButton>(download()).onPressed, isNull);
+  });
+
+  testWidgets('a manual pick can be undone by using the downloaded image',
+      (tester) async {
+    await tester.pumpWidget(wrap(screen()));
+    await downloadIt(tester);
+    feed.downloadCalls.single.result.complete(Downloaded(firmwareBytes()));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('use-downloaded-firmware')), findsNothing);
+
+    await pick(tester);
+    expect(find.textContaining('baixado do GitHub'), findsNothing);
+
+    final useIt = find.byKey(const Key('use-downloaded-firmware'));
+    await tester.ensureVisible(useIt);
+    await tester.tap(useIt);
+    await tester.pumpAndSettle();
+
+    expect(feed.downloadCalls, hasLength(1), reason: 'no second download');
+    expect(find.textContaining('baixado do GitHub'), findsOneWidget);
+    expect(find.textContaining('escolhida pelo tipo que o controlador informou'),
+        findsOneWidget);
+    expect(find.textContaining('não tem como saber'), findsNothing);
+    expect(useIt, findsNothing);
+  });
+
+  testWidgets('picking a file waits for a download in flight', (tester) async {
+    // Otherwise the download would finish and overwrite the pick.
+    await tester.pumpWidget(wrap(screen()));
+    await downloadIt(tester);
+
+    final button = find.byKey(const Key('pick-firmware'));
+    await tester.ensureVisible(button);
+    expect(tester.widget<OutlinedButton>(button).onPressed, isNull);
   });
 }

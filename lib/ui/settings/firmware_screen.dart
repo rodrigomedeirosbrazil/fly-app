@@ -46,24 +46,24 @@ class _FirmwareSettingsScreenState extends State<FirmwareSettingsScreen> {
   @override
   void initState() {
     super.initState();
-    widget.session.addListener(_onSessionChanged);
+    widget.session.addListener(_onChanged);
     // Check BEFORE listening: check() notifies synchronously when it flips to
     // `checking`, and a listener calling setState inside initState throws.
     // The first build reads `checking` directly; later notifications arrive
     // after an await, outside any build.
     widget.updates.check();
-    widget.updates.addListener(_onSessionChanged);
+    widget.updates.addListener(_onChanged);
   }
 
   @override
   void dispose() {
-    widget.updates.removeListener(_onSessionChanged);
-    widget.session.removeListener(_onSessionChanged);
+    widget.updates.removeListener(_onChanged);
+    widget.session.removeListener(_onChanged);
     _pinController.dispose();
     super.dispose();
   }
 
-  void _onSessionChanged() => setState(() {});
+  void _onChanged() => setState(() {});
 
   /// What the last pick failed with, or null. A pick that throws and a pick
   /// the pilot cancelled look identical from here unless one of them says so.
@@ -95,6 +95,18 @@ class _FirmwareSettingsScreenState extends State<FirmwareSettingsScreen> {
     await widget.updates.download();
     final bytes = widget.updates.image;
     if (bytes == null || !mounted) return;
+    setState(() {
+      _pickError = null;
+      _chosenImage = bytes;
+      _inspection = inspectImage(bytes);
+      _downloaded = offer;
+    });
+  }
+
+  /// Re-adopts the image already downloaded, after a manual pick replaced it.
+  void _useDownloaded(FirmwareAvailable offer) {
+    final bytes = widget.updates.image;
+    if (bytes == null) return;
     setState(() {
       _pickError = null;
       _chosenImage = bytes;
@@ -227,8 +239,8 @@ class _FirmwareSettingsScreenState extends State<FirmwareSettingsScreen> {
     final downloading =
         widget.updates.downloadState == FirmwareDownloadState.downloading;
     final sendDisabledNow = sendDisabled || downloading;
-    // Downloading is network only, so armed does not block it; a transfer in
-    // progress does, because the bytes it would replace are being sent.
+    // Downloading is network only, so armed does not block it. A transfer in
+    // flight does: the chosen image must not change under it.
     final transferIdle = widget.session.state == DfuTransferState.idle ||
         widget.session.state == DfuTransferState.failed ||
         widget.session.state == DfuTransferState.aborted;
@@ -284,7 +296,8 @@ class _FirmwareSettingsScreenState extends State<FirmwareSettingsScreen> {
                       title: 'NO GITHUB',
                       children: _githubCard(
                         context,
-                        canDownload: widget.canUpdateFirmware && transferIdle,
+                        canDownload: widget.canUpdateFirmware,
+                        downloadEnabled: transferIdle,
                       ),
                     ),
                     SettingsCard(
@@ -293,7 +306,7 @@ class _FirmwareSettingsScreenState extends State<FirmwareSettingsScreen> {
                         OutlinedButton(
                           key: const Key('pick-firmware'),
                           onPressed:
-                              isDisabled ? null : _pickFile,
+                              isDisabled || downloading ? null : _pickFile,
                           child: const Text('Escolher arquivo .bin'),
                         ),
                         if (_pickError != null) ...[
@@ -481,7 +494,11 @@ class _FirmwareSettingsScreenState extends State<FirmwareSettingsScreen> {
     ControllerType.unknown => '?',
   };
 
-  List<Widget> _githubCard(BuildContext context, {required bool canDownload}) {
+  List<Widget> _githubCard(
+    BuildContext context, {
+    required bool canDownload,
+    required bool downloadEnabled,
+  }) {
     final u = widget.updates;
     final muted = TextStyle(
       fontSize: 13,
@@ -530,7 +547,7 @@ class _FirmwareSettingsScreenState extends State<FirmwareSettingsScreen> {
           ],
           if (canDownload) ...[
             const SizedBox(height: 12),
-            ..._downloadRow(context, offer, mb, muted, error),
+            ..._downloadRow(context, offer, mb, muted, error, downloadEnabled),
           ],
         ];
     }
@@ -542,16 +559,19 @@ class _FirmwareSettingsScreenState extends State<FirmwareSettingsScreen> {
     String mb,
     TextStyle muted,
     TextStyle error,
+    bool enabled,
   ) {
     final u = widget.updates;
-    final button = FilledButton(
+    // Shown disabled rather than hidden while a transfer is in flight: fixed
+    // presence, varying state, so nothing under it shifts mid-transfer.
+    FilledButton button(String label) => FilledButton(
       key: const Key('download-firmware'),
-      onPressed: _download,
-      child: Text('Baixar ${offer.tag} ($mb MB)'),
+      onPressed: enabled ? _download : null,
+      child: Text(label),
     );
     switch (u.downloadState) {
       case FirmwareDownloadState.idle:
-        return [button];
+        return [button('Baixar ${offer.tag} ($mb MB)')];
       case FirmwareDownloadState.downloading:
         final total = u.total ?? 0;
         final fraction = total == 0 ? 0.0 : u.received / total;
@@ -561,18 +581,30 @@ class _FirmwareSettingsScreenState extends State<FirmwareSettingsScreen> {
           Text('${(fraction * 100).toStringAsFixed(0)}%'),
         ];
       case FirmwareDownloadState.downloaded:
-        return [Text('Baixado', style: muted)];
+        return [
+          Text('Baixado', style: muted),
+          // A manual pick afterwards supersedes the download; this is the way
+          // back, without spending the data again.
+          if (_downloaded == null) ...[
+            const SizedBox(height: 12),
+            OutlinedButton(
+              key: const Key('use-downloaded-firmware'),
+              onPressed: enabled ? () => _useDownloaded(offer) : null,
+              child: const Text('Usar a imagem baixada'),
+            ),
+          ],
+        ];
       case FirmwareDownloadState.failed:
         return [
           Text('Falha no download', style: error),
           const SizedBox(height: 12),
-          button,
+          button('Tentar de novo'),
         ];
       case FirmwareDownloadState.incomplete:
         return [
           Text('Download incompleto', style: error),
           const SizedBox(height: 12),
-          button,
+          button('Tentar de novo'),
         ];
     }
   }
