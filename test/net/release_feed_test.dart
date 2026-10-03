@@ -85,7 +85,9 @@ void main() {
 
       await feed().latestTag();
 
-      expect(seen!.value(HttpHeaders.userAgentHeader), isNotEmpty);
+      // dart:io would otherwise send its own default ("Dart/x (dart:io)"), so
+      // only an exact match proves the code sets the header itself.
+      expect(seen!.value(HttpHeaders.userAgentHeader), 'aerovolt-app');
       expect(seen!.value(HttpHeaders.acceptHeader),
           'application/vnd.github+json');
     });
