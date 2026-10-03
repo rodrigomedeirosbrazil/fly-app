@@ -44,6 +44,11 @@ class _LogsScreenState extends State<LogsScreen> {
   int _total = 0;
   LogDownload? _current;
 
+  /// A delete is on the wire. Without it the tiles re-enable the moment the
+  /// confirmation closes, and a second tap starts a second delete (or a
+  /// download of the file being erased) behind the first.
+  bool _deleting = false;
+
   /// Owned by the screen, not the dialog — `CLAUDE.md` records the crash a
   /// dialog-owned controller caused.
   final TextEditingController _pinController = TextEditingController();
@@ -177,8 +182,12 @@ class _LogsScreenState extends State<LogsScreen> {
         ],
       ),
     ).then((pin) async {
-      if (pin == null || !mounted) return;
-      await onPin(pin);
+      // Cleared whichever way the dialog closed: the controller outlives it,
+      // and a PIN left in it would sit in memory until the screen is popped.
+      final entered = pin;
+      _pinController.clear();
+      if (entered == null || !mounted) return;
+      await onPin(entered);
     });
   }
 
@@ -193,8 +202,24 @@ class _LogsScreenState extends State<LogsScreen> {
     await _delete(file.name);
   }
 
+  /// The aircraft can arm while a confirmation or PIN dialog is open, and the
+  /// editor asks for a PIN *before* sending anything — so reaching it armed
+  /// would prompt for a password to do something refused either way.
+  bool _refuseIfArmed() {
+    if (!widget.armed) return false;
+    _snack('Recusado: a aeronave está armada');
+    return true;
+  }
+
   Future<void> _delete(String name, {String? pin}) async {
-    final outcome = await widget.editor.deleteLog(name, pin: pin);
+    if (_refuseIfArmed()) return;
+    setState(() => _deleting = true);
+    final SaveOutcome outcome;
+    try {
+      outcome = await widget.editor.deleteLog(name, pin: pin);
+    } finally {
+      if (mounted) setState(() => _deleting = false);
+    }
     await _afterDelete(outcome, 'Registro apagado',
         (pin) => _delete(name, pin: pin));
   }
@@ -211,7 +236,14 @@ class _LogsScreenState extends State<LogsScreen> {
   }
 
   Future<void> _deleteAll({String? pin}) async {
-    final outcome = await widget.editor.deleteAllLogs(pin: pin);
+    if (_refuseIfArmed()) return;
+    setState(() => _deleting = true);
+    final SaveOutcome outcome;
+    try {
+      outcome = await widget.editor.deleteAllLogs(pin: pin);
+    } finally {
+      if (mounted) setState(() => _deleting = false);
+    }
     await _afterDelete(outcome, 'Registros apagados',
         (pin) => _deleteAll(pin: pin));
   }
@@ -252,7 +284,7 @@ class _LogsScreenState extends State<LogsScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final state = widget.browser.state;
-    final busy = widget.armed || _downloading != null;
+    final busy = widget.armed || _downloading != null || _deleting;
     final files = state is LogListLoaded ? state.files : const <LogFileEntry>[];
 
     return Scaffold(
@@ -330,7 +362,15 @@ class _LogsScreenState extends State<LogsScreen> {
           ),
         ];
       case LogListRefusedArmed():
-        return const [];
+        // Armed, the banner above already says so. Disarmed, the refusal is
+        // stale — and a blank body would look like a screen that broke.
+        return [
+          if (!widget.armed)
+            Text(
+              'Indisponível com a aeronave armada. Atualize quando desarmar.',
+              style: muted,
+            ),
+        ];
       case LogListFailed(:final reason):
         return [
           Text(
@@ -381,7 +421,7 @@ class _LogsScreenState extends State<LogsScreen> {
   Widget _tile(BuildContext context, LogFileEntry f) {
     final theme = Theme.of(context);
     final downloadingThis = _downloading == f.name;
-    final idle = !widget.armed && _downloading == null;
+    final idle = !widget.armed && _downloading == null && !_deleting;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),

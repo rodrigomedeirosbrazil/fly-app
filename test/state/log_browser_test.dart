@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -30,6 +31,31 @@ List<int> page({
       ..addAll(name.codeUnits);
   }
   return out;
+}
+
+/// Answers each request from a list of completers the test resolves in
+/// whatever order it likes.
+class ManualSession implements ControlSession {
+  final replies = <Completer<ControlResult>>[];
+
+  @override
+  Future<ControlResult> request({
+    required int op,
+    List<int> payload = const [],
+  }) {
+    final c = Completer<ControlResult>();
+    replies.add(c);
+    return c.future;
+  }
+
+  @override
+  Stream<ControlResponse> get events => const Stream.empty();
+
+  @override
+  Duration get timeout => const Duration(seconds: 2);
+
+  @override
+  void dispose() {}
 }
 
 void main() {
@@ -100,5 +126,21 @@ void main() {
     await b.refresh();
     expect((b.state as LogListFailed).reason, LogListFailure.malformed);
     expect(s.sent, hasLength(64));
+  });
+
+  test('an older refresh that answers late cannot overwrite a newer one',
+      () async {
+    final s = ManualSession();
+    final b = LogBrowser(s);
+
+    final first = b.refresh();
+    final second = b.refresh();
+    s.replies[1].complete(ControlOk(page(entries: [('20261002_001.csv', 2)])));
+    await second;
+    s.replies[0].complete(ControlOk(page(entries: [('20261001_001.csv', 1)])));
+    await first;
+
+    final loaded = b.state as LogListLoaded;
+    expect(loaded.files.map((f) => f.name), ['20261002_001.csv']);
   });
 }

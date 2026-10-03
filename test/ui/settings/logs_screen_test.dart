@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -54,6 +55,15 @@ class DeletingEditor extends Fake implements ConfigEditor {
     allPins.add(pin);
     return _next();
   }
+}
+
+/// A delete that answers when the test says so.
+class SlowDeleteEditor extends DeletingEditor {
+  SlowDeleteEditor(this._answer);
+  final Future<SaveOutcome> _answer;
+
+  @override
+  Future<SaveOutcome> deleteLog(String name, {String? pin}) => _answer;
 }
 
 Widget wrap(Widget child) => MaterialApp(home: child);
@@ -192,6 +202,94 @@ void main() {
       isNull,
     );
     expect(find.text('Indisponível com a aeronave armada'), findsOneWidget);
+  });
+
+  testWidgets('arming under an open confirmation never reaches a PIN prompt',
+      (tester) async {
+    listSession.queueOk(page([('20261002_003.csv', 3)]));
+    editor.queued.add(const SaveNeedsPin());
+    await tester.pumpWidget(wrap(screen()));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('log-delete-20261002_003.csv')));
+    await tester.pumpAndSettle();
+    // The aircraft arms while the dialog is still on screen.
+    await tester.pumpWidget(wrap(screen(armed: true)));
+    await tester.pump();
+    await tester.tap(find.text('Apagar'));
+    await tester.pumpAndSettle();
+
+    expect(editor.deleted, isEmpty);
+    expect(find.text('PIN'), findsNothing);
+    expect(find.text('Recusado: a aeronave está armada'), findsOneWidget);
+  });
+
+  testWidgets('arming under an open delete-all confirmation is refused too',
+      (tester) async {
+    listSession.queueOk(page([('20261002_003.csv', 3)]));
+    editor.queued.add(const SaveNeedsPin());
+    await tester.pumpWidget(wrap(screen()));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('logs-delete-all')));
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(wrap(screen(armed: true)));
+    await tester.pump();
+    await tester.tap(find.text('Apagar todos'));
+    await tester.pumpAndSettle();
+
+    expect(editor.allPins, isEmpty);
+    expect(find.text('PIN'), findsNothing);
+    expect(find.text('Recusado: a aeronave está armada'), findsOneWidget);
+  });
+
+  testWidgets('a delete in flight makes every action inert', (tester) async {
+    final pending = Completer<SaveOutcome>();
+    final slow = SlowDeleteEditor(pending.future);
+    listSession
+      ..queueOk(page([('20261002_003.csv', 3)]))
+      ..queueOk(page([('20261002_003.csv', 3)]));
+    await tester.pumpWidget(wrap(LogsScreen(
+      browser: browser,
+      editor: slow,
+      armed: false,
+      download: () => LogDownload(readSession, maxChunk: 100),
+      share: (name, bytes) async => shared.add((name, bytes)),
+    )));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('log-delete-20261002_003.csv')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Apagar'));
+    await tester.pump();
+
+    IconButton button(String key) =>
+        tester.widget<IconButton>(find.byKey(Key(key)));
+    expect(button('log-download-20261002_003.csv').onPressed, isNull);
+    expect(button('log-delete-20261002_003.csv').onPressed, isNull);
+    expect(button('logs-refresh').onPressed, isNull);
+    expect(
+      tester.widget<OutlinedButton>(find.byKey(const Key('logs-delete-all'))).onPressed,
+      isNull,
+    );
+
+    pending.complete(const SaveFailed(SaveFailure.noAnswer));
+    await tester.pumpAndSettle();
+
+    expect(button('log-download-20261002_003.csv').onPressed, isNotNull);
+    expect(button('logs-refresh').onPressed, isNotNull);
+  });
+
+  testWidgets('armed refusal with a disarmed screen explains the empty list',
+      (tester) async {
+    listSession.queue(const ControlRefused(ControlStatus.errState));
+    await tester.pumpWidget(wrap(screen()));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('Indisponível com a aeronave armada. Atualize quando desarmar.'),
+      findsOneWidget,
+    );
   });
 
   group('layout', () {

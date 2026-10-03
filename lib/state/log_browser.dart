@@ -62,6 +62,11 @@ class LogBrowser extends ChangeNotifier {
 
   bool _disposed = false;
 
+  /// Bumped by every [refresh]. Two can overlap — the screen refreshes on
+  /// disarm and after a delete — and the older one finishing last would
+  /// overwrite a newer list with a stale one.
+  int _generation = 0;
+
   void _set(LogListState s) {
     if (_disposed) return;
     _state = s;
@@ -69,6 +74,7 @@ class LogBrowser extends ChangeNotifier {
   }
 
   Future<void> refresh() async {
+    final generation = ++_generation;
     _set(const LogListLoading());
 
     final files = <LogFileEntry>[];
@@ -78,7 +84,7 @@ class LogBrowser extends ChangeNotifier {
 
     for (var pageNo = 0; pageNo < maxPages; pageNo++) {
       final result = await _list(cursor);
-      if (_disposed) return;
+      if (_disposed || generation != _generation) return;
 
       switch (result) {
         case ControlOk(:final payload):
