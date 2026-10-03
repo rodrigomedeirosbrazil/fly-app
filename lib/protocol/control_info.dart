@@ -22,6 +22,7 @@ class ControlInfo {
     required this.appVersion,
     this.buildDate,
     this.buildTime,
+    this.defaultDividerRatio,
   });
 
   /// The minimum, not the size. A shorter payload is unusable; a longer one
@@ -36,6 +37,8 @@ class ControlInfo {
   /// Length of a payload carrying the build stamp.
   static const int kLengthWithBuildStamp =
       _buildTimeOffset + _buildTimeLength; // 49
+
+  static const int _defaultRatioOffset = 49;
 
   static const int _capCanTelemetry = 1 << 0;
   static const int _capVoltageSensor = 1 << 1;
@@ -61,6 +64,11 @@ class ControlInfo {
 
   /// The firmware's `__TIME__`, e.g. `12:06:45`. Null with [buildDate].
   final String? buildTime;
+
+  /// The board's factory divider ratio, `Settings::getDefaultVoltageDividerRatio()`.
+  /// Null on firmware that does not send it, and for a zero — a ratio of
+  /// zero would divide the pack voltage away, so it can only mean "unset".
+  final double? defaultDividerRatio;
 
   bool get hasCanTelemetry => capabilities & _capCanTelemetry != 0;
   bool get hasVoltageSensor => capabilities & _capVoltageSensor != 0;
@@ -99,9 +107,16 @@ class ControlInfo {
       return (value == null || value.isEmpty) ? null : value;
     }
 
+    double? defaultRatio;
+    if (data.length >= _defaultRatioOffset + 2) {
+      final x100 = d.getUint16(_defaultRatioOffset, Endian.little);
+      if (x100 != 0) defaultRatio = x100 / 100.0;
+    }
+
     return ControlInfo(
       buildDate: stamp(_buildDateOffset, _buildDateLength),
       buildTime: stamp(_buildTimeOffset, _buildTimeLength),
+      defaultDividerRatio: defaultRatio,
       protocolVersion: d.getUint8(0),
       controllerType: switch (d.getUint8(1)) {
         1 => ControllerType.xag,
