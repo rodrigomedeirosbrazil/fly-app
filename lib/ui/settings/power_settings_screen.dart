@@ -244,6 +244,13 @@ class _PowerSettingsScreenState extends State<PowerSettingsScreen> {
       );
 
   Future<void> _save(PowerConfig config, {String? pin}) async {
+    // Checked here rather than only on the buttons: a confirmation dialog or a
+    // PIN prompt can outlive the moment the aircraft arms, and the editor asks
+    // for the PIN before the firmware gets to refuse with ErrState.
+    if (widget.armed) {
+      _showSnackBar('Recusado: a aeronave está armada');
+      return;
+    }
     _pending = config;
     await _handleSaveOutcome(await widget.editor.savePower(config, pin: pin));
   }
@@ -412,6 +419,12 @@ class _PowerSettingsScreenState extends State<PowerSettingsScreen> {
     final computedRatio = _getComputedCalibrationRatio();
     final calibrationValid = _isCalibrationValid();
 
+    // Calibrate and restore write the whole group built from the form, so they
+    // answer to the same gates as Salvar: an unreadable field is not a zero.
+    final canWriteGroup = !widget.armed &&
+        widget.config != null &&
+        powerError == SettingsError.none;
+
     final calibrationRefError = !calibrationValid &&
             _bmsReferenceController.text.isNotEmpty
         ? messageFor(validateCalibrationReference(
@@ -566,18 +579,18 @@ class _PowerSettingsScreenState extends State<PowerSettingsScreen> {
                         const SizedBox(height: 12),
                         OutlinedButton(
                           key: const Key('calibrate'),
-                          onPressed: calibrationValid ? _applyCalibration : null,
+                          onPressed: canWriteGroup && calibrationValid
+                              ? _applyCalibration
+                              : null,
                           child: const Text('Aplicar calibração'),
                         ),
                         if (widget.defaultDividerRatio != null) ...[
                           const SizedBox(height: 8),
                           OutlinedButton(
                             key: const Key('restore-divider'),
-                            onPressed: widget.config == null ||
-                                    widget.armed ||
-                                    _atDefault
-                                ? null
-                                : _confirmRestoreDivider,
+                            onPressed: canWriteGroup && !_atDefault
+                                ? _confirmRestoreDivider
+                                : null,
                             child: Text(
                               'Restaurar padrão (${widget.defaultDividerRatio!.toStringAsFixed(2)})',
                             ),

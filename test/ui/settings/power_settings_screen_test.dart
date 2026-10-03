@@ -350,6 +350,87 @@ void main() {
     });
   });
 
+  group('calibration and restore write the whole group', () {
+    // Both buttons build the Power group from the form. An unreadable or
+    // inverted voltage must stop them exactly as it stops Salvar, or they write
+    // the zeros parseSetting refuses to invent.
+    bool? enabled(WidgetTester tester, String key) =>
+        tester.widget<OutlinedButton>(find.byKey(Key(key))).onPressed != null;
+
+    testWidgets('an unreadable voltage disables both', (tester) async {
+      await tester.pumpWidget(
+          wrap(screen(sensorVolts: 50.4, defaultDividerRatio: 10.5)));
+      await type(tester, 'bms-reference', '51.20');
+      expect(enabled(tester, 'calibrate'), isTrue);
+      expect(enabled(tester, 'restore-divider'), isTrue);
+
+      await type(tester, 'min-voltage-cell', 'abc');
+
+      expect(enabled(tester, 'calibrate'), isFalse);
+      expect(enabled(tester, 'restore-divider'), isFalse);
+    });
+
+    testWidgets('an inverted min and max disables both', (tester) async {
+      await tester.pumpWidget(
+          wrap(screen(sensorVolts: 50.4, defaultDividerRatio: 10.5)));
+      await type(tester, 'bms-reference', '51.20');
+      await type(tester, 'min-voltage-cell', '4.20');
+
+      expect(enabled(tester, 'calibrate'), isFalse);
+      expect(enabled(tester, 'restore-divider'), isFalse);
+    });
+
+    testWidgets('a blank custom capacity disables both', (tester) async {
+      await tester.pumpWidget(wrap(screen(
+        config: const PowerConfig(
+          capacityMah: 22000,
+          minVoltageMv: 44100,
+          maxVoltageMv: 58100,
+          powerControlEnabled: true,
+          voltageDividerRatio: 11.0,
+        ),
+        sensorVolts: 50.4,
+        defaultDividerRatio: 10.5,
+      )));
+      await type(tester, 'bms-reference', '51.20');
+      await type(tester, 'capacity-custom', '');
+
+      expect(enabled(tester, 'calibrate'), isFalse);
+      expect(enabled(tester, 'restore-divider'), isFalse);
+    });
+
+    testWidgets('armed disables both', (tester) async {
+      await tester.pumpWidget(wrap(
+          screen(armed: true, sensorVolts: 50.4, defaultDividerRatio: 10.5)));
+      await type(tester, 'bms-reference', '51.20');
+
+      expect(enabled(tester, 'calibrate'), isFalse);
+      expect(enabled(tester, 'restore-divider'), isFalse);
+    });
+
+    testWidgets('arming while the restore confirmation is open writes nothing',
+        (tester) async {
+      // The button was enabled when the dialog opened; the aircraft armed
+      // before the pilot confirmed. The editor would ask for a PIN before the
+      // firmware refuses with ErrState, so the screen has to refuse first.
+      editor.queued.add(const SaveNeedsPin());
+      await tester.pumpWidget(wrap(screen(defaultDividerRatio: 10.5)));
+      await tester.ensureVisible(find.byKey(const Key('restore-divider')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('restore-divider')));
+      await tester.pumpAndSettle();
+
+      await tester.pumpWidget(
+          wrap(screen(armed: true, defaultDividerRatio: 10.5)));
+      await tester.tap(find.text('Restaurar'));
+      await tester.pumpAndSettle();
+
+      expect(editor.saves, isEmpty);
+      expect(find.text('PIN'), findsNothing);
+      expect(find.text('Recusado: a aeronave está armada'), findsOneWidget);
+    });
+  });
+
   group('the save button', () {
     testWidgets('is live for a valid group', (tester) async {
       await tester.pumpWidget(wrap(screen()));
