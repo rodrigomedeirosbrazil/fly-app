@@ -73,6 +73,7 @@ here — neither has a Bluetooth radio.
 | `flutter_svg` | 2.3.0 | Renders the tintable Aerovolt logo |
 | `audioplayers` | 6.8.1 | Mirrors the controller's buzzer. **See below.** |
 | `file_picker` | 12.3.0 | The pilot supplies the firmware `.bin` |
+| `share_plus` | 13.3.1 | Exports a downloaded flight log to the share sheet |
 | `flutter_launcher_icons` | 0.14.4 | **Dev only.** Generates the icon sets |
 
 Plugins resolve through **Swift Package Manager**, not CocoaPods — Flutter 3.47
@@ -701,6 +702,41 @@ Transfer and commit are separate buttons for the same reason: the transfer is
 reversible until the moment it is not, and the irreversible half gets its own
 press.
 
+### Flight logs are read by offset, over the request channel
+
+`LOG_LIST` (`0x40`), `LOG_READ` (`0x41`), `LOG_DELETE` (`0x42`) and
+`LOG_DELETE_ALL` (`0x43`) — `lib/protocol/log_protocol.dart` is the
+**seventh** hand-copied fly-controller contract here. The design is
+`docs/superpowers/specs/2026-10-02-portal-replacement-design.md`, Part 1.
+
+Bulk travels on `CMD`/`RSP` rather than a streaming characteristic because the
+whole partition is 128 KB: one round trip per ≤ 232-byte chunk is tens of
+seconds at worst, and every read is **idempotent**, so a timeout simply asks
+for the same offset again. There is no CRC, deliberately: replies are
+acknowledged by the link layer, the echoed offset catches a misplaced chunk,
+and the file cannot change while disarmed because the Logger only writes
+armed. A `fileSize` that changes between chunks aborts the download rather
+than stitching two files together.
+
+The chunk is `logChunkLimit(MTU − 3)`, read per download — the MTU is not
+stable across connections. `LOG_LIST` pages by **cursor** (the last name
+received), so a delete between pages cannot skip or repeat a file.
+
+Deletes go through `ConfigEditor`, so the PIN prompt and the refusal mapping
+are the ones every save uses, and `ErrNotFound` on a delete is success — it
+is what a retried delete looks like when the first reply was lost.
+
+Every log opcode is refused while armed. Firmware without them answers
+`ErrBadOp`, and the screen says to update the firmware. Delete and delete-all
+also refuse **locally** when armed, before any request leaves the phone, so an
+armed aircraft never produces a PIN prompt for something the firmware would
+refuse anyway — the same `ErrState` rule every other write follows.
+
+`LogBrowser` stamps every refresh with a generation counter, and only the
+latest one may write the list. Listings are cursor-paged round trips that can
+overlap — the screen refreshes on disarm and again after a delete — and without
+it the older, slower one lands last and shows a file that is already gone.
+
 ### The Dart enum order does not match the firmware's
 
 `MotorTempSource` is declared `{can, ntc, none}` here; the firmware's
@@ -1019,6 +1055,7 @@ available only when the binary service is present:
 - **Which limiter is acting** (`limitCauses`) — **done**, named on the chip
 - **The red reduction band** on the thermal dials — **done**, from `CFG_GET`
 - **Buzzer mirroring** — **done**, subsystem 5
+- **Flight-log download** — **done** (2026-10-02): list, export to the share sheet, delete one or all.
 
 Nothing on that list is absent any more, and **firmware update over BLE is
 done and verified on the aircraft** (2026-09-12).

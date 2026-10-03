@@ -84,8 +84,8 @@ readings that arrived in every frame and were never drawn — signal-state notes
 `SEM DADOS`, the throttle ceiling, the limiting card's outline, the fault
 explanation, the voltage source, BMS state, BMS temperature and cell spread —
 and calibration, now gated on the capability bit instead of appearing on a
-controller with no voltage sensor. Logs and the features that need new firmware
-follow in plans A1 and A3.
+controller with no voltage sensor. Flight logs are done (plan A1); the features that
+need new firmware follow in plan A3.
 
 A binary telemetry characteristic (roughly 200 B of CSV becomes ~40 B, and it
 can carry fields the sentence has no room for), plus a command characteristic
@@ -144,8 +144,12 @@ internet, and contradicts the brief that access is over Bluetooth.
 the app has been flown enough to trust, and retiring it is a later call made on
 evidence rather than a milestone to aim at.
 
-**Log download is out with it.** The `0x40–0x4F` opcode range and the
-`D4CF0006-…` characteristic stay reserved and unimplemented on both sides.
+**Log download is no longer out with it** (2026-10-02). It shipped over
+`CMD`/`RSP` with opcodes `0x40–0x43` (list, read by offset, delete, delete
+all), independent of the portal. A `D4CF0007`-style streaming characteristic was
+considered and rejected: the log partition is 128 KB, so one request per chunk
+is tens of seconds at worst, and every read is idempotent. `D4CF0006-…` stays
+the firmware-update characteristic; the rest of `0x44–0x4F` stays reserved.
 
 Kept here because the flash arithmetic still depends on it: retiring the portal
 frees 200–400 KB (ESPAsyncWebServer + ElegantOTA + the gzipped assets), which
