@@ -156,13 +156,33 @@ void main() {
 
     expect(call.cancel!.isCancelled, isTrue);
     call.onProgress!(2);
-    call.result.complete(const DownloadFailed());
+    call.result.complete(Downloaded(firmwareBytes()));
     await done;
     await settle();
 
     expect(notified, before);
+    // The guard after the await, not just _notify()'s: state stays frozen.
+    expect(checker.downloadState, FirmwareDownloadState.downloading);
+    expect(checker.image, isNull);
+    expect(checker.received, 0);
 
     // tearDown disposes again; make that a no-op for this test.
+    checker = FirmwareUpdateChecker(
+      feed: feed,
+      installedVersion: null,
+      controllerType: ControllerType.xag,
+    );
+  });
+
+  test('download() after dispose does nothing', () async {
+    await available();
+    checker.dispose();
+
+    await checker.download();
+
+    expect(feed.downloadCalls, isEmpty);
+    expect(checker.downloadState, FirmwareDownloadState.idle);
+
     checker = FirmwareUpdateChecker(
       feed: feed,
       installedVersion: null,

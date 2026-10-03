@@ -101,6 +101,7 @@ class FirmwareUpdateChecker extends ChangeNotifier {
         expectedSize: available.size,
         cancel: cancel,
         onProgress: (n) {
+          if (_disposed) return;
           _received = n;
           _notify();
         },
