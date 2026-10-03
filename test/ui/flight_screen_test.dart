@@ -35,6 +35,7 @@ TelemetryFrame frame({
   bool? hasTelemetry,
   bool? bmsConnected,
   bool? bmsConfigured,
+  BmsLinkState? bmsLinkState,
 }) =>
     TelemetryFrame(
       socCoulomb: 87,
@@ -66,6 +67,7 @@ TelemetryFrame frame({
       hasTelemetry: hasTelemetry,
       bmsConnected: bmsConnected,
       bmsConfigured: bmsConfigured,
+      bmsLinkState: bmsLinkState,
     );
 
 /// A wire-shaped Thermal group: motor 80–100 °C, ESC 70–95 °C.
@@ -803,6 +805,20 @@ void main() {
       )));
       await openDrawer(tester);
       expect(find.text('Sem conexão'), findsOneWidget);
+    });
+
+    testWidgets('the drawer says the BMS is connecting when it is',
+        (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(
+          bmsConfigured: true,
+          bmsConnected: false,
+          bmsLinkState: BmsLinkState.connecting,
+        ),
+        stale: false,
+      )));
+      await openDrawer(tester);
+      expect(find.text('Conectando'), findsOneWidget);
     });
   });
 }

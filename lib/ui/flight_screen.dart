@@ -837,6 +837,21 @@ class _SecondaryDataState extends State<_SecondaryData> {
   /// From the frame's flags. Null on the sentence path, which carries none.
   String get _bmsState {
     final f = frame;
+    // The link state tells connecting from disconnected, which the two flags
+    // below cannot; they remain for firmware that predates it.
+    switch (f?.bmsLinkState) {
+      case BmsLinkState.connected:
+        return 'Conectado';
+      case BmsLinkState.connecting:
+        return 'Conectando';
+      case BmsLinkState.idle:
+        return 'Ocioso';
+      case BmsLinkState.notConfigured:
+        return 'Não configurado';
+      case BmsLinkState.unknown:
+      case null:
+        break;
+    }
     if (f?.bmsConnected == true) return 'Conectado';
     if (f?.bmsConfigured == true) return 'Sem conexão';
     if (f?.bmsConfigured == false) return 'Não configurado';
