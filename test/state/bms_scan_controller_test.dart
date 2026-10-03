@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fly_app/protocol/bms_scan.dart';
 import 'package:fly_app/protocol/control_frame.dart';
@@ -186,4 +188,49 @@ void main() {
     expect(session.sent.where((r) => r.op == 0x2B), hasLength(1));
     expect(c.detailFor(c.results.first), isNull);
   });
+
+  test('a new scan stops an older detail fetch from writing', () async {
+    // The fetch of scan 1 is still waiting on its reply when scan 2 starts.
+    // Its answer describes a device from a scan that no longer exists, and
+    // start() has just cleared exactly that.
+    final session = _GatedDetailSession();
+    final editor = ConfigEditor(session);
+    final c = BmsScanController(editor,
+        pollInterval: const Duration(milliseconds: 10));
+
+    session.queueOk(); // AUTH
+    session.queueOk(); // BMS_SCAN_START
+    session.queueOk([2, 1, 1, 2, 3, 4, 5, 6, (-50) & 0xFF, 3]); // complete
+    await c.start(pin: '1234');
+    await pumpUntil(() => session.gate != null);
+    final old = c.results.first;
+
+    session.queueOk(); // second BMS_SCAN_START
+    await c.start();
+    session.gate!.complete(ControlOk(detailBytes([1, 2, 3, 4, 5, 6], 'OLD')));
+    await pumpUntil(() => false, maxTicks: 6);
+
+    expect(c.detailFor(old), isNull);
+    expect(session.detailRequests, 1, reason: 'the old loop did not go on');
+    c.dispose();
+  });
+}
+
+/// Holds the first detail request until the test releases it.
+class _GatedDetailSession extends FakeSession {
+  Completer<ControlResult>? gate;
+  int detailRequests = 0;
+
+  @override
+  Future<ControlResult> request({
+    required int op,
+    List<int> payload = const [],
+  }) {
+    if (op == 0x2B) {
+      detailRequests++;
+      sent.add((op: op, payload: payload));
+      return (gate ??= Completer<ControlResult>()).future;
+    }
+    return super.request(op: op, payload: payload);
+  }
 }

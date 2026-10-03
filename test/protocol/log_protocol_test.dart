@@ -153,5 +153,8 @@ void main() {
     expect(formatLogSize(900), '900 B');
     expect(formatLogSize(4100), '4,0 KB');
     expect(formatLogSize(131072), '128,0 KB');
+    expect(formatLogSize(1024 * 1024 - 1), '1024,0 KB');
+    expect(formatLogSize(1024 * 1024), '1,0 MB');
+    expect(formatLogSize(2000000), '1,9 MB');
   });
 }

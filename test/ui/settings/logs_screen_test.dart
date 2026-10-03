@@ -132,6 +132,27 @@ void main() {
     expect(shared.single.$2, [0x61, 0x2C, 0x62]);
   });
 
+  testWidgets('a share sheet that throws says so without the exception text',
+      (tester) async {
+    listSession.queueOk(page([('20261002_003.csv', 3)]));
+    readSession.queueOk(chunk(0, 3, [0x61, 0x2C, 0x62]));
+    await tester.pumpWidget(wrap(LogsScreen(
+      browser: browser,
+      editor: editor,
+      armed: false,
+      download: () => LogDownload(readSession, maxChunk: 100),
+      share: (name, bytes) async => throw Exception('PlatformException(7)'),
+    )));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('log-download-20261002_003.csv')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Não foi possível compartilhar o registro.'),
+        findsOneWidget);
+    expect(find.textContaining('PlatformException'), findsNothing);
+  });
+
   testWidgets('a download that fails says why', (tester) async {
     listSession.queueOk(page([('20261002_003.csv', 3)]));
     readSession.queue(const ControlDropped());

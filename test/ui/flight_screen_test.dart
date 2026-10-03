@@ -22,6 +22,7 @@ TelemetryFrame frame({
   double? powerKw = 1.5,
   ArmState armState = ArmState.armed,
   DisarmReason disarmReason = DisarmReason.none,
+  String? rawDisarmCode,
   int powerPct = 100,
   int? cellMinMv = 3712,
   Set<LimitCause>? limitCauses,
@@ -52,6 +53,7 @@ TelemetryFrame frame({
       escTempC: escTempC,
       armState: armState,
       disarmReason: disarmReason,
+      rawDisarmCode: rawDisarmCode,
       bmsMaxTempC: bmsMaxTempC,
       cellMinMv: cellMinMv,
       cellMaxMv: cellMaxMv,
@@ -768,6 +770,23 @@ void main() {
 
       expect(find.text('Desarmado: falha no acelerador (sem fio)'),
           findsOneWidget);
+    });
+
+    testWidgets('a code the app has no sentence for gets the portal fallback',
+        (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(
+          armState: ArmState.disarmed,
+          disarmReason: DisarmReason.unknown,
+          rawDisarmCode: 'NEW ERR',
+        ),
+        stale: false,
+      )));
+      await openDrawer(tester);
+
+      expect(find.byKey(const Key('fault-explanation')), findsOneWidget);
+      expect(find.text('Desarmado por falha'), findsOneWidget);
+      expect(find.text('Código: NEW ERR'), findsOneWidget);
     });
 
     testWidgets('a manual disarm explains nothing', (tester) async {

@@ -935,12 +935,17 @@ class _SecondaryDataState extends State<_SecondaryData> {
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              if (f != null &&
-                                  f.disarmCode != null &&
-                                  kFaultExplanations[f.disarmReason] != null)
+                              if (f != null && f.disarmCode != null)
                                 _FaultExplanation(
                                   key: const Key('fault-explanation'),
-                                  text: kFaultExplanations[f.disarmReason]!,
+                                  // A reason newer firmware sent has no
+                                  // sentence here; the portal falls back to
+                                  // the bare code rather than saying nothing.
+                                  text: kFaultExplanations[f.disarmReason] ??
+                                      (
+                                        title: 'Desarmado por falha',
+                                        detail: 'Código: ${f.disarmCode}',
+                                      ),
                                 ),
                               for (final (label, value) in rows)
                                 Padding(

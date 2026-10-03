@@ -180,8 +180,11 @@ String logDisplayName(String name) {
   return '${m[3]}/${m[2]}/${m[1]} · voo ${int.parse(m[4]!)}';
 }
 
-/// Bytes, then kilobytes with a Brazilian decimal comma.
+/// Bytes, then kilobytes, then megabytes, with a Brazilian decimal comma.
 String formatLogSize(int bytes) {
   if (bytes < 1024) return '$bytes B';
-  return '${(bytes / 1024).toStringAsFixed(1).replaceAll('.', ',')} KB';
+  if (bytes < 1024 * 1024) {
+    return '${(bytes / 1024).toStringAsFixed(1).replaceAll('.', ',')} KB';
+  }
+  return '${(bytes / (1024 * 1024)).toStringAsFixed(1).replaceAll('.', ',')} MB';
 }

@@ -37,6 +37,10 @@ class BmsScanController extends ChangeNotifier {
   final Map<String, BmsScanDetail> _details = {};
   bool _disposed = false;
 
+  /// Bumped by every [start]. A detail fetch that outlives its scan would
+  /// write a device from the old scan into the map the new one just cleared.
+  int _generation = 0;
+
   BmsScanStatus get status => _status;
 
   /// Sorted strongest first: the nearest device is the pilot's own, and a
@@ -67,6 +71,7 @@ class BmsScanController extends ChangeNotifier {
   static String _key(List<int> mac) => mac.join(':');
 
   Future<SaveOutcome> start({String? pin}) async {
+    _generation++;
     _refusal = null;
     _details.clear();
     _results = const [];
@@ -120,7 +125,7 @@ class BmsScanController extends ChangeNotifier {
     if (state.status != BmsScanStatus.scanning) {
       _stopTimer();
       if (state.status == BmsScanStatus.complete) {
-        unawaited(_fetchDetails(state.total));
+        unawaited(_fetchDetails(state.total, _generation));
       }
     }
     notifyListeners();
@@ -132,10 +137,10 @@ class BmsScanController extends ChangeNotifier {
   /// Stops at the first `ErrBadOp` (firmware without the opcode) and at the
   /// first silence: details are decoration, and a link that went quiet right
   /// after a scan does not need sixteen more timeouts queued on it.
-  Future<void> _fetchDetails(int count) async {
+  Future<void> _fetchDetails(int count, int generation) async {
     for (var i = 0; i < count && i < 16; i++) {
       final r = await _editor.readBmsScanDetail(i);
-      if (_disposed) return;
+      if (_disposed || generation != _generation) return;
       final d = r.detail;
       if (d == null) return;
       _details[_key(d.mac)] = d;

@@ -111,8 +111,8 @@ class _LogsScreenState extends State<LogsScreen> {
       case LogDownloaded(:final bytes):
         try {
           await widget.share(file.name, bytes);
-        } catch (e) {
-          if (mounted) _snack('Não foi possível compartilhar: $e');
+        } catch (_) {
+          if (mounted) _snack('Não foi possível compartilhar o registro.');
         }
       case LogDownloadRefusedArmed():
         _snack('Recusado: a aeronave está armada');
