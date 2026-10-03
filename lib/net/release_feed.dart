@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../state/app_update_policy.dart';
+import '../state/github_release.dart';
 
 /// The newest published release, as far as the network can tell.
 ///
@@ -33,8 +34,21 @@ class GitHubReleaseFeed implements ReleaseFeed {
   /// Covers the whole exchange, not just the connect.
   final Duration timeout;
 
+  /// The latest release of [repo] (`owner/name`).
+  GitHubReleaseFeed.forRepo(
+    String repo, {
+    Duration timeout = const Duration(seconds: 10),
+  }) : this(
+          endpoint: Uri.https('api.github.com', '/repos/$repo/releases/latest'),
+          timeout: timeout,
+        );
+
   @override
-  Future<String?> latestTag() async {
+  Future<String?> latestTag() async => (await latestRelease())?.tag;
+
+  /// The latest release with its assets, or null for **any** failure — the
+  /// same rule as [latestTag], which is now a view of this.
+  Future<GitHubRelease?> latestRelease() async {
     final client = HttpClient()..connectionTimeout = timeout;
     try {
       return await _fetch(client).timeout(timeout);
@@ -51,7 +65,7 @@ class GitHubReleaseFeed implements ReleaseFeed {
     }
   }
 
-  Future<String?> _fetch(HttpClient client) async {
+  Future<GitHubRelease?> _fetch(HttpClient client) async {
     final request = await client.getUrl(endpoint);
     request.headers
       ..set(HttpHeaders.acceptHeader, 'application/vnd.github+json')
@@ -62,19 +76,39 @@ class GitHubReleaseFeed implements ReleaseFeed {
       await response.drain<void>();
       return null;
     }
-    return parseLatestTag(await response.transform(utf8.decoder).join());
+    return parseRelease(await response.transform(utf8.decoder).join());
   }
 }
 
-/// `tag_name` from a `/releases/latest` body, or null when the body is not
-/// a JSON object carrying a string there. Format validation is the policy's
-/// job ([releaseBuildNumber]); this only reads.
-String? parseLatestTag(String body) {
+/// `tag_name` from a `/releases/latest` body, or null. Kept for the app
+/// update notice's tests; [parseRelease] is the parser.
+String? parseLatestTag(String body) => parseRelease(body)?.tag;
+
+/// A `/releases/latest` body, or null when it is not a JSON object carrying a
+/// string `tag_name`. Format validation is the policies' job; this only reads.
+///
+/// An asset without a string `name` or a positive integer `size` is
+/// **skipped**: one odd entry must not hide the image this controller needs,
+/// and an asset whose size is unknown cannot be checked after download.
+GitHubRelease? parseRelease(String body) {
   try {
     final decoded = jsonDecode(body);
     if (decoded is! Map<String, dynamic>) return null;
     final tag = decoded['tag_name'];
-    return tag is String ? tag : null;
+    if (tag is! String) return null;
+    final assets = <ReleaseAsset>[];
+    final raw = decoded['assets'];
+    if (raw is List) {
+      for (final entry in raw) {
+        if (entry is! Map<String, dynamic>) continue;
+        final name = entry['name'];
+        final size = entry['size'];
+        if (name is String && size is int && size > 0) {
+          assets.add(ReleaseAsset(name: name, size: size));
+        }
+      }
+    }
+    return GitHubRelease(tag: tag, assets: assets);
   } on FormatException {
     return null;
   }

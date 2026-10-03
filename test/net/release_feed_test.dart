@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fly_app/net/release_feed.dart';
+import 'package:fly_app/state/github_release.dart';
 
 // DO NOT call TestWidgetsFlutterBinding.ensureInitialized() or use
 // testWidgets in this file. The binding installs HttpOverrides that answer
@@ -19,7 +20,60 @@ const String realBody = '''
  "created_at":"2026-10-03T11:52:52Z","published_at":"2026-10-03T11:59:28Z"}
 ''';
 
+/// Fields copied from the real
+/// GET /repos/rodrigomedeirosbrazil/fly-controller/releases/latest on 2026-10-03.
+const String realFirmwareBody = '''
+{"tag_name":"2026-10-02.2","draft":false,"prerelease":false,
+ "assets":[
+  {"name":"firmware-tmotor-2026-10-02.2.bin","size":1605776,
+   "content_type":"application/octet-stream",
+   "digest":"sha256:c8c566bfe675a62c5e5358242de00871a52aa686007e3b3eecf75ceda19e05d2",
+   "browser_download_url":"https://github.com/rodrigomedeirosbrazil/fly-controller/releases/download/2026-10-02.2/firmware-tmotor-2026-10-02.2.bin"},
+  {"name":"firmware-xag-2026-10-02.2.bin","size":1594624,
+   "content_type":"application/octet-stream",
+   "digest":"sha256:7c1b6f44fdd227a60106631218b0c2746dc1a06670d7e6420c8e739bb250d120",
+   "browser_download_url":"https://github.com/rodrigomedeirosbrazil/fly-controller/releases/download/2026-10-02.2/firmware-xag-2026-10-02.2.bin"}]}
+''';
+
 void main() {
+  group('parseRelease', () {
+    test('reads the tag and both assets from a real firmware release', () {
+      final release = parseRelease(realFirmwareBody)!;
+
+      expect(release.tag, '2026-10-02.2');
+      expect(release.assets, const [
+        ReleaseAsset(name: 'firmware-tmotor-2026-10-02.2.bin', size: 1605776),
+        ReleaseAsset(name: 'firmware-xag-2026-10-02.2.bin', size: 1594624),
+      ]);
+    });
+
+    test('a release with no assets field has an empty list', () {
+      // The app's own release body carries none in the fields we copied.
+      expect(parseRelease(realBody)!.assets, isEmpty);
+    });
+
+    test('an asset without a name or an integer size is skipped, not fatal',
+        () {
+      final release = parseRelease('''
+        {"tag_name":"2026-10-02.2","assets":[
+          {"size":10},
+          {"name":"no-size.bin"},
+          {"name":"string-size.bin","size":"10"},
+          {"name":"zero.bin","size":0},
+          "not an object",
+          {"name":"ok.bin","size":10}]}
+      ''')!;
+
+      expect(release.assets, const [ReleaseAsset(name: 'ok.bin', size: 10)]);
+    });
+
+    test('no tag_name, a JSON array or non-JSON is null', () {
+      expect(parseRelease('{"assets":[]}'), isNull);
+      expect(parseRelease('[]'), isNull);
+      expect(parseRelease('<html></html>'), isNull);
+    });
+  });
+
   group('parseLatestTag', () {
     test('reads tag_name from a real response', () {
       expect(parseLatestTag(realBody), '2026-10-03.1');
@@ -92,6 +146,20 @@ void main() {
           'application/vnd.github+json');
     });
 
+    test('latestRelease returns the parsed release', () async {
+      answer(200, realFirmwareBody);
+
+      final release = await feed().latestRelease();
+
+      expect(release!.tag, '2026-10-02.2');
+      expect(release.assets, hasLength(2));
+    });
+
+    test('latestRelease is null on a 403, like latestTag', () async {
+      answer(403, '{"message":"API rate limit exceeded"}');
+      expect(await feed().latestRelease(), isNull);
+    });
+
     test('403 (rate limit) is null', () async {
       answer(403, '{"message":"API rate limit exceeded"}');
       expect(await feed().latestTag(), isNull);
@@ -128,5 +196,16 @@ void main() {
 
       expect(tag, isNull);
     });
+  });
+
+  test('forRepo points at that repository\'s latest release', () {
+    expect(
+      GitHubReleaseFeed.forRepo('rodrigomedeirosbrazil/fly-controller')
+          .endpoint,
+      Uri.parse(
+        'https://api.github.com/repos/'
+        'rodrigomedeirosbrazil/fly-controller/releases/latest',
+      ),
+    );
   });
 }
