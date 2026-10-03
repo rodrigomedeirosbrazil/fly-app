@@ -418,8 +418,8 @@ class ConfigEditor {
   ///
   /// Safe for exactly the two opcodes used here: `AUTH` with the same correct
   /// PIN and `CFG_SET` with the same payload both land on the same state. It
-  /// would not be safe for PIN_CHANGE or SESSION_RESET, which is why the session
-  /// itself never retries and each caller decides.
+  /// would not be safe for `PIN_CHANGE` or `SESSION_RESET`, which is why the
+  /// session itself never retries and each caller decides.
   Future<ControlResult> _retrying({
     required int op,
     required List<int> payload,
