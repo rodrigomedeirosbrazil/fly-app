@@ -1,9 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fly_app/audio/tone_player.dart';
 import 'package:fly_app/ble/fly_controller_link.dart';
+import 'package:fly_app/net/release_feed.dart';
 import 'package:fly_app/state/buzzer_mirror.dart';
 import 'package:fly_app/state/telemetry_repository.dart';
+import 'package:fly_app/state/update_checker.dart';
 import 'package:fly_app/ui/settings/bms_settings_screen.dart';
 import 'package:fly_app/ui/settings/power_settings_screen.dart';
 import 'package:fly_app/ui/settings/settings_navigation.dart';
@@ -36,6 +40,21 @@ class FakePlayer implements TonePlayer {
 
   @override
   Future<void> dispose() async {}
+}
+
+class GatedFeed implements ReleaseFeed {
+  final Completer<String?> gate = Completer<String?>();
+
+  @override
+  Future<String?> latestTag() => gate.future;
+}
+
+class NoStore implements TagStore {
+  @override
+  Future<String?> read() async => null;
+
+  @override
+  Future<void> write(String tag) async {}
 }
 
 void main() {
@@ -395,5 +414,46 @@ void main() {
 
     expect(tester.widget<IconButton>(download).onPressed, isNull,
         reason: 'the route must follow the repository, not a snapshot');
+  });
+
+  testWidgets('the version card follows the checker after the route is pushed',
+      (tester) async {
+    // The same trap as arming: a MaterialPageRoute builder runs once, so a
+    // value read from the checker inside it would freeze at "Verificando…".
+    final feed = GatedFeed();
+    final updates = UpdateChecker(
+      feed: feed,
+      store: NoStore(),
+      installedBuild: () async => 2026100301,
+      openUrl: (_) async {},
+      canOpenRelease: true,
+    );
+    addTearDown(updates.dispose);
+    unawaited(updates.check());
+
+    await tester.pumpWidget(MaterialApp(
+      home: Builder(
+        builder: (context) => Scaffold(
+          body: ElevatedButton(
+            onPressed: () => openSettings(context, repo, updates: updates),
+            child: const Text('abrir'),
+          ),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('abrir'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('VERSÃO DO APP'), 100);
+
+    expect(find.text('Verificando…'), findsOneWidget,
+        reason: 'the card had somewhere to change from');
+
+    feed.gate.complete('2026-10-04.1');
+    await tester.runAsync(() => pumpEventQueue());
+    await tester.pumpAndSettle();
+
+    expect(find.text('Nova versão 2026-10-04.1 — toque para baixar'),
+        findsOneWidget,
+        reason: 'the route must follow the checker, not a snapshot');
   });
 }

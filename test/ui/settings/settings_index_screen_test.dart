@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:fly_app/state/app_update_policy.dart';
 import 'package:fly_app/ui/settings/settings_index_screen.dart';
 
 Widget wrap(Widget child) => MaterialApp(home: child);
@@ -151,5 +152,97 @@ void main() {
     )));
 
     expect(find.text('Firmware desconhecido'), findsOneWidget);
+  });
+
+  group('app version card', () {
+    Future<void> pumpIndex(
+      WidgetTester tester, {
+      String? appVersion = '2026-10-03.1',
+      UpdateAvailability appUpdate = const UpdateUnknown(),
+      bool appUpdateChecking = false,
+      VoidCallback? onOpenRelease,
+    }) async {
+      await tester.pumpWidget(wrap(SettingsIndexScreen(
+        onOpenPower: () {},
+        onOpenThermal: () {},
+        onOpenBms: () {},
+        onOpenSystem: () {},
+        onOpenFirmware: () {},
+        onOpenLogs: () {},
+        appVersion: appVersion,
+        appUpdate: appUpdate,
+        appUpdateChecking: appUpdateChecking,
+        onOpenRelease: onOpenRelease,
+      )));
+      await tester.scrollUntilVisible(find.text('VERSÃO DO APP'), 100);
+      // scrollUntilVisible stops as soon as the first pixel of the label is
+      // built, which can still be below the viewport edge. Without this the
+      // taps below miss and "does nothing" passes for the wrong reason.
+      await tester.ensureVisible(find.text('VERSÃO DO APP'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('shows the installed version, up to date', (tester) async {
+      await pumpIndex(tester, appUpdate: const UpToDate());
+      expect(find.text('2026-10-03.1'), findsOneWidget);
+      expect(find.text('Atualizado'), findsOneWidget);
+    });
+
+    testWidgets('says it is checking while the network has not answered',
+        (tester) async {
+      await pumpIndex(tester, appUpdateChecking: true);
+      expect(find.text('Verificando…'), findsOneWidget);
+    });
+
+    testWidgets('says it could not check once the check is over',
+        (tester) async {
+      await pumpIndex(tester);
+      expect(find.text('Não foi possível verificar'), findsOneWidget);
+    });
+
+    testWidgets('a build without a number says so and checks nothing',
+        (tester) async {
+      await pumpIndex(tester, appVersion: null, appUpdateChecking: true);
+      expect(find.text('Desconhecida'), findsOneWidget);
+      expect(find.text('Build sem número de versão'), findsOneWidget);
+    });
+
+    testWidgets('an available release opens where it can be installed',
+        (tester) async {
+      var opened = 0;
+      await pumpIndex(
+        tester,
+        appUpdate: const UpdateAvailable('2026-10-04.1'),
+        onOpenRelease: () => opened++,
+      );
+
+      expect(find.text('Nova versão 2026-10-04.1 — toque para baixar'),
+          findsOneWidget);
+      await tester.tap(find.text('VERSÃO DO APP'));
+      await tester.pumpAndSettle();
+      expect(opened, 1);
+    });
+
+    testWidgets('where it cannot be installed, the card says how',
+        (tester) async {
+      await pumpIndex(
+        tester,
+        appUpdate: const UpdateAvailable('2026-10-04.1'),
+      );
+      expect(find.text('Nova versão 2026-10-04.1 — reinstale pelo Mac'),
+          findsOneWidget);
+    });
+
+    testWidgets('up to date, tapping does nothing', (tester) async {
+      var opened = 0;
+      await pumpIndex(
+        tester,
+        appUpdate: const UpToDate(),
+        onOpenRelease: () => opened++,
+      );
+      await tester.tap(find.text('VERSÃO DO APP'));
+      await tester.pumpAndSettle();
+      expect(opened, 0);
+    });
   });
 }

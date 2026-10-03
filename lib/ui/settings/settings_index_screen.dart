@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../state/app_update_policy.dart';
+import '../update_notice.dart';
+
 class SettingsIndexScreen extends StatelessWidget {
   const SettingsIndexScreen({
     super.key,
@@ -10,11 +13,27 @@ class SettingsIndexScreen extends StatelessWidget {
     required this.onOpenFirmware,
     required this.onOpenLogs,
     this.firmwareVersion,
+    this.appVersion,
+    this.appUpdate = const UpdateUnknown(),
+    this.appUpdateChecking = false,
+    this.onOpenRelease,
   });
 
   /// The controller's firmware version and type, as one line. Null on the
   /// `$XCTOD` path, where INFO was never read.
   final String? firmwareVersion;
+
+  /// The installed app version in tag form, `2026-10-03.1`. Null for a build
+  /// that carries no usable number.
+  final String? appVersion;
+
+  final UpdateAvailability appUpdate;
+
+  /// True while GitHub has not answered yet.
+  final bool appUpdateChecking;
+
+  /// Opens the release page. Null where a release cannot be installed (iOS).
+  final VoidCallback? onOpenRelease;
 
   final VoidCallback onOpenPower;
   final VoidCallback onOpenThermal;
@@ -102,9 +121,31 @@ class SettingsIndexScreen extends StatelessWidget {
             description: 'Enviar novo firmware para o controlador.',
             onTap: onOpenFirmware,
           ),
+          const SizedBox(height: 12),
+          // Always present, whatever the state: fixed presence, varying
+          // state, the rule the status chips follow. Labelled "VERSÃO DO
+          // APP" so it does not read as a second "Atualizar", which is the
+          // firmware.
+          _SettingsCard(
+            label: 'VERSÃO DO APP',
+            title: appVersion ?? 'Desconhecida',
+            description: _appUpdateLine(),
+            onTap: appUpdate is UpdateAvailable ? onOpenRelease : null,
+          ),
         ],
       ),
     );
+  }
+
+  String _appUpdateLine() {
+    if (appVersion == null) return 'Build sem número de versão';
+    return switch (appUpdate) {
+      UpdateAvailable(:final tag) =>
+        updateNoticeText(tag, canOpen: onOpenRelease != null),
+      UpToDate() => 'Atualizado',
+      UpdateUnknown() =>
+        appUpdateChecking ? 'Verificando…' : 'Não foi possível verificar',
+    };
   }
 }
 

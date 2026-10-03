@@ -10,7 +10,9 @@ import '../../state/dfu_session.dart';
 import '../../state/log_browser.dart';
 import '../../state/log_download.dart';
 import '../../state/remote_pairing_controller.dart';
+import '../../state/app_update_policy.dart';
 import '../../state/telemetry_repository.dart';
+import '../../state/update_checker.dart';
 import 'bms_settings_screen.dart';
 import 'firmware_screen.dart';
 import 'logs_screen.dart';
@@ -32,13 +34,28 @@ import 'thermal_settings_screen.dart';
 /// inside it would be a snapshot — which is how arming the aircraft with the
 /// settings screen open failed to disable saving. It is the same trap
 /// `CLAUDE.md` documents for the secondary-data drawer.
-void openSettings(BuildContext context, TelemetryRepository repo) {
+///
+/// [updates] is optional only so tests that do not care about the version
+/// card need not build a checker; `app.dart` always passes it.
+void openSettings(
+  BuildContext context,
+  TelemetryRepository repo, {
+  UpdateChecker? updates,
+}) {
   Navigator.of(context).push(
     MaterialPageRoute<void>(
       builder: (indexContext) => ListenableBuilder(
-        listenable: repo,
+        // Both: the version card must follow the checker for the same reason
+        // the cards follow the repository.
+        listenable: Listenable.merge([repo, ?updates]),
         builder: (indexContext, _) => SettingsIndexScreen(
           firmwareVersion: repo.firmwareVersion,
+          appVersion: updates?.installedLabel,
+          appUpdate: updates?.availability ?? const UpdateUnknown(),
+          appUpdateChecking: updates?.checking ?? false,
+          onOpenRelease: updates != null && updates.canOpenRelease
+              ? updates.openRelease
+              : null,
           onOpenPower: () => _push(
             indexContext,
             repo,
