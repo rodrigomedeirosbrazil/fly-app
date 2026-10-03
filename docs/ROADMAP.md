@@ -69,11 +69,6 @@ Latency is unmeasured and will be audible: a beep travels a 1 Hz firmware
 loop, a BLE notification, a decode and an audio session before it sounds. Fine
 for a warning, useless for anything the pilot times.
 
-What phase 2 still does not send is `PIN_CHANGE` (`0x28`) and the two Tmotor
-direction opcodes — none of them telemetry, and
-`PIN_CHANGE` alone deserves care because it is the one write that is **not
-idempotent**, so it cannot use the retry every other write here depends on.
-
 `SET_TIME` (`0x27`) is sent automatically on every connection, with no PIN —
 which depends on fly-controller having taken it off the auth list. Older
 firmware answers `ErrAuth` and the app stays silent.
@@ -81,9 +76,8 @@ firmware answers `ErrAuth` and the app stays silent.
 This is the first piece of the web portal with a real alternative, and
 therefore the first step toward phase 4.
 
-**Portal parity, first slice, is done** (2026-10-02), and supersedes the
-paragraph above about what phase 2 does not send. The PIN can be changed and
-the flight clock reset from Sistema; `PIN_CHANGE` is sent once and a timeout
+**Portal parity, first slice, is done** (2026-10-02). The PIN can be changed
+and the flight clock reset from Sistema; `PIN_CHANGE` is sent once and a timeout
 reads "the PIN may have changed", because it cannot be retried. The Tmotor
 direction opcodes stay unsent, dropped by the owner. The rest is display: the
 readings that arrived in every frame and were never drawn — signal-state notes,
