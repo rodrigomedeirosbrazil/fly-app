@@ -76,33 +76,30 @@ class UpdateChecker extends ChangeNotifier {
     _checking = true;
     _notify();
 
-    _installed = await _quietly(_installedBuild);
-    if (installedLabel == null) {
+    try {
+      _installed = await _quietly(_installedBuild);
       // A build with no version number cannot be compared to anything, so
       // the network is not asked.
+      if (installedLabel == null) return;
+
+      final cached = await _quietly(_store.read);
+      if (cached != null && releaseBuildNumber(cached) != null) {
+        _latestTag = cached;
+        _notify();
+      }
+
+      final fresh = await _quietly(_feed.latestTag);
+      if (fresh != null && releaseBuildNumber(fresh) != null) {
+        _latestTag = fresh;
+        await _quietly(() => _store.write(fresh));
+      }
+      // A failed refresh leaves a cached tag in place: it is still an answer.
+    } finally {
+      // An Error (a bug, not a failure) still propagates, but must not leave
+      // the settings row on "Verificando…" for good.
       _checking = false;
       _notify();
-      return;
     }
-
-    final cached = await _quietly(_store.read);
-    if (cached != null && releaseBuildNumber(cached) != null) {
-      _latestTag = cached;
-      _notify();
-    }
-
-    final fresh = await _quietly(_feed.latestTag);
-    if (fresh != null && releaseBuildNumber(fresh) != null) {
-      _latestTag = fresh;
-      await _quietly(() async {
-        await _store.write(fresh);
-        return null;
-      });
-    }
-    // A failed refresh leaves a cached tag in place: it is still an answer.
-
-    _checking = false;
-    _notify();
   }
 
   /// Opens the page of the available release, on platforms that can install

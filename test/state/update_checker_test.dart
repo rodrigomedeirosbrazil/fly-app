@@ -25,9 +25,11 @@ class MemoryStore implements TagStore {
 
   String? value;
   bool failing = false;
+  bool broken = false;
 
   @override
   Future<String?> read() async {
+    if (broken) throw StateError('a bug, not a failure');
     if (failing) throw PlatformException(code: 'prefs');
     return value;
   }
@@ -172,6 +174,19 @@ void main() {
     final c = checker();
     await c.check();
     expect(c.availability, const UpdateAvailable('2026-10-04.1'));
+  });
+
+  test('a programming error propagates but never leaves checking on',
+      () async {
+    store.broken = true;
+    final c = checker();
+    var notified = 0;
+    c.addListener(() => notified++);
+
+    await expectLater(c.check(), throwsStateError);
+
+    expect(c.checking, isFalse);
+    expect(notified, 2); // started, finished
   });
 
   test('notifies listeners as the answer changes', () async {
