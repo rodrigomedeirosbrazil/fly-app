@@ -40,10 +40,14 @@ import 'thermal_settings_screen.dart';
 ///
 /// [updates] is optional only so tests that do not care about the version
 /// card need not build a checker; `app.dart` always passes it.
+///
+/// [firmwareFeed] defaults to fly-controller's GitHub releases; tests inject a
+/// fake so navigation never builds a real HTTP client.
 void openSettings(
   BuildContext context,
   TelemetryRepository repo, {
   UpdateChecker? updates,
+  FirmwareFeed? firmwareFeed,
 }) {
   Navigator.of(context).push(
     MaterialPageRoute<void>(
@@ -86,7 +90,7 @@ void openSettings(
           ),
           onOpenBms: () => _pushBms(indexContext, repo),
           onOpenSystem: () => _pushSystem(indexContext, repo),
-          onOpenFirmware: () => _pushFirmware(indexContext, repo),
+          onOpenFirmware: () => _pushFirmware(indexContext, repo, firmwareFeed),
           onOpenLogs: () => _pushLogs(indexContext, repo),
         ),
       ),
@@ -277,16 +281,23 @@ class _LogsScreenWrapperState extends State<_LogsScreenWrapper> {
   }
 }
 
-void _pushFirmware(BuildContext context, TelemetryRepository repo) {
+void _pushFirmware(
+  BuildContext context,
+  TelemetryRepository repo,
+  FirmwareFeed? feed,
+) {
   Navigator.of(context).push(
-    MaterialPageRoute<void>(builder: (_) => _FirmwareScreenWrapper(repo: repo)),
+    MaterialPageRoute<void>(
+      builder: (_) => _FirmwareScreenWrapper(repo: repo, feed: feed),
+    ),
   );
 }
 
 class _FirmwareScreenWrapper extends StatefulWidget {
-  const _FirmwareScreenWrapper({required this.repo});
+  const _FirmwareScreenWrapper({required this.repo, this.feed});
 
   final TelemetryRepository repo;
+  final FirmwareFeed? feed;
 
   @override
   State<_FirmwareScreenWrapper> createState() => _FirmwareScreenWrapperState();
@@ -307,7 +318,7 @@ class _FirmwareScreenWrapperState extends State<_FirmwareScreenWrapper> {
       _session = DfuSession(_NoOpTransport());
     }
     _updates = FirmwareUpdateChecker(
-      feed: GitHubReleaseFeed.forRepo(kFirmwareRepo),
+      feed: widget.feed ?? GitHubReleaseFeed.forRepo(kFirmwareRepo),
       installedVersion: widget.repo.installedFirmwareVersion,
       controllerType: widget.repo.controllerType,
     );

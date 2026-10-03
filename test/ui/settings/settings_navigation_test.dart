@@ -14,6 +14,7 @@ import 'package:fly_app/ui/settings/settings_navigation.dart';
 import 'package:fly_app/ui/settings/system_settings_screen.dart';
 import 'package:fly_app/ui/settings/thermal_settings_screen.dart';
 
+import '../../state/fake_firmware_feed.dart';
 import '../../state/fake_link.dart';
 
 class FakePlayer implements TonePlayer {
@@ -70,12 +71,16 @@ void main() {
   tearDown(() => repo.dispose());
 
   /// Pumps a host with one button that opens settings, the way app.dart does.
-  Future<void> pumpHost(WidgetTester tester) async {
+  Future<void> pumpHost(
+    WidgetTester tester, {
+    FirmwareFeed? firmwareFeed,
+  }) async {
     await tester.pumpWidget(MaterialApp(
       home: Builder(
         builder: (context) => Scaffold(
           body: ElevatedButton(
-            onPressed: () => openSettings(context, repo),
+            onPressed: () =>
+                openSettings(context, repo, firmwareFeed: firmwareFeed),
             child: const Text('abrir'),
           ),
         ),
@@ -325,6 +330,28 @@ void main() {
     expect(find.textContaining('Não é possível enviar enquanto a aeronave está armada'),
         findsOneWidget,
         reason: 'the route must follow the repository, not a snapshot');
+  });
+
+  testWidgets('the Firmware screen checks the injected feed', (tester) async {
+    final feed = FakeFirmwareFeed();
+    link.emit(LinkStatus.connected);
+    link.feedBinary(binarySample(armed: false));
+    await tester.pumpAndSettle();
+    // Let the clock sync's reply (a Timer.run in FakeLink) land before the
+    // link is disposed, or it fires into a closed stream after the test.
+    await tester.runAsync(() => pumpEventQueue());
+    await tester.pumpAndSettle();
+
+    await pumpHost(tester, firmwareFeed: feed);
+    await tester.tap(find.text('abrir'));
+    await tester.pumpAndSettle();
+
+    await tester.scrollUntilVisible(find.text('Atualizar'), 100);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Atualizar'));
+    await tester.pumpAndSettle();
+
+    expect(feed.releaseCalls, hasLength(1));
   });
 
   testWidgets('every screen is handed the connection\'s own editor',
