@@ -502,4 +502,48 @@ void main() {
       );
     });
   });
+
+  group('log deletes', () {
+    test('deleteLog authenticates and sends the name', () async {
+      final s = FakeSession()
+        ..queueOk() // AUTH
+        ..queueOk(); // LOG_DELETE
+      final editor = ConfigEditor(s);
+
+      expect(await editor.deleteLog('a.csv', pin: '1234'), isA<SaveOk>());
+      expect(s.sent[1].op, 0x42);
+      expect(s.sent[1].payload, [5, ...'a.csv'.codeUnits]);
+    });
+
+    test('a file already gone counts as deleted', () async {
+      // A retried delete whose first reply was lost finds nothing: that is
+      // the outcome the pilot asked for.
+      final s = FakeSession()
+        ..queueOk() // AUTH
+        ..queue(const ControlRefused(ControlStatus.errNotFound));
+      final editor = ConfigEditor(s);
+
+      expect(await editor.deleteLog('a.csv', pin: '1234'), isA<SaveOk>());
+    });
+
+    test('deleteAllLogs sends 0x43 and is retried on a timeout', () async {
+      final s = FakeSession()
+        ..queueOk() // AUTH
+        ..queue(const ControlTimeout())
+        ..queueOk();
+      final editor = ConfigEditor(s);
+
+      expect(await editor.deleteAllLogs(pin: '1234'), isA<SaveOk>());
+      expect(s.sent.where((r) => r.op == 0x43), hasLength(2));
+    });
+
+    test('ErrNotFound elsewhere is still a failure', () async {
+      final s = FakeSession()
+        ..queueOk() // AUTH
+        ..queue(const ControlRefused(ControlStatus.errNotFound));
+      final editor = ConfigEditor(s);
+
+      expect(await editor.forgetRemote(pin: '1234'), isA<SaveFailed>());
+    });
+  });
 }

@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import '../protocol/bms_scan.dart';
 import '../protocol/config_groups.dart';
 import '../protocol/control_frame.dart';
+import '../protocol/log_protocol.dart';
 import '../protocol/pin_change.dart';
 import 'control_session.dart';
 
@@ -262,6 +263,24 @@ class ConfigEditor {
     };
   }
 
+  /// Deletes one log file. Idempotent, so retried on a timeout — and a file
+  /// already gone is success, because that is how a retry looks when the
+  /// first reply was the thing lost.
+  Future<SaveOutcome> deleteLog(String name, {String? pin}) =>
+      _authenticatedAction(
+        op: kOpLogDelete,
+        payload: encodeLogDelete(name),
+        pin: pin,
+        notFoundIsOk: true,
+      );
+
+  /// Deletes every log file. Idempotent, so retried on a timeout.
+  Future<SaveOutcome> deleteAllLogs({String? pin}) => _authenticatedAction(
+        op: kOpLogDeleteAll,
+        payload: const [],
+        pin: pin,
+      );
+
   /// The shared body of every authenticated action.
   ///
   /// Identical refusal mapping to `_save`, deliberately: armed reported
@@ -273,6 +292,7 @@ class ConfigEditor {
     required List<int> payload,
     required String? pin,
     bool retry = true,
+    bool notFoundIsOk = false,
   }) async {
     if (!_authenticated) {
       if (pin == null) return const SaveNeedsPin();
@@ -292,6 +312,7 @@ class ConfigEditor {
           ControlStatus.errBadArg => const SaveRejectedByController(),
           ControlStatus.errBadOp => const SaveUnsupported(),
           ControlStatus.errBusy => const SaveBusy(),
+          ControlStatus.errNotFound when notFoundIsOk => const SaveOk(),
           _ => const SaveFailed(),
         },
       ControlTimeout() => const SaveFailed(SaveFailure.noAnswer),
