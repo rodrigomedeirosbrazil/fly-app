@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fly_app/state/app_update_policy.dart';
 import 'package:fly_app/ui/settings/settings_index_screen.dart';
@@ -243,6 +244,35 @@ void main() {
       await tester.tap(find.text('VERSÃO DO APP'));
       await tester.pumpAndSettle();
       expect(opened, 0);
+    });
+
+    testWidgets('a notice that cannot be opened is neither cut off nor dimmed',
+        (tester) async {
+      // iOS: no callback, so the card is inert -- but the notice is the one
+      // thing on it worth reading, and "reinstale pelo Mac" is its tail.
+      //
+      // 480 wide, not a phone's 320-390: flutter_test renders in Ahem, where
+      // every glyph is a full 14px square, so this 45-character line is
+      // ~630px and word wrap needs three lines at any phone width. Real
+      // Roboto is about half that, so on a 320px phone the notice wraps to
+      // two lines for real. At 480 Ahem reproduces that same two-line fit,
+      // and at one line it still overflows -- which is what is pinned.
+      tester.view.physicalSize = const Size(480, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      await pumpIndex(
+        tester,
+        appUpdate: const UpdateAvailable('2026-10-04.1'),
+      );
+
+      final notice = find.text('Nova versão 2026-10-04.1 — reinstale pelo Mac');
+      expect(tester.renderObject<RenderParagraph>(notice).didExceedMaxLines,
+          isFalse,
+          reason: 'the actionable tail must not be hidden by an ellipsis');
+      expect(tester.widget<Text>(notice).style!.color,
+          Theme.of(tester.element(notice)).colorScheme.onSurface,
+          reason: 'a notice is not a disabled card');
     });
   });
 }

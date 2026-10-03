@@ -131,6 +131,11 @@ class SettingsIndexScreen extends StatelessWidget {
             title: appVersion ?? 'Desconhecida',
             description: _appUpdateLine(),
             onTap: appUpdate is UpdateAvailable ? onOpenRelease : null,
+            // A notice is never dimmed, on iOS too where it cannot be
+            // tapped, and its tail ("reinstale pelo Mac") is the actionable
+            // part, so it gets a second line rather than an ellipsis.
+            descriptionMaxLines: 2,
+            dimmed: appUpdate is! UpdateAvailable,
           ),
         ],
       ),
@@ -155,17 +160,23 @@ class _SettingsCard extends StatelessWidget {
     required this.title,
     required this.description,
     required this.onTap,
+    this.descriptionMaxLines = 1,
+    this.dimmed,
   });
 
   final String label;
   final String title;
   final String description;
   final VoidCallback? onTap;
+  final int descriptionMaxLines;
+
+  /// Null keeps the default: dimmed exactly when there is nothing to tap.
+  final bool? dimmed;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final enabled = onTap != null;
+    final enabled = !(dimmed ?? onTap == null);
     final textColor = enabled
         ? theme.colorScheme.onSurface
         : theme.colorScheme.onSurfaceVariant;
@@ -202,7 +213,7 @@ class _SettingsCard extends StatelessWidget {
             const SizedBox(height: 8),
             Text(
               description,
-              maxLines: 1,
+              maxLines: descriptionMaxLines,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 14,
