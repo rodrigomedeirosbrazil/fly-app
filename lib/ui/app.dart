@@ -28,6 +28,7 @@ class _FlyAppState extends State<FlyApp> {
     // the Mac instead of linking to a file the phone cannot use.
     canOpenRelease: defaultTargetPlatform == TargetPlatform.android,
   );
+  late final Listenable _state = Listenable.merge([_repo, _updates]);
 
   @override
   void initState() {
@@ -132,7 +133,7 @@ class _FlyAppState extends State<FlyApp> {
         ),
       ),
       home: AnimatedBuilder(
-        animation: Listenable.merge([_repo, _updates]),
+        animation: _state,
         builder: (context, _) {
           final frame = _repo.frame;
           if (frame == null && !_repo.isStale) {
