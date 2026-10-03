@@ -71,6 +71,9 @@ void main() {
   tearDown(() => repo.dispose());
 
   /// Pumps a host with one button that opens settings, the way app.dart does.
+  ///
+  /// Always hands settings a feed -- a fake unless the test supplies one -- so
+  /// no navigation test can reach the real GitHub client by tapping Firmware.
   Future<void> pumpHost(
     WidgetTester tester, {
     FirmwareFeed? firmwareFeed,
@@ -79,8 +82,11 @@ void main() {
       home: Builder(
         builder: (context) => Scaffold(
           body: ElevatedButton(
-            onPressed: () =>
-                openSettings(context, repo, firmwareFeed: firmwareFeed),
+            onPressed: () => openSettings(
+              context,
+              repo,
+              firmwareFeed: firmwareFeed ?? FakeFirmwareFeed(),
+            ),
             child: const Text('abrir'),
           ),
         ),
@@ -462,7 +468,12 @@ void main() {
       home: Builder(
         builder: (context) => Scaffold(
           body: ElevatedButton(
-            onPressed: () => openSettings(context, repo, updates: updates),
+            onPressed: () => openSettings(
+              context,
+              repo,
+              updates: updates,
+              firmwareFeed: FakeFirmwareFeed(),
+            ),
             child: const Text('abrir'),
           ),
         ),
