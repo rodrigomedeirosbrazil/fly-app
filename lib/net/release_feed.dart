@@ -100,6 +100,7 @@ class GitHubReleaseFeed implements ReleaseFeed, FirmwareFeed {
     void Function(int received)? onProgress,
     DownloadCancel? cancel,
   }) async {
+    if (cancel?.isCancelled ?? false) return const DownloadFailed();
     final client = HttpClient()..connectionTimeout = timeout;
     // Force-closing the client tears down the socket, which surfaces in the
     // loop below as an IOException — one exit path for both.
@@ -109,7 +110,8 @@ class GitHubReleaseFeed implements ReleaseFeed, FirmwareFeed {
       request.headers.set(HttpHeaders.userAgentHeader, 'aerovolt-app');
       final response = await request.close().timeout(timeout);
       if (response.statusCode != HttpStatus.ok) {
-        await response.drain<void>();
+        // Bounded like the body: a refusal whose body stalls must not hang.
+        await response.drain<void>().timeout(idleTimeout);
         return const DownloadFailed();
       }
       final bytes = BytesBuilder(copy: false);

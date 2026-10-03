@@ -313,6 +313,56 @@ void main() {
           isA<DownloadFailed>());
     });
 
+    test('a non-200 whose body stalls is a failure, not a hang', () async {
+      handler = (request) {
+        request.response
+          ..bufferOutput = false
+          ..statusCode = 404
+          ..add([1, 2, 3]);
+        request.response.flush(); // then never another byte, never close
+      };
+      final watch = Stopwatch()..start();
+
+      final result = await feed(idle: const Duration(milliseconds: 200))
+          .download(url('/a'), expectedSize: 10);
+
+      expect(result, isA<DownloadFailed>());
+      expect(watch.elapsed, lessThan(const Duration(seconds: 2)));
+    });
+
+    test('a token cancelled before the call is honoured', () async {
+      handler = (request) => request.response
+        ..add(payload)
+        ..close();
+      final cancel = DownloadCancel()..cancel();
+
+      final result = await feed()
+          .download(url('/a'), expectedSize: payload.length, cancel: cancel);
+
+      expect(result, isA<DownloadFailed>());
+    });
+
+    test('the limit is on silence, not on the total', () async {
+      // 6 chunks 100 ms apart: 500 ms in all, past the 300 ms idle timeout,
+      // but never more than 100 ms without a byte.
+      const chunk = 500;
+      handler = (request) async {
+        request.response.bufferOutput = false;
+        for (var i = 0; i < 6; i++) {
+          request.response.add(payload.sublist(i * chunk, (i + 1) * chunk));
+          await request.response.flush();
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+        await request.response.close();
+      };
+
+      final result = await feed(idle: const Duration(milliseconds: 300))
+          .download(url('/a'), expectedSize: 6 * chunk);
+
+      expect(result, isA<Downloaded>());
+      expect((result as Downloaded).bytes, payload.sublist(0, 6 * chunk));
+    });
+
     test('a refused connection is a failure', () async {
       final port = server.port;
       await server.close(force: true);
