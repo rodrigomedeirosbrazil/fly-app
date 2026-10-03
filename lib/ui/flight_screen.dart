@@ -129,10 +129,20 @@ class _FlightScreenState extends State<FlightScreen> {
 
 /// Rounded surface every band sits on.
 class _Card extends StatelessWidget {
-  const _Card({required this.child, this.padding = const EdgeInsets.all(10)});
+  const _Card({
+    super.key,
+    required this.child,
+    this.padding = const EdgeInsets.all(10),
+    this.highlight = false,
+  });
 
   final Widget child;
   final EdgeInsets padding;
+
+  /// Outlined in red while this card's reading is what limits power. The
+  /// border is always drawn — transparent when idle — so highlighting moves
+  /// nothing.
+  final bool highlight;
 
   @override
   Widget build(BuildContext context) {
@@ -141,6 +151,12 @@ class _Card extends StatelessWidget {
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surfaceContainer,
         borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          width: 2,
+          color: highlight
+              ? Theme.of(context).colorScheme.error
+              : Colors.transparent,
+        ),
       ),
       child: child,
     );
@@ -210,6 +226,15 @@ class _StatusRow extends StatelessWidget {
           ),
           const SizedBox(width: 10),
           _Chip(text: text, color: color),
+          // hasTelemetry is the controller saying none of its own readings
+          // arrived — no ESC over CAN, no sensors. Null is the sentence path,
+          // which cannot say, and shows nothing.
+          if (f != null && f.hasTelemetry == false) ...[
+            const SizedBox(width: 6),
+            Flexible(
+              child: _Chip(text: 'SEM DADOS', color: theme.colorScheme.outline),
+            ),
+          ],
           const Spacer(),
           if (f?.sessionSec != null) ...[
             // Flexible for the same reason the chip beside it is: this row is
@@ -338,7 +363,10 @@ class _BatteryCardState extends State<_BatteryCard> {
       }
     }
 
+    final limiting = _limiting(f, LimitCause.battery);
     return _Card(
+      key: limiting ? const Key('limiting-battery') : null,
+      highlight: limiting,
       child: Column(
         children: [
           Expanded(
@@ -519,6 +547,10 @@ class _InstrumentRow extends StatelessWidget {
           if (f?.powerKw != null) const SizedBox(width: 8),
           Expanded(
             child: _Card(
+              key: _limiting(f, LimitCause.motorTemp)
+                  ? const Key('limiting-motor')
+                  : null,
+              highlight: _limiting(f, LimitCause.motorTemp),
               child: Dial(
                 value: f?.motorTempC,
                 max: 140,
@@ -538,6 +570,10 @@ class _InstrumentRow extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(
             child: _Card(
+              key: _limiting(f, LimitCause.escTemp)
+                  ? const Key('limiting-esc')
+                  : null,
+              highlight: _limiting(f, LimitCause.escTemp),
               child: Dial(
                 value: f?.escTempC,
                 max: 140,
@@ -643,13 +679,31 @@ class _ThrottleCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 6),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(5),
-            child: LinearProgressIndicator(
-              value: pct / 100,
-              minHeight: 10,
-              color: theme.colorScheme.secondary,
-              backgroundColor: theme.colorScheme.surfaceContainerHighest,
+          // The ceiling is where the throttle stops mattering: past powerPct
+          // the controller delivers no more. The portal draws the same tick.
+          LayoutBuilder(
+            builder: (context, constraints) => Stack(
+              clipBehavior: Clip.none,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(5),
+                  child: LinearProgressIndicator(
+                    value: pct / 100,
+                    minHeight: 10,
+                    color: theme.colorScheme.secondary,
+                    backgroundColor: theme.colorScheme.surfaceContainerHighest,
+                  ),
+                ),
+                if (f != null && f.isLimited)
+                  Positioned(
+                    key: const Key('throttle-ceiling'),
+                    left: (constraints.maxWidth * f.powerPct / 100)
+                        .clamp(0.0, constraints.maxWidth - 2),
+                    top: -3,
+                    bottom: -3,
+                    child: Container(width: 2, color: theme.colorScheme.error),
+                  ),
+              ],
             ),
           ),
         ],
@@ -1056,3 +1110,6 @@ class _MuteControl extends StatelessWidget {
     );
   }
 }
+
+bool _limiting(TelemetryFrame? f, LimitCause cause) =>
+    f?.limitCauses?.contains(cause) ?? false;

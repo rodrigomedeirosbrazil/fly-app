@@ -507,6 +507,47 @@ void main() {
     });
   });
 
+  group('portal parity on the flight screen', () {
+    testWidgets('a controller with no telemetry says SEM DADOS',
+        (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(hasTelemetry: false),
+        stale: false,
+      )));
+      expect(find.text('SEM DADOS'), findsOneWidget);
+    });
+
+    testWidgets('the sentence path, which cannot say, shows no SEM DADOS',
+        (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
+      expect(find.text('SEM DADOS'), findsNothing);
+    });
+
+    testWidgets('a limited frame marks the ceiling on the throttle bar',
+        (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(powerPct: 60, limitCauses: {LimitCause.motorTemp}),
+        stale: false,
+      )));
+      expect(find.byKey(const Key('throttle-ceiling')), findsOneWidget);
+    });
+
+    testWidgets('an unlimited frame has no ceiling marker', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
+      expect(find.byKey(const Key('throttle-ceiling')), findsNothing);
+    });
+
+    testWidgets('the card that is limiting is outlined', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(powerPct: 60, limitCauses: {LimitCause.motorTemp}),
+        stale: false,
+      )));
+      expect(find.byKey(const Key('limiting-motor')), findsOneWidget);
+      expect(find.byKey(const Key('limiting-esc')), findsNothing);
+      expect(find.byKey(const Key('limiting-battery')), findsNothing);
+    });
+  });
+
   group('the flight clock', () {
     testWidgets('renders as mm:ss in the space the status row reserves',
         (tester) async {
