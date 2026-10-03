@@ -38,8 +38,13 @@ commit and the tag follows it:
 
 ```bash
 # tag 2026-10-04.1  →  version: 2026.10.4+2026100401
-git commit -am "build: release 2026-10-04.1" && git tag 2026-10-04.1 && git push --follow-tags
+git commit -am "build: release 2026-10-04.1"
+git tag 2026-10-04.1 && git push origin main 2026-10-04.1
 ```
+
+Push the tag by name. `--follow-tags` pushes only annotated tags, and
+`git tag <name>` makes a lightweight one, so it would leave the tag behind and
+the workflow would never run.
 
 The workflow refuses a tag that disagrees with the pubspec. The build number
 is the tag flattened to `YYYYMMDDNN`; the name is `YYYY.M.D` because iOS
