@@ -201,6 +201,10 @@ class TelemetryRepository extends ChangeNotifier {
   /// the bit was consulted.
   bool get hasVoltageSensor => _link.info?.hasVoltageSensor ?? true;
 
+  /// The factory divider ratio from INFO, or null when this firmware does
+  /// not send it.
+  double? get defaultDividerRatio => _link.info?.defaultDividerRatio;
+
   /// Whether the controller supports firmware updates over BLE.
   /// False when INFO was never read or the DFU characteristic is absent.
   bool get canUpdateFirmware => _link.canUpdateFirmware;

@@ -51,6 +51,7 @@ void openSettings(BuildContext context, TelemetryRepository repo) {
               // rather than inventing a second one.
               sensorVolts: repo.frame?.voltage,
               hasVoltageSensor: repo.hasVoltageSensor,
+              defaultDividerRatio: repo.defaultDividerRatio,
             ),
           ),
           onOpenThermal: () => _push(

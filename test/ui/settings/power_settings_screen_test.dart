@@ -81,6 +81,7 @@ void main() {
     PowerConfig? config = power,
     double? sensorVolts = 50.4,
     bool hasVoltageSensor = true,
+    double? defaultDividerRatio,
   }) =>
       PowerSettingsScreen(
         editor: editor,
@@ -88,6 +89,7 @@ void main() {
         armed: armed,
         sensorVolts: sensorVolts,
         hasVoltageSensor: hasVoltageSensor,
+        defaultDividerRatio: defaultDividerRatio,
       );
 
   Finder save() => find.byKey(const Key('save-power'));
@@ -307,6 +309,44 @@ void main() {
         isNull,
       );
       expect(find.textContaining('10 a 65'), findsOneWidget);
+    });
+  });
+
+  group('default ratio', () {
+    testWidgets('labels a ratio at the factory value as padrão',
+        (tester) async {
+      await tester.pumpWidget(wrap(screen(defaultDividerRatio: 11.0)));
+      expect(find.textContaining('(padrão)'), findsOneWidget);
+      expect(
+        tester
+            .widget<OutlinedButton>(find.byKey(const Key('restore-divider')))
+            .onPressed,
+        isNull,
+        reason: 'nothing to restore',
+      );
+    });
+
+    testWidgets('a calibrated ratio can go back, after a confirmation',
+        (tester) async {
+      await tester.pumpWidget(wrap(screen(defaultDividerRatio: 10.5)));
+      expect(find.textContaining('(calibrado)'), findsOneWidget);
+
+      await tester.ensureVisible(find.byKey(const Key('restore-divider')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('restore-divider')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Restaurar'));
+      await tester.pumpAndSettle();
+
+      expect(editor.saves.single.voltageDividerRatio, 10.5);
+    });
+
+    testWidgets('older firmware shows neither label nor button',
+        (tester) async {
+      await tester.pumpWidget(wrap(screen()));
+      expect(find.textContaining('(padrão)'), findsNothing);
+      expect(find.textContaining('(calibrado)'), findsNothing);
+      expect(find.byKey(const Key('restore-divider')), findsNothing);
     });
   });
 

@@ -14,6 +14,7 @@ class PowerSettingsScreen extends StatefulWidget {
     required this.armed,
     required this.sensorVolts,
     this.hasVoltageSensor = true,
+    this.defaultDividerRatio,
   });
 
   final ConfigEditor editor;
@@ -29,6 +30,10 @@ class PowerSettingsScreen extends StatefulWidget {
   /// INFO capability `0x0002`. A controller with no voltage divider has
   /// nothing to calibrate, and the portal hides the section for it.
   final bool hasVoltageSensor;
+
+  /// The board's factory ratio from INFO, or null on firmware that does not
+  /// send it — then neither the label nor the restore button appears.
+  final double? defaultDividerRatio;
 
   @override
   State<PowerSettingsScreen> createState() => _PowerSettingsScreenState();
@@ -241,6 +246,41 @@ class _PowerSettingsScreenState extends State<PowerSettingsScreen> {
   Future<void> _save(PowerConfig config, {String? pin}) async {
     _pending = config;
     await _handleSaveOutcome(await widget.editor.savePower(config, pin: pin));
+  }
+
+  /// Within half a hundredth: the wire carries hundredths, so anything closer
+  /// is the same number.
+  bool get _atDefault {
+    final d = widget.defaultDividerRatio;
+    final c = widget.config?.voltageDividerRatio;
+    return d != null && c != null && (c - d).abs() < 0.005;
+  }
+
+  Future<void> _confirmRestoreDivider() async {
+    final d = widget.defaultDividerRatio;
+    if (d == null) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Restaurar divisor padrão'),
+        content: Text(
+          'O divisor volta para ${d.toStringAsFixed(2)} e a calibração atual '
+          'é descartada.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Restaurar'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    await _save(_configWithRatio(d));
   }
 
   Future<void> _savePower() =>
@@ -508,7 +548,9 @@ class _PowerSettingsScreenState extends State<PowerSettingsScreen> {
                         ),
                         const SizedBox(height: 12),
                         Text(
-                          'Divisor de Tensão Atual: ${widget.config?.voltageDividerRatio.toStringAsFixed(2) ?? '--'}',
+                          'Divisor de Tensão Atual: '
+                          '${widget.config?.voltageDividerRatio.toStringAsFixed(2) ?? '--'}'
+                          '${widget.defaultDividerRatio == null || widget.config == null ? '' : _atDefault ? ' (padrão)' : ' (calibrado)'}',
                           style: Theme.of(context).textTheme.bodyMedium,
                         ),
                         if (computedRatio != null && calibrationValid) ...[
@@ -527,6 +569,20 @@ class _PowerSettingsScreenState extends State<PowerSettingsScreen> {
                           onPressed: calibrationValid ? _applyCalibration : null,
                           child: const Text('Aplicar calibração'),
                         ),
+                        if (widget.defaultDividerRatio != null) ...[
+                          const SizedBox(height: 8),
+                          OutlinedButton(
+                            key: const Key('restore-divider'),
+                            onPressed: widget.config == null ||
+                                    widget.armed ||
+                                    _atDefault
+                                ? null
+                                : _confirmRestoreDivider,
+                            child: Text(
+                              'Restaurar padrão (${widget.defaultDividerRatio!.toStringAsFixed(2)})',
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                 ],
