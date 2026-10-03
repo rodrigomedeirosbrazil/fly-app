@@ -7,12 +7,16 @@ import '../../state/control_session.dart';
 import '../../state/bms_scan_controller.dart';
 import '../../state/config_editor.dart';
 import '../../state/dfu_session.dart';
+import '../../state/log_browser.dart';
+import '../../state/log_download.dart';
 import '../../state/remote_pairing_controller.dart';
 import '../../state/telemetry_repository.dart';
 import 'bms_settings_screen.dart';
 import 'firmware_screen.dart';
+import 'logs_screen.dart';
 import 'power_settings_screen.dart';
 import 'settings_index_screen.dart';
+import 'share_csv.dart';
 import 'system_settings_screen.dart';
 import 'thermal_settings_screen.dart';
 
@@ -62,6 +66,7 @@ void openSettings(BuildContext context, TelemetryRepository repo) {
           onOpenBms: () => _pushBms(indexContext, repo),
           onOpenSystem: () => _pushSystem(indexContext, repo),
           onOpenFirmware: () => _pushFirmware(indexContext, repo),
+          onOpenLogs: () => _pushLogs(indexContext, repo),
         ),
       ),
     ),
@@ -188,6 +193,59 @@ class _SystemScreenWrapperState extends State<_SystemScreenWrapper> {
         config: widget.repo.systemConfig,
         armed: widget.repo.frame?.isArmed ?? false,
         hasRemoteLink: widget.repo.hasRemoteLink,
+      ),
+    );
+  }
+}
+
+void _pushLogs(BuildContext context, TelemetryRepository repo) {
+  final editor = repo.editor;
+  final session = repo.session;
+  if (editor == null || session == null) return;
+
+  Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) =>
+          _LogsScreenWrapper(editor: editor, session: session, repo: repo),
+    ),
+  );
+}
+
+class _LogsScreenWrapper extends StatefulWidget {
+  const _LogsScreenWrapper({
+    required this.editor,
+    required this.session,
+    required this.repo,
+  });
+
+  final ConfigEditor editor;
+  final ControlSession session;
+  final TelemetryRepository repo;
+
+  @override
+  State<_LogsScreenWrapper> createState() => _LogsScreenWrapperState();
+}
+
+class _LogsScreenWrapperState extends State<_LogsScreenWrapper> {
+  late final LogBrowser _browser = LogBrowser(widget.session);
+
+  @override
+  void dispose() {
+    _browser.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: widget.repo,
+      builder: (context, _) => LogsScreen(
+        browser: _browser,
+        editor: widget.editor,
+        armed: widget.repo.frame?.isArmed ?? false,
+        download: () =>
+            LogDownload(widget.session, maxChunk: widget.repo.logChunkBytes),
+        share: shareCsv,
       ),
     );
   }

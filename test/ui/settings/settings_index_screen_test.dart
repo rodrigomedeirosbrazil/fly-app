@@ -12,6 +12,7 @@ void main() {
       onOpenBms: () {},
       onOpenSystem: () {},
       onOpenFirmware: () {},
+      onOpenLogs: () {},
     )));
 
     expect(find.text('Energia'), findsOneWidget);
@@ -31,12 +32,14 @@ void main() {
     var bms = false;
     var system = false;
     var firmware = false;
+    var logs = false;
     await tester.pumpWidget(wrap(SettingsIndexScreen(
       onOpenPower: () => power = true,
       onOpenThermal: () => thermal = true,
       onOpenBms: () => bms = true,
       onOpenSystem: () => system = true,
       onOpenFirmware: () => firmware = true,
+      onOpenLogs: () => logs = true,
     )));
 
     await tester.tap(find.text('Energia'));
@@ -63,6 +66,12 @@ void main() {
     await tester.tap(find.text('Atualizar'));
     await tester.pumpAndSettle();
     expect(firmware, isTrue);
+
+    await tester.scrollUntilVisible(find.text('Registros de voo'), 100);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Registros de voo'));
+    await tester.pumpAndSettle();
+    expect(logs, isTrue);
   });
 
   testWidgets('all five cards have descriptions', (tester) async {
@@ -72,6 +81,7 @@ void main() {
       onOpenBms: () {},
       onOpenSystem: () {},
       onOpenFirmware: () {},
+      onOpenLogs: () {},
     )));
 
     expect(find.textContaining('Capacidade da bateria'), findsOneWidget);
@@ -102,6 +112,7 @@ void main() {
           onOpenBms: () {},
           onOpenSystem: () {},
           onOpenFirmware: () {},
+          onOpenLogs: () {},
         )));
         await tester.pumpAndSettle();
 
@@ -120,6 +131,7 @@ void main() {
       onOpenBms: () {},
       onOpenSystem: () {},
       onOpenFirmware: () {},
+      onOpenLogs: () {},
       firmwareVersion: '2.4.1 · Tmotor',
     )));
 
@@ -135,6 +147,7 @@ void main() {
       onOpenBms: () {},
       onOpenSystem: () {},
       onOpenFirmware: () {},
+      onOpenLogs: () {},
     )));
 
     expect(find.text('Firmware desconhecido'), findsOneWidget);

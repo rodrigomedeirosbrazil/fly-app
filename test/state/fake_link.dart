@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:fly_app/ble/fly_controller_link.dart';
 import 'package:fly_app/protocol/control_info.dart';
+import 'package:fly_app/protocol/log_protocol.dart';
 import 'package:fly_app/protocol/set_time.dart';
 import 'package:fly_app/state/telemetry_source_policy.dart';
 
@@ -44,6 +45,13 @@ class FakeLink extends FlyControllerLink {
   /// unanswered. Answering by default matters in widget tests: an unanswered
   /// request leaves the session's timeout timer pending.
   int? clockReplyStatus = 0;
+
+  /// Log files the fake controller holds, or null for firmware without the
+  /// log opcodes (requests then go to [commands] unanswered, like any other).
+  /// Answered here, like SET_TIME, so the config tests' indices into
+  /// [commands] are untouched.
+  Map<String, List<int>>? logFiles;
+  final logCommands = <List<int>>[];
 
   final dfuWrites = <List<int>>[];
 
@@ -91,7 +99,50 @@ class FakeLink extends FlyControllerLink {
       }
       return;
     }
+    final files = logFiles;
+    if (files != null && (bytes[0] == kOpLogList || bytes[0] == kOpLogRead)) {
+      logCommands.add(bytes);
+      final reply = bytes[0] == kOpLogList
+          ? _logListReply(files)
+          : _logReadReply(files, bytes.sublist(3));
+      Timer.run(() => _responses.add([bytes[0], bytes[1], 0, reply.length, ...reply]));
+      return;
+    }
     commands.add(bytes);
+  }
+
+  /// One page with every file, ascending, as the firmware pages them.
+  List<int> _logListReply(Map<String, List<int>> files) {
+    final names = files.keys.toList()..sort();
+    final used = files.values.fold<int>(0, (a, b) => a + b.length);
+    final head = ByteData(12)
+      ..setUint32(0, used, Endian.little)
+      ..setUint32(4, 131072, Endian.little)
+      ..setUint16(8, names.length, Endian.little)
+      ..setUint8(10, 0)
+      ..setUint8(11, names.length);
+    final out = [...head.buffer.asUint8List()];
+    for (final n in names) {
+      final s = ByteData(4)..setUint32(0, files[n]!.length, Endian.little);
+      out
+        ..addAll(s.buffer.asUint8List())
+        ..add(n.length)
+        ..addAll(n.codeUnits);
+    }
+    return out;
+  }
+
+  List<int> _logReadReply(Map<String, List<int>> files, List<int> p) {
+    final d = ByteData.sublistView(Uint8List.fromList(p));
+    final offset = d.getUint32(0, Endian.little);
+    final maxLen = p[4];
+    final name = String.fromCharCodes(p.sublist(6, 6 + p[5]));
+    final data = files[name] ?? const <int>[];
+    final end = (offset + maxLen).clamp(0, data.length);
+    final head = ByteData(8)
+      ..setUint32(0, offset, Endian.little)
+      ..setUint32(4, data.length, Endian.little);
+    return [...head.buffer.asUint8List(), ...data.sublist(offset, end)];
   }
 
   @override
