@@ -736,7 +736,9 @@ CRC-32/ISO-HDLC, the value `esp_rom_crc32_le` and every zip tool produce; the
 standard vectors are pinned in the test because a disagreement with the
 firmware refuses every update after a full minute of transfer.
 
-**None of them prove the image is for this controller.** XAG and Tmotor run
+**None of them prove the image is for this controller.** A download from
+GitHub is chosen by the controller's reported type (next section), which
+narrows this but does not close it. XAG and Tmotor run
 different builds and both pass all three. The firmware cannot tell either.
 This is stated on the screen in as many words, above the send button rather
 than in a dialog after it, because the failure it describes is a controller
@@ -745,6 +747,51 @@ that will not boot and the recovery is a USB cable.
 Transfer and commit are separate buttons for the same reason: the transfer is
 reversible until the moment it is not, and the irreversible half gets its own
 press.
+
+### Firmware comes from GitHub, chosen by the controller's own type
+
+Opening the Firmware screen checks fly-controller's latest release
+(`/releases/latest`, public, unauthenticated) and compares its tag with
+`INFO.appVersion`. When the release is newer — or the installed version is not
+a release tag at all, as on every `dev` build — the screen offers the image
+for **this controller's type**, read from `INFO.controllerType`.
+
+The type is a compile-time constant of the firmware build (`CONTROLLER_TYPE`
+in `platformio.ini`), so it is trustworthy where `appVersion` is not. It
+**reduces** the wrong-controller risk the previous section describes; it does
+not remove it — a mislabelled release would still pass. The warning says
+"escolhida pelo tipo que o controlador informou", never "verificada".
+
+**The asset names are the eighth hand-copied fly-controller contract**, from
+its `build-and-release.yml`: `firmware-xag-<tag>.bin`,
+`firmware-tmotor-<tag>.bin`. `firmware_update_policy.dart` builds the expected
+name and accepts it only on an exact match in the release, so a rename there
+stops the offer rather than fetching the wrong file.
+
+**The app downloads only from URLs it built**, from a validated tag and a
+built name. The API's `browser_download_url` is never read — the same rule as
+the app update notice's `releasePageUrl`.
+
+**Only the size is checked.** TLS keeps the bytes intact, the size the release
+announced catches a truncated or overrunning body (reported as "Download
+incompleto", worth retrying), and `inspectImage` still runs. A SHA-256 against
+the API's `digest` would need `package:crypto` and would protect only against
+a compromised GitHub, which would serve the matching digest too.
+
+The download's limit is on **silence** (15 s between bytes), not on the total:
+1.6 MB on a launch site's signal can legitimately take minutes. A refusal
+whose body stalls is bounded the same way.
+
+Nothing is cached and nothing appears outside the Firmware screen. Leaving the
+screen cancels a download. Downloading is allowed while armed — it is network
+only — and lands in the same slot a picked file does, so **Enviar** and
+**Aplicar e reiniciar** are unchanged and still gated.
+
+**Baixar is disabled during a transfer, not hidden**; it disappears only
+where there is no DFU channel to send to. The last choice wins in both
+directions: picking a file supersedes a download, and **Usar a imagem
+baixada** re-adopts it without fetching again. `openSettings` takes an
+optional `firmwareFeed` so no navigation test builds a real HTTP client.
 
 ### Flight logs are read by offset, over the request channel
 
@@ -849,18 +896,22 @@ lib/
 │               ble_permission_policy.dart
 │               log_browser.dart · log_download.dart
 │               app_update_policy.dart · update_checker.dart
+│               github_release.dart · firmware_update_policy.dart
+│               firmware_update_checker.dart
 ├── audio/      tone_player.dart
 ├── net/        release_feed.dart
 ├── ble/        fly_controller_link.dart · android_host.dart · app_host.dart
 └── ui/         app.dart · connection_screen.dart · flight_screen.dart
                 reading_text.dart · widgets/dial.dart
                 settings/logs_screen.dart · settings/share_csv.dart
+                settings/firmware_screen.dart
 ```
 
 The layering is the point, and it is worth preserving:
 
 - **`protocol/`**, **`state/link_health.dart`**,
-  **`state/ble_permission_policy.dart`** and **`state/app_update_policy.dart`**
+  **`state/ble_permission_policy.dart`**, **`state/app_update_policy.dart`**,
+  **`state/firmware_update_policy.dart`** and **`state/github_release.dart`**
   import nothing from
   `package:flutter`. They are the Dart analogue of the firmware's host-testable
   headers (`ThrottleSignalLogic.h`, `PowerAlertLogic.h`): pure decision logic,
