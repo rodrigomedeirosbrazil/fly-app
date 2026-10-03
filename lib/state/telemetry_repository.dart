@@ -137,6 +137,16 @@ class TelemetryRepository extends ChangeNotifier {
     return '${i.appVersion} · $type';
   }
 
+  /// `INFO.appVersion` as reported — a release tag on CI builds, `dev` on a
+  /// local one. Null on the `$XCTOD` path. [firmwareVersion] is the display
+  /// line; this is what the firmware update check compares.
+  String? get installedFirmwareVersion => _link.info?.appVersion;
+
+  /// `INFO.controllerType`, or unknown on the `$XCTOD` path. It picks which
+  /// release asset is this controller's.
+  ControllerType get controllerType =>
+      _link.info?.controllerType ?? ControllerType.unknown;
+
   /// When the running firmware was built — `Sep 12 2026 12:46:03` — or null.
   ///
   /// **Null on every controller built before the field existed**, because it
