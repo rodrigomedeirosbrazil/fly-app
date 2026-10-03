@@ -17,6 +17,7 @@ const int _opRemotePair = 0x24;
 const int _opRemoteForget = 0x25;
 const int _opBuzzerPreview = 0x26;
 const int _opPinChange = 0x28;
+const int _opBmsScanResult = 0x2B;
 
 /// How many times an idempotent request is resent after a timeout.
 const int _attempts = 3;
@@ -173,6 +174,24 @@ class ConfigEditor {
     final result = await _session.request(op: _opBmsScanStatus, payload: const []);
     if (result is! ControlOk) return null;
     return BmsScanState.decode(result.payload);
+  }
+
+  /// One scan result's name and services.
+  ///
+  /// **Open**, like `BMS_SCAN_STATUS`: no PIN, answers while armed.
+  /// [unsupported] is true only for `ErrBadOp` — firmware without the
+  /// opcode — so a caller stops asking; silence is just no detail.
+  Future<({BmsScanDetail? detail, bool unsupported})> readBmsScanDetail(
+      int index) async {
+    final result =
+        await _session.request(op: _opBmsScanResult, payload: [index]);
+    return switch (result) {
+      ControlOk(:final payload) =>
+        (detail: BmsScanDetail.decode(payload), unsupported: false),
+      ControlRefused(status: ControlStatus.errBadOp) =>
+        (detail: null, unsupported: true),
+      _ => (detail: null, unsupported: false),
+    };
   }
 
   /// Puts the controller into pairing mode.

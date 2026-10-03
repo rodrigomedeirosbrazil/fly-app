@@ -546,4 +546,33 @@ void main() {
       expect(await editor.forgetRemote(pin: '1234'), isA<SaveFailed>());
     });
   });
+
+  group('readBmsScanDetail', () {
+    test('sends the index, open and unauthenticated', () async {
+      final s = FakeSession()
+        ..queueOk([1, 2, 3, 4, 5, 6, 0xC3, 1, 0, 0]);
+      final editor = ConfigEditor(s);
+
+      final r = await editor.readBmsScanDetail(4);
+
+      expect(s.sent.single.op, 0x2B);
+      expect(s.sent.single.payload, [4]);
+      expect(r.detail!.mac, [1, 2, 3, 4, 5, 6]);
+      expect(r.unsupported, isFalse);
+    });
+
+    test('old firmware is unsupported', () async {
+      final s = FakeSession()
+        ..queue(const ControlRefused(ControlStatus.errBadOp));
+      final r = await ConfigEditor(s).readBmsScanDetail(0);
+      expect(r.detail, isNull);
+      expect(r.unsupported, isTrue);
+    });
+
+    test('silence is nothing, not unsupported', () async {
+      final r = await ConfigEditor(FakeSession()).readBmsScanDetail(0);
+      expect(r.detail, isNull);
+      expect(r.unsupported, isFalse);
+    });
+  });
 }

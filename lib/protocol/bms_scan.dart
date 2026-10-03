@@ -8,6 +8,8 @@
 /// find the controller again until it ends.
 library;
 
+import 'dart:convert';
+
 /// What the controller's scanner is doing. `unknown` exists so a status from
 /// newer firmware degrades instead of throwing, the same rule `DisarmReason`
 /// follows.
@@ -92,3 +94,52 @@ const Map<int, String> kBmsTypeNames = {
   2: 'Daly (D2 BLE)',
   3: 'JK BMS',
 };
+
+/// One `BMS_SCAN_RESULT` (`0x2B`) reply:
+/// `[mac 6][rssi i8][type u8][nameLen u8][name…][svcLen u8][services…]`.
+///
+/// What `BMS_SCAN_STATUS` cannot fit eight bytes a result: the advertised
+/// name and the service UUIDs, as the portal shows them. Fetched per result
+/// after a scan completes; firmware without it answers `ErrBadOp`.
+class BmsScanDetail {
+  const BmsScanDetail({
+    required this.mac,
+    required this.rssi,
+    required this.detectedType,
+    required this.name,
+    required this.services,
+  });
+
+  final List<int> mac;
+  final int rssi;
+  final int detectedType;
+
+  /// As advertised. Empty when the device advertised none.
+  final String name;
+
+  /// Comma-separated UUIDs, possibly truncated by the firmware to fit a frame.
+  final String services;
+
+  static BmsScanDetail? decode(List<int> bytes) {
+    if (bytes.length < 9) return null;
+    final nameLen = bytes[8];
+    final svcLenAt = 9 + nameLen;
+    if (bytes.length < svcLenAt + 1) return null;
+    final svcLen = bytes[svcLenAt];
+    if (bytes.length < svcLenAt + 1 + svcLen) return null;
+
+    final rawRssi = bytes[6];
+    return BmsScanDetail(
+      mac: List<int>.unmodifiable(bytes.sublist(0, 6)),
+      rssi: rawRssi > 127 ? rawRssi - 256 : rawRssi,
+      detectedType: bytes[7],
+      // A BLE name is UTF-8 and may be cut mid-character by the firmware's
+      // truncation; a replacement character beats throwing.
+      name: utf8.decode(bytes.sublist(9, svcLenAt), allowMalformed: true),
+      services: utf8.decode(
+        bytes.sublist(svcLenAt + 1, svcLenAt + 1 + svcLen),
+        allowMalformed: true,
+      ),
+    );
+  }
+}
