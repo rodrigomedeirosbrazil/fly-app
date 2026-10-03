@@ -154,6 +154,11 @@ class _BmsScreenWrapperState extends State<_BmsScreenWrapper> {
         bmsConfigured: widget.repo.frame?.bmsConfigured,
         bmsMaxTempC: widget.repo.frame?.bmsMaxTempC,
         cellDeltaMv: widget.repo.frame?.cellDeltaMv,
+        bmsLinkState: widget.repo.frame?.bmsLinkState,
+        bmsPackVoltage: widget.repo.frame?.bmsPackVoltage,
+        bmsCurrentA: widget.repo.frame?.bmsCurrentA,
+        bmsSoc: widget.repo.frame?.bmsSoc,
+        bmsCellCount: widget.repo.frame?.bmsCellCount,
       ),
     );
   }

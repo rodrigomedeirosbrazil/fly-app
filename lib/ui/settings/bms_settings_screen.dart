@@ -4,6 +4,7 @@ import '../../protocol/bms_scan.dart';
 import '../../protocol/config_groups.dart';
 import '../../protocol/mac_address.dart';
 import '../../protocol/settings_validation.dart';
+import '../../protocol/telemetry_frame.dart';
 import '../../state/bms_scan_controller.dart';
 import '../../state/config_editor.dart';
 import '../widgets/status_chip.dart';
@@ -20,6 +21,11 @@ class BmsSettingsScreen extends StatefulWidget {
     required this.bmsConfigured,
     this.bmsMaxTempC,
     this.cellDeltaMv,
+    this.bmsLinkState,
+    this.bmsPackVoltage,
+    this.bmsCurrentA,
+    this.bmsSoc,
+    this.bmsCellCount,
   });
 
   final ConfigEditor editor;
@@ -33,6 +39,14 @@ class BmsSettingsScreen extends StatefulWidget {
   /// the row: the BMS is not reporting, which is not the same as 0.
   final int? bmsMaxTempC;
   final int? cellDeltaMv;
+
+  /// From the telemetry tail. Null on firmware without it, which falls back
+  /// to the two flags and shows no readings.
+  final BmsLinkState? bmsLinkState;
+  final double? bmsPackVoltage;
+  final double? bmsCurrentA;
+  final int? bmsSoc;
+  final int? bmsCellCount;
 
   @override
   State<BmsSettingsScreen> createState() => _BmsSettingsScreenState();
@@ -381,6 +395,8 @@ class _BmsSettingsScreenState extends State<BmsSettingsScreen> {
                               .map((e) => _ResultTile(
                                     index: e.key,
                                     result: e.value,
+                                    detail: widget.scanController
+                                        .detailFor(e.value),
                                     onTap: () => _onScanResultTapped(e.value),
                                   )),
                         ],
@@ -425,11 +441,35 @@ class _BmsSettingsScreenState extends State<BmsSettingsScreen> {
                           alignment: Alignment.centerLeft,
                           child: StatusChip(
                             text: _bmsLinkStatus().toUpperCase(),
-                            color: (widget.bmsConnected ?? false)
+                            color: widget.bmsLinkState ==
+                                        BmsLinkState.connected ||
+                                    (widget.bmsConnected ?? false)
                                 ? Theme.of(context).colorScheme.primary
                                 : Theme.of(context).colorScheme.outline,
                           ),
                         ),
+                        if (widget.bmsPackVoltage != null)
+                          _StatusLine(
+                            label: 'Tensão do BMS',
+                            value:
+                                '${widget.bmsPackVoltage!.toStringAsFixed(2)} V',
+                          ),
+                        if (widget.bmsCurrentA != null)
+                          _StatusLine(
+                            label: 'Corrente do BMS',
+                            value:
+                                '${widget.bmsCurrentA!.toStringAsFixed(1)} A',
+                          ),
+                        if (widget.bmsSoc != null)
+                          _StatusLine(
+                            label: 'Carga do BMS',
+                            value: '${widget.bmsSoc} %',
+                          ),
+                        if (widget.bmsCellCount != null)
+                          _StatusLine(
+                            label: 'Células',
+                            value: '${widget.bmsCellCount}',
+                          ),
                         if (widget.bmsMaxTempC != null)
                           _StatusLine(
                             label: 'Temperatura máxima',
@@ -467,6 +507,19 @@ class _BmsSettingsScreenState extends State<BmsSettingsScreen> {
   }
 
   String _bmsLinkStatus() {
+    switch (widget.bmsLinkState) {
+      case BmsLinkState.connected:
+        return 'BMS conectado';
+      case BmsLinkState.connecting:
+        return 'Conectando ao BMS';
+      case BmsLinkState.idle:
+        return 'BMS configurado, ocioso';
+      case BmsLinkState.notConfigured:
+        return 'Nenhum BMS configurado';
+      case BmsLinkState.unknown:
+      case null:
+        break;
+    }
     if (widget.bmsConnected == true) return 'BMS conectado';
     if (widget.bmsConfigured == true) return 'BMS configurado, sem conexão';
     return 'Nenhum BMS configurado';
@@ -498,11 +551,13 @@ class _ResultTile extends StatelessWidget {
     required this.index,
     required this.result,
     required this.onTap,
+    this.detail,
   });
 
   final int index;
   final BmsScanResult result;
   final VoidCallback onTap;
+  final BmsScanDetail? detail;
 
   @override
   Widget build(BuildContext context) {
@@ -528,6 +583,15 @@ class _ResultTile extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    if (detail != null && detail!.name.isNotEmpty) ...[
+                      Text(
+                        detail!.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 2),
+                    ],
                     Text(formatMac(result.mac) ?? '?',
                         style: settingsIdentifier(context).copyWith(fontSize: 15)),
                     const SizedBox(height: 2),
@@ -538,6 +602,16 @@ class _ResultTile extends StatelessWidget {
                         color: theme.colorScheme.onSurfaceVariant,
                       ),
                     ),
+                    if (detail != null && detail!.services.isNotEmpty)
+                      Text(
+                        detail!.services,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
                   ],
                 ),
               ),

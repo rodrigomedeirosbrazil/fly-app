@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fly_app/protocol/bms_scan.dart';
 import 'package:fly_app/protocol/config_groups.dart';
 import 'package:fly_app/protocol/mac_address.dart';
+import 'package:fly_app/protocol/telemetry_frame.dart';
 import 'package:fly_app/state/bms_scan_controller.dart';
 import 'package:fly_app/state/config_editor.dart';
 import 'package:fly_app/ui/settings/bms_settings_screen.dart';
@@ -203,6 +204,44 @@ void main() {
     expect(find.text('Diferença entre células'), findsNothing);
   });
 
+  testWidgets('the status card shows the link state and the BMS readings',
+      (tester) async {
+    await tester.pumpWidget(wrap(BmsSettingsScreen(
+      editor: RecordingEditor(),
+      scanController: BmsScanController(RecordingEditor()),
+      config: bmsConfig,
+      armed: false,
+      bmsConnected: false,
+      bmsConfigured: true,
+      bmsLinkState: BmsLinkState.connecting,
+      bmsPackVoltage: 57.12,
+      bmsCurrentA: -12.5,
+      bmsSoc: 81,
+      bmsCellCount: 14,
+    )));
+
+    expect(find.text('CONECTANDO AO BMS'), findsOneWidget);
+    expect(find.text('57.12 V'), findsOneWidget);
+    expect(find.text('-12.5 A'), findsOneWidget);
+    expect(find.text('81 %'), findsOneWidget);
+    expect(find.text('14'), findsOneWidget);
+  });
+
+  testWidgets('older firmware keeps the flag-based chip and no readings',
+      (tester) async {
+    await tester.pumpWidget(wrap(BmsSettingsScreen(
+      editor: RecordingEditor(),
+      scanController: BmsScanController(RecordingEditor()),
+      config: bmsConfig,
+      armed: false,
+      bmsConnected: false,
+      bmsConfigured: true,
+    )));
+
+    expect(find.text('BMS CONFIGURADO, SEM CONEXÃO'), findsOneWidget);
+    expect(find.text('Tensão do BMS'), findsNothing);
+  });
+
   testWidgets('shows the stored type and address', (tester) async {
     await tester.pumpWidget(wrap(screen()));
     expect(find.text('JBD'), findsOneWidget);
@@ -327,6 +366,26 @@ void main() {
     await tapSave(tester);
     expect(editor.saves.single.bmsMac, [0x11, 0x22, 0x33, 0x44, 0x55, 0x66]);
     expect(editor.saves.single.bmsType, 3);
+  });
+
+  testWidgets('a result shows the name the controller saw', (tester) async {
+    scanEditor.nextDetail = const BmsScanDetail(
+      mac: [0x11, 0x22, 0x33, 0x44, 0x55, 0x66],
+      rssi: -62,
+      detectedType: 3,
+      name: 'JK-B2A24S',
+      services: '0000ffe0-0000-1000-8000-00805f9b34fb',
+    );
+    await completeScan(tester, total: 1, results: [
+      [0x11, 0x22, 0x33, 0x44, 0x55, 0x66, -62, 3],
+    ]);
+    // The detail fetch is unawaited after completion; let it land.
+    await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)));
+    await tester.pumpWidget(wrap(screen(config: noBmsConfig)));
+
+    expect(find.text('JK-B2A24S'), findsOneWidget);
+    expect(find.text('0000ffe0-0000-1000-8000-00805f9b34fb'), findsOneWidget);
   });
 
   testWidgets('a result with no detected type leaves the dropdown alone',
