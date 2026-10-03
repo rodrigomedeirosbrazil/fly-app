@@ -198,6 +198,133 @@ void main() {
     });
   });
 
+  group('download', () {
+    late HttpServer server;
+    late void Function(HttpRequest) handler;
+
+    setUp(() async {
+      server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      server.listen((request) => handler(request));
+    });
+
+    tearDown(() => server.close(force: true));
+
+    Uri url(String path) => Uri.http('127.0.0.1:${server.port}', path);
+
+    // `download` never reads the endpoint, so it must not depend on the
+    // server being bound (the refused-connection test closes it first).
+    GitHubReleaseFeed feed({Duration idle = const Duration(seconds: 2)}) =>
+        GitHubReleaseFeed(
+            endpoint: Uri.http('127.0.0.1', '/unused'), idleTimeout: idle);
+
+    final payload = List<int>.generate(5000, (i) => i % 251);
+
+    test('follows the redirect GitHub answers with and returns the bytes',
+        () async {
+      // github.com/.../releases/download/... is a 302 to the storage host.
+      handler = (request) {
+        if (request.uri.path == '/asset') {
+          request.response
+            ..statusCode = HttpStatus.found
+            ..headers.set(HttpHeaders.locationHeader, url('/storage').toString())
+            ..close();
+        } else {
+          request.response
+            ..add(payload)
+            ..close();
+        }
+      };
+
+      final progress = <int>[];
+      final result = await feed().download(url('/asset'),
+          expectedSize: payload.length, onProgress: progress.add);
+
+      expect(result, isA<Downloaded>());
+      expect((result as Downloaded).bytes, payload);
+      expect(progress.last, payload.length);
+    });
+
+    test('a short body is incomplete, not a smaller image', () async {
+      handler = (request) => request.response
+        ..add(payload.sublist(0, 4000))
+        ..close();
+
+      final result =
+          await feed().download(url('/a'), expectedSize: payload.length);
+
+      expect(result, isA<DownloadIncomplete>());
+    });
+
+    test('a body longer than the asset is refused as soon as it overruns',
+        () async {
+      handler = (request) => request.response
+        ..add(payload)
+        ..add(payload)
+        ..close();
+
+      final result =
+          await feed().download(url('/a'), expectedSize: payload.length);
+
+      expect(result, isA<DownloadIncomplete>());
+    });
+
+    test('a non-200 is a failure', () async {
+      handler = (request) => request.response
+        ..statusCode = 404
+        ..close();
+
+      expect(await feed().download(url('/a'), expectedSize: 10),
+          isA<DownloadFailed>());
+    });
+
+    test('a server that stops sending is a failure after the idle timeout',
+        () async {
+      handler = (request) {
+        // Unbuffered, or the 100 bytes sit in the server and never leave.
+        request.response.bufferOutput = false;
+        request.response.add(payload.sublist(0, 100));
+        request.response.flush(); // then never another byte, never close
+      };
+      final watch = Stopwatch()..start();
+
+      final result = await feed(idle: const Duration(milliseconds: 200))
+          .download(url('/a'), expectedSize: payload.length);
+
+      expect(result, isA<DownloadFailed>());
+      expect(watch.elapsed, lessThan(const Duration(seconds: 2)));
+    });
+
+    test('cancelling mid-body ends the download as a failure', () async {
+      handler = (request) {
+        request.response.bufferOutput = false;
+        request.response.add(payload.sublist(0, 100));
+        request.response.flush();
+      };
+      final cancel = DownloadCancel();
+
+      final pending = feed(idle: const Duration(seconds: 30)).download(
+        url('/a'),
+        expectedSize: payload.length,
+        cancel: cancel,
+        onProgress: (_) => cancel.cancel(),
+      );
+
+      expect(await pending.timeout(const Duration(seconds: 2)),
+          isA<DownloadFailed>());
+    });
+
+    test('a refused connection is a failure', () async {
+      final port = server.port;
+      await server.close(force: true);
+
+      final result = await feed().download(
+          Uri.http('127.0.0.1:$port', '/a'),
+          expectedSize: 10);
+
+      expect(result, isA<DownloadFailed>());
+    });
+  });
+
   test('forRepo points at that repository\'s latest release', () {
     expect(
       GitHubReleaseFeed.forRepo('rodrigomedeirosbrazil/fly-controller')

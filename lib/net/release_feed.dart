@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import '../state/app_update_policy.dart';
 import '../state/github_release.dart';
@@ -15,6 +16,21 @@ abstract interface class ReleaseFeed {
   Future<String?> latestTag();
 }
 
+/// What the firmware check needs from the network. An interface so
+/// `FirmwareUpdateChecker` is tested without a socket.
+abstract interface class FirmwareFeed {
+  /// The latest release with its assets, or null for any failure.
+  Future<GitHubRelease?> latestRelease();
+
+  /// Never throws.
+  Future<DownloadResult> download(
+    Uri url, {
+    required int expectedSize,
+    void Function(int received)? onProgress,
+    DownloadCancel? cancel,
+  });
+}
+
 /// The only code in the app that talks to the internet — the same role
 /// `ble/` plays for the radio.
 ///
@@ -22,10 +38,11 @@ abstract interface class ReleaseFeed {
 /// earn a dependency. Unauthenticated, GitHub allows 60 requests an hour per
 /// IP; this makes one per app launch. `/releases/latest` already excludes
 /// drafts and prereleases.
-class GitHubReleaseFeed implements ReleaseFeed {
+class GitHubReleaseFeed implements ReleaseFeed, FirmwareFeed {
   GitHubReleaseFeed({
     Uri? endpoint,
     this.timeout = const Duration(seconds: 10),
+    this.idleTimeout = const Duration(seconds: 15),
   }) : endpoint = endpoint ??
             Uri.https('api.github.com', '/repos/$kReleaseRepo/releases/latest');
 
@@ -34,13 +51,20 @@ class GitHubReleaseFeed implements ReleaseFeed {
   /// Covers the whole exchange, not just the connect.
   final Duration timeout;
 
+  /// How long a download may go without receiving a byte. Not a total
+  /// limit: 1.6 MB on a weak signal at a launch site can legitimately take
+  /// minutes, and what is wrong is a transfer that stopped moving.
+  final Duration idleTimeout;
+
   /// The latest release of [repo] (`owner/name`).
   GitHubReleaseFeed.forRepo(
     String repo, {
     Duration timeout = const Duration(seconds: 10),
+    Duration idleTimeout = const Duration(seconds: 15),
   }) : this(
           endpoint: Uri.https('api.github.com', '/repos/$repo/releases/latest'),
           timeout: timeout,
+          idleTimeout: idleTimeout,
         );
 
   @override
@@ -48,6 +72,7 @@ class GitHubReleaseFeed implements ReleaseFeed {
 
   /// The latest release with its assets, or null for **any** failure — the
   /// same rule as [latestTag], which is now a view of this.
+  @override
   Future<GitHubRelease?> latestRelease() async {
     final client = HttpClient()..connectionTimeout = timeout;
     try {
@@ -61,6 +86,46 @@ class GitHubReleaseFeed implements ReleaseFeed {
     } finally {
       // Force: after a timeout the request is still open, and closing
       // gracefully would wait for it.
+      client.close(force: true);
+    }
+  }
+
+  /// [url] must be one the app built — see `firmwareDownloadUrl`. GitHub
+  /// answers it with a 302 to its storage host, which `HttpClient` follows
+  /// for a GET.
+  @override
+  Future<DownloadResult> download(
+    Uri url, {
+    required int expectedSize,
+    void Function(int received)? onProgress,
+    DownloadCancel? cancel,
+  }) async {
+    final client = HttpClient()..connectionTimeout = timeout;
+    // Force-closing the client tears down the socket, which surfaces in the
+    // loop below as an IOException — one exit path for both.
+    unawaited(cancel?.whenCancelled.then((_) => client.close(force: true)));
+    try {
+      final request = await client.getUrl(url).timeout(timeout);
+      request.headers.set(HttpHeaders.userAgentHeader, 'aerovolt-app');
+      final response = await request.close().timeout(timeout);
+      if (response.statusCode != HttpStatus.ok) {
+        await response.drain<void>();
+        return const DownloadFailed();
+      }
+      final bytes = BytesBuilder(copy: false);
+      await for (final chunk in response.timeout(idleTimeout)) {
+        bytes.add(chunk);
+        // Past the announced size it cannot become right; stop paying for it.
+        if (bytes.length > expectedSize) return const DownloadIncomplete();
+        onProgress?.call(bytes.length);
+      }
+      if (bytes.length != expectedSize) return const DownloadIncomplete();
+      return Downloaded(bytes.takeBytes());
+    } on IOException {
+      return const DownloadFailed(); // includes HttpException, RedirectException
+    } on TimeoutException {
+      return const DownloadFailed();
+    } finally {
       client.close(force: true);
     }
   }
@@ -111,5 +176,39 @@ GitHubRelease? parseRelease(String body) {
     return GitHubRelease(tag: tag, assets: assets);
   } on FormatException {
     return null;
+  }
+}
+
+sealed class DownloadResult {
+  const DownloadResult();
+}
+
+final class Downloaded extends DownloadResult {
+  const Downloaded(this.bytes);
+  final Uint8List bytes;
+}
+
+/// The body ended short of, or ran past, the size the release announced.
+/// Told apart from [DownloadFailed] because the pilot's next step differs:
+/// this one is worth retrying on the same signal.
+final class DownloadIncomplete extends DownloadResult {
+  const DownloadIncomplete();
+}
+
+/// No network, refused, TLS, a non-200, an idle timeout, or cancelled.
+final class DownloadFailed extends DownloadResult {
+  const DownloadFailed();
+}
+
+/// Ends an in-flight [GitHubReleaseFeed.download]. The Firmware screen
+/// cancels when it closes, so leaving it stops spending the pilot's data.
+final class DownloadCancel {
+  final Completer<void> _done = Completer<void>();
+
+  bool get isCancelled => _done.isCompleted;
+  Future<void> get whenCancelled => _done.future;
+
+  void cancel() {
+    if (!_done.isCompleted) _done.complete();
   }
 }
