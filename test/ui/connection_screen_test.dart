@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fly_app/ble/fly_controller_link.dart';
+import 'package:fly_app/state/app_update_policy.dart';
 import 'package:fly_app/ui/connection_screen.dart';
 
 Widget wrap(
@@ -10,6 +11,8 @@ Widget wrap(
   VoidCallback? onCancel,
   VoidCallback? onOpenSettings,
   VoidCallback? onOpenLocationSettings,
+  UpdateAvailability update = const UpdateUnknown(),
+  VoidCallback? onOpenRelease,
 }) =>
     MaterialApp(
       home: ConnectionScreen(
@@ -19,6 +22,8 @@ Widget wrap(
         onCancel: onCancel ?? () {},
         onOpenSettings: onOpenSettings ?? () {},
         onOpenLocationSettings: onOpenLocationSettings ?? () {},
+        update: update,
+        onOpenRelease: onOpenRelease,
       ),
     );
 
@@ -200,5 +205,82 @@ void main() {
         });
       }
     }
+  });
+
+  group('update notice', () {
+    testWidgets('says nothing when up to date or unknown', (tester) async {
+      await tester.pumpWidget(wrap(LinkStatus.idle, update: const UpToDate()));
+      expect(find.textContaining('Nova versão'), findsNothing);
+
+      await tester
+          .pumpWidget(wrap(LinkStatus.idle, update: const UpdateUnknown()));
+      expect(find.textContaining('Nova versão'), findsNothing);
+    });
+
+    testWidgets('where it can install, tapping opens the release',
+        (tester) async {
+      var opened = 0;
+      await tester.pumpWidget(wrap(
+        LinkStatus.idle,
+        update: const UpdateAvailable('2026-10-04.1'),
+        onOpenRelease: () => opened++,
+      ));
+
+      expect(find.text('Nova versão 2026-10-04.1 — toque para baixar'),
+          findsOneWidget);
+      await tester.tap(find.textContaining('Nova versão'));
+      await tester.pump();
+      expect(opened, 1);
+    });
+
+    testWidgets('where it cannot install, it says how and is not a button',
+        (tester) async {
+      await tester.pumpWidget(wrap(
+        LinkStatus.idle,
+        update: const UpdateAvailable('2026-10-04.1'),
+      ));
+
+      expect(find.text('Nova versão 2026-10-04.1 — reinstale pelo Mac'),
+          findsOneWidget);
+      expect(
+        find.ancestor(
+          of: find.textContaining('Nova versão'),
+          matching: find.byType(TextButton),
+        ),
+        findsNothing,
+      );
+    });
+
+    testWidgets('a notice arriving does not move Conectar', (tester) async {
+      // The answer can land while the finger travels to the button. The
+      // line is reserved whether or not it is filled, like the status line.
+      await tester.pumpWidget(wrap(LinkStatus.idle));
+      final before = tester.getRect(find.byType(FilledButton));
+
+      await tester.pumpWidget(wrap(
+        LinkStatus.idle,
+        update: const UpdateAvailable('2026-10-04.1'),
+        onOpenRelease: () {},
+      ));
+      final after = tester.getRect(find.byType(FilledButton));
+
+      expect(after, before);
+    });
+
+    testWidgets('fits a small phone without overflowing', (tester) async {
+      tester.view.physicalSize = const Size(320, 480);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(wrap(
+        LinkStatus.unauthorized,
+        rejectedFrames: 3,
+        update: const UpdateAvailable('2026-10-04.1'),
+        onOpenRelease: () {},
+      ));
+
+      // A RenderFlex overflow fails the test on its own.
+      expect(find.textContaining('Nova versão'), findsOneWidget);
+    });
   });
 }

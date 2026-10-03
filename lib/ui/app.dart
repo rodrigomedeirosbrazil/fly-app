@@ -1,7 +1,11 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
+import '../ble/app_host.dart';
+import '../net/release_feed.dart';
 import '../state/telemetry_repository.dart';
+import '../state/update_checker.dart';
 import 'connection_screen.dart';
 import 'flight_screen.dart';
 import 'settings/settings_navigation.dart';
@@ -15,17 +19,30 @@ class FlyApp extends StatefulWidget {
 
 class _FlyAppState extends State<FlyApp> {
   final TelemetryRepository _repo = TelemetryRepository();
+  final UpdateChecker _updates = UpdateChecker(
+    feed: GitHubReleaseFeed(),
+    store: const PrefsTagStore(),
+    installedBuild: const AppHost().buildNumber,
+    openUrl: const AppHost().openUrl,
+    // A release carries an APK. On iOS the notice says to reinstall from
+    // the Mac instead of linking to a file the phone cannot use.
+    canOpenRelease: defaultTargetPlatform == TargetPlatform.android,
+  );
+  late final Listenable _state = Listenable.merge([_repo, _updates]);
 
   @override
   void initState() {
     super.initState();
     // The pilot is not going to tap the screen mid-flight to keep it awake.
     WakelockPlus.enable();
+    // Once per launch, in the background. Nothing on screen waits for it.
+    _updates.check();
   }
 
   @override
   void dispose() {
     WakelockPlus.disable();
+    _updates.dispose();
     _repo.dispose();
     super.dispose();
   }
@@ -116,7 +133,7 @@ class _FlyAppState extends State<FlyApp> {
         ),
       ),
       home: AnimatedBuilder(
-        animation: _repo,
+        animation: _state,
         builder: (context, _) {
           final frame = _repo.frame;
           if (frame == null && !_repo.isStale) {
@@ -129,6 +146,9 @@ class _FlyAppState extends State<FlyApp> {
               onCancel: () => _repo.stop(),
               onOpenSettings: () => _repo.openSettings(),
               onOpenLocationSettings: () => _repo.openLocationSettings(),
+              update: _updates.availability,
+              onOpenRelease:
+                  _updates.canOpenRelease ? _updates.openRelease : null,
             );
           }
           return FlightScreen(
@@ -142,7 +162,7 @@ class _FlyAppState extends State<FlyApp> {
             onSetMuted: _repo.setMuted,
             onOpenSettings: _repo.session == null
                 ? null
-                : () => openSettings(context, _repo),
+                : () => openSettings(context, _repo, updates: _updates),
           );
         },
       ),
