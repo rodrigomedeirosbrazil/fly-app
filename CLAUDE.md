@@ -189,6 +189,14 @@ All three collapse to `null` in `TelemetryFrame`, so every widget keeps the
 hide-don't-print-zero rule for free. The states themselves are carried
 alongside, so the decode stays lossless.
 
+### The BMS tail is the BMS's own numbers
+
+Telemetry bytes 58–68 carry the pack voltage, current, SoC and cell count
+**as the BMS reports them** — not the controller's divider reading — plus
+`bmsLinkState`. The four readings follow the existing BMS validity bit; the
+link state is always known. All five are read only when the packet is at
+least 69 bytes, so older firmware decodes exactly as before.
+
 ### The request channel answers nothing when it fails
 
 `CMD` and `RSP` carry requests and replies, matched by a one-byte sequence.
@@ -378,9 +386,16 @@ it.
 
 Calibration goes inert when `frame.voltage` is null — the codec already nulls
 it unless the battery-voltage signal state is `Valid`, so "no trustworthy
-reading" is the frame's rule rather than a second one. There is no "reset to
-default": `BATTERY_DIVIDER_RATIO` is a compile-time constant per board and
-reaches neither `INFO` nor any config group, so the app cannot know it.
+reading" is the frame's rule rather than a second one.
+
+"Restaurar padrão" writes the factory ratio that `INFO` carries at offset 49
+(firmware from the portal-replacement release on). On older firmware it is
+absent and so is the button — the ratio is a per-board compile-time
+constant the app cannot otherwise know.
+
+A save that needs the PIN resends **exactly what was asked**, held in
+`_pending`. It used to rebuild from `widget.config`, which threw away a
+calibration and still said "Gravado".
 
 ### A number field that cannot be read is not a zero
 
@@ -451,6 +466,10 @@ The scan runs 5 s (`WEB_SCAN_DURATION_SECONDS`) and stores at most 16 results.
 **Advertising is suppressed for its whole duration**: an existing connection
 survives, but a client that drops cannot find the controller until it ends.
 The screen says so rather than looking frozen.
+
+Each result's name and services come from `BMS_SCAN_RESULT` (0x2B), one request
+per result after the scan completes, keyed by MAC because the list is sorted by
+signal. `ErrBadOp` or silence stops the fetch.
 
 ### Pairing has no readback, no timeout and no cancel
 

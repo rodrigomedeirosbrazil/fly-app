@@ -85,7 +85,16 @@ readings that arrived in every frame and were never drawn — signal-state notes
 explanation, the voltage source, BMS state, BMS temperature and cell spread —
 and calibration, now gated on the capability bit instead of appearing on a
 controller with no voltage sensor. Flight logs are done (plan A1); the features that
-need new firmware follow in plan A3.
+need new firmware are plan A3, below.
+
+**Portal parity is complete on the app side** (2026-10-02, plan A3). The BMS's
+own pack readings and link state, the name and services of each scan result,
+and whether the voltage divider is at its factory value — with a way back to
+it — are shown whenever the firmware sends them, and the screens are unchanged
+on firmware that does not: each is an appended field or an opcode old firmware
+answers with `ErrBadOp`, so there is no version bump. The firmware half is
+fly-controller PR 1; until it is flashed none of this is visible on an
+aircraft.
 
 A binary telemetry characteristic (roughly 200 B of CSV becomes ~40 B, and it
 can carry fields the sentence has no room for), plus a command characteristic
