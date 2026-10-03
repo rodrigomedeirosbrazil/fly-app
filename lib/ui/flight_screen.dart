@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../protocol/config_groups.dart';
 import '../protocol/telemetry_frame.dart';
+import 'reading_text.dart';
 import 'widgets/dial.dart';
 import 'widgets/status_chip.dart';
 
@@ -364,6 +365,9 @@ class _BatteryCardState extends State<_BatteryCard> {
                     value: voltageText,
                     unit: voltageUnit,
                     onTap: f == null ? null : _toggle,
+                    note: voltageText == null
+                        ? signalNote(f?.batteryVoltageState)
+                        : null,
                   ),
                 ),
                 // No current sensing (XAG) drops the cell entirely and lets the
@@ -399,12 +403,16 @@ class _Reading extends StatelessWidget {
     required this.value,
     required this.unit,
     this.onTap,
+    this.note,
   });
 
   final String label;
   final String? value;
   final String unit;
   final VoidCallback? onTap;
+
+  /// Why [value] is missing. Takes the unit's place, so the row never grows.
+  final String? note;
 
   @override
   Widget build(BuildContext context) {
@@ -452,6 +460,20 @@ class _Reading extends StatelessWidget {
                     softWrap: false,
                     style: TextStyle(
                       fontSize: 13,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+                if (value == null && note != null) ...[
+                  const SizedBox(width: 4),
+                  Text(
+                    note!,
+                    maxLines: 1,
+                    softWrap: false,
+                    style: TextStyle(
+                      fontSize: 11,
+                      letterSpacing: 1.0,
+                      fontWeight: FontWeight.w600,
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
@@ -507,6 +529,7 @@ class _InstrumentRow extends StatelessWidget {
                   MotorTempSource.ntc => 'NTC',
                   _ => null,
                 },
+                note: signalNote(f?.motorTempState),
                 bandStart: thermalConfig?.motorBandStartC,
                 bandEnd: thermalConfig?.motorBandEndC,
               ),
@@ -520,6 +543,7 @@ class _InstrumentRow extends StatelessWidget {
                 max: 140,
                 unit: '°C',
                 caption: 'ESC',
+                note: signalNote(f?.escTempState),
                 bandStart: thermalConfig?.escBandStartC,
                 bandEnd: thermalConfig?.escBandEndC,
               ),

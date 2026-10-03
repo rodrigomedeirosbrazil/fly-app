@@ -34,6 +34,7 @@ class Dial extends StatelessWidget {
     this.label,
     this.caption,
     this.badge,
+    this.note,
     this.showScale = false,
     this.bandStart,
     this.bandEnd,
@@ -53,6 +54,10 @@ class Dial extends StatelessWidget {
 
   /// Provenance tag inside the ring, e.g. the motor temperature source.
   final String? badge;
+
+  /// Why there is no reading, shown under the dash. Ignored when [value] is
+  /// present: a valid number needs no excuse.
+  final String? note;
 
   /// Draw 0 and [max] at the ring's open ends.
   final bool showScale;
@@ -115,6 +120,24 @@ class Dial extends StatelessWidget {
                                 fontSize: side * 0.09,
                                 letterSpacing: 1.5,
                                 color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          if (v == null && note != null)
+                            SizedBox(
+                              width: side * 0.7,
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  note!,
+                                  maxLines: 1,
+                                  softWrap: false,
+                                  style: TextStyle(
+                                    fontSize: side * 0.08,
+                                    letterSpacing: 1.0,
+                                    fontWeight: FontWeight.w600,
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
                               ),
                             ),
                         ],

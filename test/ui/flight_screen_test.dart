@@ -32,6 +32,9 @@ TelemetryFrame frame({
   SignalState? motorTempState,
   SignalState? escTempState,
   SignalState? batteryVoltageState,
+  bool? hasTelemetry,
+  bool? bmsConnected,
+  bool? bmsConfigured,
 }) =>
     TelemetryFrame(
       socCoulomb: 87,
@@ -60,6 +63,9 @@ TelemetryFrame frame({
       motorTempState: motorTempState,
       escTempState: escTempState,
       batteryVoltageState: batteryVoltageState,
+      hasTelemetry: hasTelemetry,
+      bmsConnected: bmsConnected,
+      bmsConfigured: bmsConfigured,
     );
 
 /// A wire-shaped Thermal group: motor 80–100 °C, ESC 70–95 °C.
@@ -102,6 +108,43 @@ void main() {
     expect(find.descendant(of: motorDial, matching: find.text('0')),
         findsNothing);
     expect(find.text('CAN'), findsNothing);
+  });
+
+  testWidgets('a stale motor sensor says so under the dash', (tester) async {
+    await tester.pumpWidget(wrap(FlightScreen(
+      frame: frame(
+        motorTempC: null,
+        source: MotorTempSource.none,
+        motorTempState: SignalState.stale,
+      ),
+      stale: false,
+    )));
+
+    final motorDial =
+        find.ancestor(of: find.text('MOTOR'), matching: find.byType(Dial));
+    expect(find.descendant(of: motorDial, matching: find.text('DESATUALIZADO')),
+        findsOneWidget);
+  });
+
+  testWidgets('an invalid voltage sensor says so beside the dash',
+      (tester) async {
+    await tester.pumpWidget(wrap(FlightScreen(
+      frame: frame(voltage: null, batteryVoltageState: SignalState.invalid),
+      stale: false,
+    )));
+
+    expect(find.text('INVÁLIDO'), findsOneWidget);
+  });
+
+  testWidgets('a valid reading carries no note', (tester) async {
+    await tester.pumpWidget(wrap(FlightScreen(
+      frame: frame(motorTempState: SignalState.valid),
+      stale: false,
+    )));
+
+    expect(find.text('DESATUALIZADO'), findsNothing);
+    expect(find.text('INVÁLIDO'), findsNothing);
+    expect(find.text('SEM SENSOR'), findsNothing);
   });
 
   testWidgets('a disarm code is shown in the space the status bar reserves',
