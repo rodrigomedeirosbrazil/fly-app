@@ -13,7 +13,7 @@ fly-controller, and only listens.
 **Framework:** Flutter 3.47.3 (stable) · **Dart SDK:** ^3.13.3
 
 ```bash
-flutter test                  # 695 tests, no hardware needed
+flutter test                  # 776 tests, no hardware needed
 flutter analyze               # must be clean
 flutter build ios --release   # needs Xcode
 flutter build apk --release   # signed APK, ~45 MB (all three ABIs)
@@ -32,6 +32,24 @@ adb install -r build/app/outputs/flutter-apk/app-release.apk
 
 Unlike the iOS build, **an Android APK does not expire.** Whoever receives it
 keeps a working copy indefinitely.
+
+**Cutting a release.** `pubspec.yaml` carries the version, so the bump is a
+commit and the tag follows it:
+
+```bash
+# tag 2026-10-04.1  →  version: 2026.10.4+2026100401
+git commit -am "build: release 2026-10-04.1" && git tag 2026-10-04.1 && git push --follow-tags
+```
+
+The workflow refuses a tag that disagrees with the pubspec. The build number
+is the tag flattened to `YYYYMMDDNN`; the name is `YYYY.M.D` because iOS
+accepts only period-separated integers there. Build iOS from the same commit
+so the iPhone reports the version it actually is.
+
+It also refuses a tag that is not `AAAA-MM-DD.N` with `N` written without
+leading zeros — the rule `releaseBuildNumber` applies. A release the app
+cannot parse is a release the update notice never shows, so the failure would
+be invisible to everyone but the pilots who never get told.
 
 Installing on a connected iPhone:
 
@@ -766,6 +784,56 @@ explicit `switch` and must never index one by the other's integer.
 `DisarmReason` *is* positional, with a trailing `unknown` this repo adds so a
 reason from newer firmware degrades instead of throwing.
 
+## The app checks GitHub for a newer build
+
+Once per launch, `UpdateChecker` compares the installed build number with the
+latest release of this repository. It shows a line at the bottom of the
+connection screen and a fixed **VERSÃO DO APP** card on the settings index —
+never anything on the flight screen.
+
+**The comparison key is the build number.** `2026-10-03.1` cannot be an iOS
+version name, but `2026100301` is a valid `CFBundleVersion` and is already
+Android's `versionCode`. `lib/state/app_update_policy.dart` is pure and
+table-tested; it flattens the tag with the workflow's own rule, so a tag CI
+would refuse is a tag this never reads. `N` must be canonical and is parsed
+with `int.tryParse`, because the tag comes from the network and an absurdly
+long one must be an unreadable tag rather than a crash. Only a **strictly**
+newer release is a notice — a developer build ahead of the latest tag stays
+silent.
+
+**The app opens only URLs it built**, from a validated tag. The API's
+`html_url` is never read, so nothing the network says chooses where the
+browser goes. Android opens the release page and the system installer does
+the rest. **iOS gets text, not a link**: a release carries only an APK.
+
+**The cache cannot invent a notice.** The last tag seen is kept in
+`shared_preferences` so a launch with no signal still shows it, but the
+comparison is always against the *installed* build — updating clears the
+notice offline too. Its one failure mode is a deleted release.
+
+**Every failure is silence.** No network, a 403 from the 60-an-hour
+unauthenticated limit, a 404, a body that is not JSON, a tag out of pattern,
+a host that answers nothing — all of them are `UpdateUnknown`. No dialog,
+no retry, nothing that can delay Conectar. `check()` clears `checking` in a
+`finally`, so even an `Error` cannot leave the settings card on "Verificando…".
+
+`lib/net/release_feed.dart` is the **only code that talks to the internet**,
+the way `ble/` is the only code that talks to the radio. Its test runs a
+loopback `HttpServer` and must not initialise the test binding, which would
+replace `HttpClient` with one that answers 400 to everything.
+
+The build number and the browser come from the host channel `MainActivity.kt`
+already served — `buildNumber` on both platforms (iOS answers it from
+`AppDelegate.swift`), `openUrl` on Android only. `package_info_plus` and
+`url_launcher` would be two dependencies for one integer and one Intent.
+`lib/ble/app_host.dart` swallows *channel* failures — a host that refuses the
+call or lacks the method — because no number means no notice. A reply of the
+wrong type is a bug in the native half and is left to surface.
+
+A notice on the version card is **never dimmed** and may take two lines: on
+iOS the tail, "reinstale pelo Mac", is the part the pilot can act on, and
+cutting it off leaves a notice with nothing to do.
+
 ## Project Structure
 
 ```
@@ -775,8 +843,10 @@ lib/
 ├── state/      link_health.dart · telemetry_repository.dart
 │               ble_permission_policy.dart
 │               log_browser.dart · log_download.dart
+│               app_update_policy.dart · update_checker.dart
 ├── audio/      tone_player.dart
-├── ble/        fly_controller_link.dart · android_host.dart
+├── net/        release_feed.dart
+├── ble/        fly_controller_link.dart · android_host.dart · app_host.dart
 └── ui/         app.dart · connection_screen.dart · flight_screen.dart
                 reading_text.dart · widgets/dial.dart
                 settings/logs_screen.dart · settings/share_csv.dart
@@ -784,13 +854,15 @@ lib/
 
 The layering is the point, and it is worth preserving:
 
-- **`protocol/`**, **`state/link_health.dart`** and
-  **`state/ble_permission_policy.dart`** import nothing from
+- **`protocol/`**, **`state/link_health.dart`**,
+  **`state/ble_permission_policy.dart`** and **`state/app_update_policy.dart`**
+  import nothing from
   `package:flutter`. They are the Dart analogue of the firmware's host-testable
   headers (`ThrottleSignalLogic.h`, `PowerAlertLogic.h`): pure decision logic,
   fully tested in milliseconds with no device attached. Do not break this.
-- **`ble/`** is the only file that touches a radio, and **`audio/`** the only
-  one that makes a sound. Everything above them is testable precisely because
+- **`ble/`** is the only file that touches a radio, **`audio/`** the only
+  one that makes a sound, and **`net/`** the only one that reaches the
+  internet. Everything above them is testable precisely because
   that is true — `BuzzerMirror` takes an abstract `TonePlayer`, so every rule
   about layers and transitions is table-tested with no sound card.
 - **`state/telemetry_repository.dart`** is glue with no rules of its own.
@@ -984,6 +1056,10 @@ permission dialogs actually appearing. All are open — see
 and `flutter install` refuses the device outright. The cost is Android 6
 hardware — a Galaxy S5 tops out at API 23, one level short, and there is no
 cheap way around it.
+
+`INTERNET` is in the **main** manifest for the update notice, and for nothing
+else. It is the only traffic the release APK sends anywhere but the
+controller; debug and profile had it before, for the tooling.
 
 `compileSdk` is **37 with `compileSdkMinor = 0`**, pinned for every module in
 `android/build.gradle.kts`. `permission_handler_android` needs API 37
