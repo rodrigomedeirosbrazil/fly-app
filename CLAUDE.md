@@ -338,6 +338,10 @@ assumed data is what this codebase refuses everywhere else. A failed re-read is
 still a success — the controller accepted the write; only the confirmation is
 missing.
 
+The flight-clock reset lives in Sistema, not in the drawer, although the
+firmware allows it armed: it needs the PIN, and **the flight screen never
+prompts for one**.
+
 ### A pushed route freezes unless its content listens
 
 `MaterialPageRoute`'s builder runs **once**. Anything read from the repository
@@ -825,6 +829,10 @@ limiter shows as a `DISPONÍVEL xx %` chip. No banner, ever. An alert must not
 shift a number the pilot is in the middle of reading. Missing data collapses
 within its own card (no current → the cell drops and the voltage centres).
 
+The limiting card's red outline is a border every card always draws —
+transparent when idle — and a missing reading's reason takes the unit's
+place, so neither changes a size.
+
 ### The drawer is in the tree, not a route
 
 `showModalBottomSheet` pushes a route that builds once from the frame captured
@@ -1015,11 +1023,11 @@ available only when the binary service is present:
 Nothing on that list is absent any more, and **firmware update over BLE is
 done and verified on the aircraft** (2026-09-12).
 
-What is still not sent is `SESSION_RESET` (`0x20`), `PIN_CHANGE` (`0x28`) and
-the two Tmotor direction opcodes (`0x29`/`0x2A`).
-None of them is telemetry. `PIN_CHANGE` alone deserves care: it is the one
-write that is **not idempotent**, so it cannot use the retry every other write
-here depends on.
+`SESSION_RESET` (`0x20`) and `PIN_CHANGE` (`0x28`) are sent from the System
+screen. `PIN_CHANGE` is the one write that is **not idempotent**, so it is
+sent once and a timeout is reported as "the PIN may have changed" rather than
+as a failure. The two Tmotor direction opcodes (`0x29`/`0x2A`) are not sent,
+deliberately — the owner dropped them from the portal replacement.
 
 One duplication is now removable and has not been removed. The firmware
 appends `stateFreqHz` to the telemetry struct at offset 56 (58 bytes total),

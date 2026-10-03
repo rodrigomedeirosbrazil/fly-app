@@ -81,6 +81,18 @@ firmware answers `ErrAuth` and the app stays silent.
 This is the first piece of the web portal with a real alternative, and
 therefore the first step toward phase 4.
 
+**Portal parity, first slice, is done** (2026-10-02), and supersedes the
+paragraph above about what phase 2 does not send. The PIN can be changed and
+the flight clock reset from Sistema; `PIN_CHANGE` is sent once and a timeout
+reads "the PIN may have changed", because it cannot be retried. The Tmotor
+direction opcodes stay unsent, dropped by the owner. The rest is display: the
+readings that arrived in every frame and were never drawn — signal-state notes,
+`SEM DADOS`, the throttle ceiling, the limiting card's outline, the fault
+explanation, the voltage source, BMS state, BMS temperature and cell spread —
+and calibration, now gated on the capability bit instead of appearing on a
+controller with no voltage sensor. Logs and the features that need new firmware
+follow in plans A1 and A3.
+
 A binary telemetry characteristic (roughly 200 B of CSV becomes ~40 B, and it
 can carry fields the sentence has no room for), plus a command characteristic
 and a config characteristic. `Xctod` stays up for XCTrack.
