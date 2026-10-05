@@ -10,27 +10,13 @@
 /// `versionCode`, monotonic by construction.
 library;
 
+import 'github_release.dart';
+
+// Re-exported so existing importers keep finding it here.
+export 'github_release.dart' show releaseBuildNumber;
+
 /// The repository whose releases are the source of truth.
 const String kReleaseRepo = 'rodrigomedeirosbrazil/fly-app';
-
-/// The tag format `.github/workflows/release.yml` builds: `AAAA-MM-DD.N`.
-final RegExp _tagPattern = RegExp(r'^(2\d{3})-(\d{2})-(\d{2})\.(0|[1-9]\d*)$');
-
-/// `2026-10-03.1` → `2026100301`, the same flattening CI applies.
-///
-/// Null for any tag CI would refuse to build, including `N > 99`, where the
-/// build number would stop increasing. **An unreadable tag never produces a
-/// notice.**
-int? releaseBuildNumber(String tag) {
-  final match = _tagPattern.firstMatch(tag);
-  if (match == null) return null;
-  // tryParse: the tag comes from the network, and a digit run too long for an
-  // int must be an unreadable tag, not a FormatException.
-  final n = int.tryParse(match.group(4)!);
-  if (n == null || n > 99) return null;
-  final date = int.parse('${match.group(1)}${match.group(2)}${match.group(3)}');
-  return date * 100 + n;
-}
 
 /// `2026100301` → `2026-10-03.1`, so the installed version reads exactly like
 /// the tag on the releases page.

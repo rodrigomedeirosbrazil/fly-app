@@ -6,7 +6,10 @@ import 'package:flutter/material.dart';
 import '../../state/control_session.dart';
 import '../../state/bms_scan_controller.dart';
 import '../../state/config_editor.dart';
+import '../../net/release_feed.dart';
 import '../../state/dfu_session.dart';
+import '../../state/firmware_update_checker.dart';
+import '../../state/firmware_update_policy.dart';
 import '../../state/log_browser.dart';
 import '../../state/log_download.dart';
 import '../../state/remote_pairing_controller.dart';
@@ -37,10 +40,14 @@ import 'thermal_settings_screen.dart';
 ///
 /// [updates] is optional only so tests that do not care about the version
 /// card need not build a checker; `app.dart` always passes it.
+///
+/// [firmwareFeed] defaults to fly-controller's GitHub releases; tests inject a
+/// fake so navigation never builds a real HTTP client.
 void openSettings(
   BuildContext context,
   TelemetryRepository repo, {
   UpdateChecker? updates,
+  FirmwareFeed? firmwareFeed,
 }) {
   Navigator.of(context).push(
     MaterialPageRoute<void>(
@@ -83,7 +90,7 @@ void openSettings(
           ),
           onOpenBms: () => _pushBms(indexContext, repo),
           onOpenSystem: () => _pushSystem(indexContext, repo),
-          onOpenFirmware: () => _pushFirmware(indexContext, repo),
+          onOpenFirmware: () => _pushFirmware(indexContext, repo, firmwareFeed),
           onOpenLogs: () => _pushLogs(indexContext, repo),
         ),
       ),
@@ -274,16 +281,23 @@ class _LogsScreenWrapperState extends State<_LogsScreenWrapper> {
   }
 }
 
-void _pushFirmware(BuildContext context, TelemetryRepository repo) {
+void _pushFirmware(
+  BuildContext context,
+  TelemetryRepository repo,
+  FirmwareFeed? feed,
+) {
   Navigator.of(context).push(
-    MaterialPageRoute<void>(builder: (_) => _FirmwareScreenWrapper(repo: repo)),
+    MaterialPageRoute<void>(
+      builder: (_) => _FirmwareScreenWrapper(repo: repo, feed: feed),
+    ),
   );
 }
 
 class _FirmwareScreenWrapper extends StatefulWidget {
-  const _FirmwareScreenWrapper({required this.repo});
+  const _FirmwareScreenWrapper({required this.repo, this.feed});
 
   final TelemetryRepository repo;
+  final FirmwareFeed? feed;
 
   @override
   State<_FirmwareScreenWrapper> createState() => _FirmwareScreenWrapperState();
@@ -291,6 +305,7 @@ class _FirmwareScreenWrapper extends StatefulWidget {
 
 class _FirmwareScreenWrapperState extends State<_FirmwareScreenWrapper> {
   late final DfuSession _session;
+  late final FirmwareUpdateChecker _updates;
 
   @override
   void initState() {
@@ -302,10 +317,16 @@ class _FirmwareScreenWrapperState extends State<_FirmwareScreenWrapper> {
       // This should not happen in practice, but handle it gracefully.
       _session = DfuSession(_NoOpTransport());
     }
+    _updates = FirmwareUpdateChecker(
+      feed: widget.feed ?? GitHubReleaseFeed.forRepo(kFirmwareRepo),
+      installedVersion: widget.repo.installedFirmwareVersion,
+      controllerType: widget.repo.controllerType,
+    );
   }
 
   @override
   void dispose() {
+    _updates.dispose();
     _session.dispose();
     super.dispose();
   }
@@ -336,6 +357,7 @@ class _FirmwareScreenWrapperState extends State<_FirmwareScreenWrapper> {
       builder: (context, _) => FirmwareSettingsScreen(
         repo: widget.repo,
         session: _session,
+        updates: _updates,
         armed: widget.repo.frame?.isArmed ?? false,
         canUpdateFirmware: widget.repo.canUpdateFirmware,
         pickFile: _pickFile,

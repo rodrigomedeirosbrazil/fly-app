@@ -647,6 +647,31 @@ void main() {
       expect(repo.firmwareBuild, isNull);
     });
 
+    test('the installed firmware version and type are exposed raw', () {
+      final link = FakeLink()
+        ..fakeInfo = ControlInfo.decode([
+          1, 1, 0, 0, // protocol 1, XAG, no capabilities
+          ...'2026-09-12.1'.codeUnits,
+          ...List.filled(24 - '2026-09-12.1'.length, 0),
+        ]);
+      final repo = TelemetryRepository(
+          link: link, mirror: BuzzerMirror(FakePlayer()));
+      addTearDown(repo.dispose);
+
+      expect(repo.installedFirmwareVersion, '2026-09-12.1');
+      expect(repo.controllerType, ControllerType.xag);
+    });
+
+    test('without INFO there is no version and the type is unknown', () {
+      final link = FakeLink()..fakeInfo = null;
+      final repo = TelemetryRepository(
+          link: link, mirror: BuzzerMirror(FakePlayer()));
+      addTearDown(repo.dispose);
+
+      expect(repo.installedFirmwareVersion, isNull);
+      expect(repo.controllerType, ControllerType.unknown);
+    });
+
     test('both are null with no INFO at all', () {
       // The `$XCTOD` path never reads it.
       final repo = TelemetryRepository(

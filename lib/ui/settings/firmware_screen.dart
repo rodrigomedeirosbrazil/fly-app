@@ -2,8 +2,11 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
+import '../../protocol/control_info.dart';
 import '../../protocol/dfu_protocol.dart';
 import '../../state/dfu_session.dart';
+import '../../state/firmware_update_checker.dart';
+import '../../state/firmware_update_policy.dart';
 import '../../state/telemetry_repository.dart';
 import 'settings_card.dart';
 
@@ -12,6 +15,7 @@ class FirmwareSettingsScreen extends StatefulWidget {
     super.key,
     required this.repo,
     required this.session,
+    required this.updates,
     required this.armed,
     required this.canUpdateFirmware,
     required this.pickFile,
@@ -19,6 +23,10 @@ class FirmwareSettingsScreen extends StatefulWidget {
 
   final TelemetryRepository repo;
   final DfuSession session;
+
+  /// The GitHub check for this visit. Owned by the caller, which disposes it
+  /// with the screen.
+  final FirmwareUpdateChecker updates;
   final bool armed;
   final bool canUpdateFirmware;
   final Future<Uint8List?> Function() pickFile;
@@ -31,20 +39,31 @@ class _FirmwareSettingsScreenState extends State<FirmwareSettingsScreen> {
   Uint8List? _chosenImage;
   ImageInspection? _inspection;
 
+  /// The release asset the chosen image was downloaded as, or null when the
+  /// pilot picked a file. The warning text depends on it.
+  FirmwareAvailable? _downloaded;
+
   @override
   void initState() {
     super.initState();
-    widget.session.addListener(_onSessionChanged);
+    widget.session.addListener(_onChanged);
+    // Check BEFORE listening: check() notifies synchronously when it flips to
+    // `checking`, and a listener calling setState inside initState throws.
+    // The first build reads `checking` directly; later notifications arrive
+    // after an await, outside any build.
+    widget.updates.check();
+    widget.updates.addListener(_onChanged);
   }
 
   @override
   void dispose() {
-    widget.session.removeListener(_onSessionChanged);
+    widget.updates.removeListener(_onChanged);
+    widget.session.removeListener(_onChanged);
     _pinController.dispose();
     super.dispose();
   }
 
-  void _onSessionChanged() => setState(() {});
+  void _onChanged() => setState(() {});
 
   /// What the last pick failed with, or null. A pick that throws and a pick
   /// the pilot cancelled look identical from here unless one of them says so.
@@ -64,6 +83,35 @@ class _FirmwareSettingsScreenState extends State<FirmwareSettingsScreen> {
       _pickError = null;
       _chosenImage = image;
       _inspection = inspectImage(image!);
+      _downloaded = null;
+    });
+  }
+
+  /// Downloads, then puts the bytes exactly where a picked file goes, so
+  /// inspection, Enviar and Aplicar e reiniciar are the same code either way.
+  Future<void> _download() async {
+    final offer = widget.updates.availability;
+    if (offer is! FirmwareAvailable) return;
+    await widget.updates.download();
+    final bytes = widget.updates.image;
+    if (bytes == null || !mounted) return;
+    setState(() {
+      _pickError = null;
+      _chosenImage = bytes;
+      _inspection = inspectImage(bytes);
+      _downloaded = offer;
+    });
+  }
+
+  /// Re-adopts the image already downloaded, after a manual pick replaced it.
+  void _useDownloaded(FirmwareAvailable offer) {
+    final bytes = widget.updates.image;
+    if (bytes == null) return;
+    setState(() {
+      _pickError = null;
+      _chosenImage = bytes;
+      _inspection = inspectImage(bytes);
+      _downloaded = offer;
     });
   }
 
@@ -188,6 +236,14 @@ class _FirmwareSettingsScreenState extends State<FirmwareSettingsScreen> {
     final hasValidFile = fileProblem == null && _chosenImage != null;
 
     final sendDisabled = isDisabled || !hasValidFile;
+    final downloading =
+        widget.updates.downloadState == FirmwareDownloadState.downloading;
+    final sendDisabledNow = sendDisabled || downloading;
+    // Downloading is network only, so armed does not block it. A transfer in
+    // flight does: the chosen image must not change under it.
+    final transferIdle = widget.session.state == DfuTransferState.idle ||
+        widget.session.state == DfuTransferState.failed ||
+        widget.session.state == DfuTransferState.aborted;
     final commitDisabled = isDisabled ||
         widget.session.state != DfuTransferState.ready;
 
@@ -237,12 +293,20 @@ class _FirmwareSettingsScreenState extends State<FirmwareSettingsScreen> {
                       ],
                     ),
                     SettingsCard(
+                      title: 'NO GITHUB',
+                      children: _githubCard(
+                        context,
+                        canDownload: widget.canUpdateFirmware,
+                        downloadEnabled: transferIdle,
+                      ),
+                    ),
+                    SettingsCard(
                       title: 'ARQUIVO',
                       children: [
                         OutlinedButton(
                           key: const Key('pick-firmware'),
                           onPressed:
-                              isDisabled ? null : _pickFile,
+                              isDisabled || downloading ? null : _pickFile,
                           child: const Text('Escolher arquivo .bin'),
                         ),
                         if (_pickError != null) ...[
@@ -258,6 +322,13 @@ class _FirmwareSettingsScreenState extends State<FirmwareSettingsScreen> {
                         ],
                         if (_chosenImage != null) ...[
                           const SizedBox(height: 16),
+                          if (_downloaded != null) ...[
+                            Text(
+                              '${_downloaded!.assetName} · baixado do GitHub',
+                              style: settingsIdentifier(context),
+                            ),
+                            const SizedBox(height: 8),
+                          ],
                           if (_inspection?.sizeBytes != null)
                             Text(
                               'Tamanho: ${(_inspection!.sizeBytes / 1024 / 1024).toStringAsFixed(2)} MB',
@@ -287,9 +358,17 @@ class _FirmwareSettingsScreenState extends State<FirmwareSettingsScreen> {
                       title: 'AVISO',
                       children: [
                         Text(
-                          'O app não tem como saber se este firmware é do seu controlador. '
-                          'Um arquivo errado deixa o controlador sem iniciar, e a recuperação '
-                          'é por cabo USB.',
+                          _downloaded == null
+                              ? 'O app não tem como saber se este firmware é do seu controlador. '
+                                    'Um arquivo errado deixa o controlador sem iniciar, e a recuperação '
+                                    'é por cabo USB.'
+                              // Reduces the risk; does not remove it. The
+                              // release itself could be mislabelled, so the
+                              // wording says "chosen by", never "verified".
+                              : 'Imagem ${_typeLabel(widget.updates.controllerType)} do release '
+                                    '${_downloaded!.tag}, escolhida pelo tipo que o controlador '
+                                    'informou. Se ainda assim estiver errada, o controlador não '
+                                    'inicia e a recuperação é por cabo USB.',
                           style: TextStyle(
                             fontSize: 13,
                             color: Theme.of(context).colorScheme.error,
@@ -305,7 +384,7 @@ class _FirmwareSettingsScreenState extends State<FirmwareSettingsScreen> {
                             widget.session.state == DfuTransferState.aborted)
                           FilledButton(
                             key: const Key('send-firmware'),
-                            onPressed: sendDisabled ? null : _send,
+                            onPressed: sendDisabledNow ? null : _send,
                             child: const Text('Enviar'),
                           ),
                         if (widget.session.isTransferring) ...[
@@ -407,6 +486,127 @@ class _FirmwareSettingsScreenState extends State<FirmwareSettingsScreen> {
         ),
       ),
     );
+  }
+
+  String _typeLabel(ControllerType type) => switch (type) {
+    ControllerType.xag => 'XAG',
+    ControllerType.tmotor => 'Tmotor',
+    ControllerType.unknown => '?',
+  };
+
+  List<Widget> _githubCard(
+    BuildContext context, {
+    required bool canDownload,
+    required bool downloadEnabled,
+  }) {
+    final u = widget.updates;
+    final muted = TextStyle(
+      fontSize: 13,
+      color: Theme.of(context).colorScheme.onSurfaceVariant,
+    );
+    final error = TextStyle(
+      fontSize: 13,
+      color: Theme.of(context).colorScheme.error,
+    );
+
+    if (u.checking || u.availability == null) {
+      return [Text('Verificando no GitHub…', style: muted)];
+    }
+
+    final retryCheck = OutlinedButton(
+      key: const Key('retry-firmware-check'),
+      onPressed: u.check,
+      child: const Text('Tentar de novo'),
+    );
+
+    switch (u.availability!) {
+      case FirmwareUpToDate():
+        return [Text('Atualizado', style: settingsIdentifier(context))];
+      case FirmwareUnknown():
+        return [
+          Text('Não foi possível verificar', style: muted),
+          const SizedBox(height: 12),
+          retryCheck,
+        ];
+      case FirmwareNoAssetForType():
+        return [
+          Text(
+            'Não há imagem para este controlador neste release',
+            style: muted,
+          ),
+        ];
+      case final FirmwareAvailable offer:
+        final mb = (offer.size / 1024 / 1024)
+            .toStringAsFixed(1)
+            .replaceAll('.', ',');
+        return [
+          Text('Disponível ${offer.tag}', style: settingsIdentifier(context)),
+          if (offer.installedUnreadable) ...[
+            const SizedBox(height: 4),
+            Text('A versão instalada não é de um release', style: muted),
+          ],
+          if (canDownload) ...[
+            const SizedBox(height: 12),
+            ..._downloadRow(context, offer, mb, muted, error, downloadEnabled),
+          ],
+        ];
+    }
+  }
+
+  List<Widget> _downloadRow(
+    BuildContext context,
+    FirmwareAvailable offer,
+    String mb,
+    TextStyle muted,
+    TextStyle error,
+    bool enabled,
+  ) {
+    final u = widget.updates;
+    // Shown disabled rather than hidden while a transfer is in flight: fixed
+    // presence, varying state, so nothing under it shifts mid-transfer.
+    FilledButton button(String label) => FilledButton(
+      key: const Key('download-firmware'),
+      onPressed: enabled ? _download : null,
+      child: Text(label),
+    );
+    switch (u.downloadState) {
+      case FirmwareDownloadState.idle:
+        return [button('Baixar ${offer.tag} ($mb MB)')];
+      case FirmwareDownloadState.downloading:
+        final total = u.total ?? 0;
+        final fraction = total == 0 ? 0.0 : u.received / total;
+        return [
+          LinearProgressIndicator(value: fraction, minHeight: 8),
+          const SizedBox(height: 8),
+          Text('${(fraction * 100).toStringAsFixed(0)}%'),
+        ];
+      case FirmwareDownloadState.downloaded:
+        return [
+          Text('Baixado', style: muted),
+          // A manual pick afterwards supersedes the download; this is the way
+          // back, without spending the data again.
+          if (_downloaded == null) ...[
+            const SizedBox(height: 12),
+            OutlinedButton(
+              key: const Key('use-downloaded-firmware'),
+              onPressed: enabled ? () => _useDownloaded(offer) : null,
+              child: const Text('Usar a imagem baixada'),
+            ),
+          ],
+        ];
+      case FirmwareDownloadState.failed:
+        return [
+          Text('Falha no download', style: error),
+          const SizedBox(height: 12),
+          button('Tentar de novo'),
+        ];
+      case FirmwareDownloadState.incomplete:
+        return [
+          Text('Download incompleto', style: error),
+          const SizedBox(height: 12),
+          button('Tentar de novo'),
+        ];
+    }
   }
 
   /// The estimate, rounded to something a pilot reads at a glance.
