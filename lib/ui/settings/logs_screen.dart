@@ -1,11 +1,13 @@
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../../protocol/log_protocol.dart';
 import '../../state/config_editor.dart';
 import '../../state/log_browser.dart';
 import '../../state/log_download.dart';
+import 'csv_delivery.dart';
 import 'settings_card.dart';
 
 /// The controller's flight logs: list, export, delete.
@@ -87,6 +89,71 @@ class _LogsScreenState extends State<LogsScreen> {
         .showSnackBar(SnackBar(content: Text(message)));
   }
 
+  /// The web build's second step. The browser refuses a share sheet or a
+  /// download that does not follow a tap closely, and the BLE transfer takes
+  /// longer than it allows — so the bytes wait here for one. Every action
+  /// runs inside its own button's handler for the same reason.
+  void _offerWebDelivery(String name, Uint8List bytes) {
+    final canShare = canShareCsvFile(name, bytes);
+    final kb = (bytes.length / 1024).ceil();
+
+    void attempt(BuildContext dialogContext, String failure, bool Function() act) {
+      var ok = false;
+      try {
+        ok = act();
+      } catch (_) {
+        ok = false;
+      }
+      Navigator.pop(dialogContext);
+      if (!ok) _snack(failure);
+    }
+
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Registro baixado'),
+        content: Text('$name\n$kb KB'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Fechar'),
+          ),
+          TextButton(
+            onPressed: () => attempt(
+              dialogContext,
+              'O navegador bloqueou a nova aba.',
+              () => openCsvFile(name, bytes),
+            ),
+            child: const Text('Abrir'),
+          ),
+          TextButton(
+            onPressed: () => attempt(
+              dialogContext,
+              'Este navegador não salvou o arquivo. Use Abrir.',
+              () {
+                saveCsvFile(name, bytes);
+                return true;
+              },
+            ),
+            child: const Text('Salvar arquivo'),
+          ),
+          if (canShare)
+            TextButton(
+              onPressed: () {
+                // Started before the pop, inside the tap; awaited after.
+                final sharing = shareCsvFile(name, bytes);
+                Navigator.pop(dialogContext);
+                sharing.catchError((Object _) {
+                  if (mounted) _snack('Não foi possível compartilhar o registro.');
+                });
+              },
+              child: const Text('Compartilhar'),
+            ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _download(LogFileEntry file) async {
     final d = widget.download();
     _current = d;
@@ -108,6 +175,8 @@ class _LogsScreenState extends State<LogsScreen> {
     setState(() => _downloading = null);
 
     switch (outcome) {
+      case LogDownloaded(:final bytes) when kIsWeb:
+        _offerWebDelivery(file.name, bytes);
       case LogDownloaded(:final bytes):
         try {
           await widget.share(file.name, bytes);
