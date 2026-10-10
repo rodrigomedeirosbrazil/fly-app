@@ -39,6 +39,24 @@ Apple ID, which means **the app stops opening after 7 days** and has to be
 reinstalled. The device also needs Developer Mode enabled and the certificate
 trusted in Settings → General → VPN & Device Management.
 
+## In a browser — and on an iPhone without a build
+
+The same app runs on the web over Web Bluetooth:
+
+**https://rodrigomedeirosbrazil.github.io/fly-app/**
+
+- **iPhone / iPad:** Safari has no Web Bluetooth. Install
+  [Bluefy](https://apps.apple.com/app/bluefy-web-ble-browser/id1492822055)
+  (free) and open the address **inside Bluefy**. Tapping the link elsewhere
+  opens Safari, which cannot reach the controller.
+- **Android and desktop:** Chrome or Edge, no install.
+- Firmware updates take the `.bin` from the
+  [fly-controller releases](https://github.com/rodrigomedeirosbrazil/fly-controller/releases)
+  through the file picker — the web build does not download from GitHub.
+
+[CLAUDE.md](CLAUDE.md) (section Web) has what differs from the native build
+and how the site is deployed.
+
 ## Working on it
 
 [CLAUDE.md](CLAUDE.md) is the project guide: architecture, the rules the

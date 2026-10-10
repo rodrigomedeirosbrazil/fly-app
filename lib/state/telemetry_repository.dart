@@ -116,6 +116,15 @@ class TelemetryRepository extends ChangeNotifier {
 
   int get rejectedFrames => _health.rejectedCount;
 
+  /// When the last frame arrived, however old, or null when none has since
+  /// the last explicit stop. Lets the panel say how long it has been silent.
+  DateTime? get lastFrameAt => _health.last?.receivedAt;
+
+  /// Whether the last frame, however old, said the controller was armed.
+  bool get lastFrameArmed => _health.last?.isArmed ?? false;
+
+  DateTime now() => _now();
+
   /// Firmware version and controller type, as one support line — `2.4.1 ·
   /// XAG`. Null on the `$XCTOD` path, where INFO was never read.
   ///
@@ -253,6 +262,9 @@ class TelemetryRepository extends ChangeNotifier {
   }
 
   Future<void> stop() => _link.disconnect();
+
+  /// Tries again right away, without leaving the instrument panel.
+  Future<void> reconnect() => _link.reconnectNow();
 
   Future<void> openSettings() => _link.openSettings();
 

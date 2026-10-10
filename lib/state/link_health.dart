@@ -50,6 +50,10 @@ class LinkHealth {
   /// between "signal lost" and "never connected".
   bool isStale(DateTime now) => _last != null && frameAt(now) == null;
 
+  /// The last frame received, however old. For saying how long ago it was
+  /// and what it said — never for rendering; [frameAt] is for that.
+  TelemetryFrame? get last => _last;
+
   /// Drops the current frame.
   ///
   /// Call when the pilot has explicitly stopped — never on a dropped

@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:fly_app/ble/fly_controller_link.dart';
 import 'package:fly_app/protocol/config_groups.dart';
 import 'package:fly_app/protocol/telemetry_frame.dart';
 import 'package:fly_app/ui/flight_screen.dart';
@@ -182,6 +183,104 @@ void main() {
 
     expect(find.text('SEM SINAL'), findsOneWidget);
     expect(find.text('87'), findsNothing);
+  });
+
+  group('status chip', () {
+    final silentSince = DateTime.utc(2026, 9, 9, 12);
+    DateTime fortySecondsLater() => silentSince.add(const Duration(seconds: 40));
+
+    testWidgets('a stale link that is retrying says RECONECTANDO',
+        (tester) async {
+      await tester.pumpWidget(wrap(const FlightScreen(
+        frame: null,
+        stale: true,
+        linkStatus: LinkStatus.connecting,
+      )));
+
+      expect(find.text('RECONECTANDO'), findsOneWidget);
+      expect(find.text('SEM SINAL'), findsNothing);
+    });
+
+    testWidgets('tapping it while stale offers reconnect and disconnect',
+        (tester) async {
+      var reconnects = 0;
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: null,
+        stale: true,
+        lastFrameAt: silentSince,
+        now: fortySecondsLater,
+        onReconnect: () => reconnects++,
+        onDisconnect: () {},
+      )));
+
+      await tester.tap(find.text('SEM SINAL'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Último dado há 40 s.'), findsOneWidget);
+      await tester.tap(find.text('Reconectar'));
+      await tester.pumpAndSettle();
+      expect(reconnects, 1);
+    });
+
+    testWidgets('disconnecting needs the confirmation, not just the tap',
+        (tester) async {
+      var disconnects = 0;
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(armState: ArmState.disarmed),
+        stale: false,
+        onDisconnect: () => disconnects++,
+      )));
+
+      await tester.tap(find.text('DESARMADO'));
+      await tester.pumpAndSettle();
+      expect(disconnects, 0);
+      expect(find.text('Reconectar'), findsNothing); // live link: nothing to retry
+
+      await tester.tap(find.text('Desconectar'));
+      await tester.pumpAndSettle();
+      expect(disconnects, 1);
+    });
+
+    testWidgets('cancel leaves the link alone', (tester) async {
+      var calls = 0;
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: null,
+        stale: true,
+        onReconnect: () => calls++,
+        onDisconnect: () => calls++,
+      )));
+
+      await tester.tap(find.text('SEM SINAL'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cancelar'));
+      await tester.pumpAndSettle();
+      expect(calls, 0);
+    });
+
+    testWidgets('an armed last frame is called out before disconnecting',
+        (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: null,
+        stale: true,
+        lastFrameAt: silentSince,
+        lastFrameArmed: true,
+        now: fortySecondsLater,
+        onDisconnect: () {},
+      )));
+
+      await tester.tap(find.text('SEM SINAL'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('dizia ARMADO'), findsOneWidget);
+    });
+
+    testWidgets('without a disconnect handler the chip is inert',
+        (tester) async {
+      await tester.pumpWidget(wrap(const FlightScreen(frame: null, stale: true)));
+
+      await tester.tap(find.text('SEM SINAL'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+    });
   });
 
   testWidgets('the voltage cell toggles to per-cell on tap', (tester) async {

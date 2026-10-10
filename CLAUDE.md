@@ -1,6 +1,6 @@
 # Fly App — Claude Code Guide
 
-Flutter app (Android + iOS) that reads live telemetry from the
+Flutter app (Android, iOS and the web) that reads live telemetry from the
 [fly-controller](https://github.com/rodrigomedeirosbrazil/fly-controller)
 electric paramotor controller over BLE.
 
@@ -18,6 +18,8 @@ flutter analyze               # must be clean
 flutter build ios --release   # needs Xcode
 flutter build apk --release   # signed APK, ~45 MB (all three ABIs)
 flutter build apk --debug     # validates the Android config with no device
+tool/build_web.sh             # web build for GitHub Pages, into build/web
+tool/deploy_web.sh            # builds and publishes it — see Web below
 ```
 
 `flutter build apk --debug` is worth knowing: it is the cheapest way to
@@ -97,6 +99,7 @@ here — neither has a Bluetooth radio.
 | `audioplayers` | 6.8.1 | Mirrors the controller's buzzer. **See below.** |
 | `file_picker` | 12.3.0 | The pilot supplies the firmware `.bin` |
 | `share_plus` | 13.3.1 | Exports a downloaded flight log to the share sheet |
+| `web` | 1.1.1 | **Web only.** Blob download, share and new tab for a downloaded log |
 | `flutter_launcher_icons` | 0.14.4 | **Dev only.** Generates the icon sets |
 
 Plugins resolve through **Swift Package Manager**, not CocoaPods — Flutter 3.47
@@ -355,6 +358,9 @@ copies agree, so a write the app accepted and the firmware refused means the
 mirrored ranges have moved apart. It is reported as that, not as a pilot error.
 
 ### Settings is the only way out of the flight screen
+
+(Besides the status chip, which disconnects — see "The connection screen is a
+door, not a fallback".)
 
 The entry sits in the "MAIS DADOS" drawer — already outside the card stack,
 already opened deliberately — and is **disabled with its reason** while armed
@@ -970,6 +976,29 @@ The button becomes **Cancelar** while trying, because `connect()` retries
 forever with a backoff and there is no failure state to fall into. Giving up
 automatically was rejected: the pilot may be walking to a controller that is
 still powered off, which is exactly what the 8 s backoff cap was written for.
+(The web build is the exception: see Web.)
+
+The way back is the **status chip**, and only through a confirmation. Tapping
+it opens a dialog: **Desconectar** calls `stop()`, which resets `LinkHealth`
+and so returns here; **Reconectar**, offered only while stale, calls
+`reconnectNow()` without leaving the panel. If the last frame said armed, the
+dialog says so. The chip reads **RECONECTANDO** while the link is between
+attempts and **SEM SINAL** otherwise. Leaving the panel is still never
+automatic — it is the pilot's decision, and a stray tap cannot make it.
+
+### A silent link is a lost link
+
+`FlyControllerLink` treats **6 s without any notification** (telemetry or
+`RSP`) as a drop: it emits `disconnected`, tears down and enters the retry
+loop, exactly as for a drop the OS reported. The controller notifies at 1 Hz,
+so that is six missed frames, and it sits above `LinkHealth`'s 3 s staleness
+so the panel goes SEM SINAL first.
+
+This is what makes the web build reconnect at all — its plugin never reports
+a drop it did not cause (see Web) — but it is on for every platform, because
+a link that is up and mute is useless everywhere. One known cost: the
+firmware's `BMS_DETECT` blocks its loop for up to 10 s, which would trip the
+watchdog; the app does not send that opcode (see above).
 
 ### MTU
 
@@ -1183,6 +1212,61 @@ Signed with a **free personal Apple ID** (team `KP44BA9VNZ`, bundle
 
 Wireless installs work, but pairing requires one USB connection first
 (Xcode → Window → Devices and Simulators → Connect via network).
+
+## Web
+
+The same app, built for Web Bluetooth and served from GitHub Pages:
+
+**https://rodrigomedeirosbrazil.github.io/fly-app/** (keep the final slash —
+without it the offline cache does not apply).
+
+It exists for **iPhone pilots without a signed build**. Safari has no Web
+Bluetooth; [Bluefy](https://bluefy.app/) (free, App Store) is a browser that
+adds it, and the page is opened there. Chrome on Android and on the desktop
+supports it natively. Safari and Firefox do not, anywhere.
+
+Deploy with `tool/deploy_web.sh` from a clean checkout. It runs
+`tool/build_web.sh` and replaces the contents of the **`gh-pages`** branch,
+which holds only the build output and is what Pages serves. The build:
+
+- serves CanvasKit from the page's own origin (`--no-web-resources-cdn`);
+- generates **`sw.js`**, a cache-first service worker that precaches the app
+  (~17 MB) under a name derived from the content, registered from
+  `web/index.html`. Flutter's own worker is deprecated, unregisters itself, and
+  its loader only ever *updates* a registered worker — so `web/flutter_bootstrap.js`
+  passes it no `serviceWorkerSettings`, or it would take the same scope.
+  Offline works in Chrome after one visit; Bluefy (WKWebView) may not run
+  service workers at all.
+
+What is different on the web, and why:
+
+- **The scan is the browser's chooser.** `startScan` blocks on
+  `requestDevice` until the pilot picks; it only opens from a tap. The control
+  service is not advertised, so it is passed as `webOptionalServices` or it is
+  unreachable. Whatever the pilot picks is the controller — Web Bluetooth
+  carries no advertised name to match. A chooser closed empty stops the
+  attempt (back to idle) instead of retrying: a retry cannot reopen it.
+- **The chosen device is kept** across drops, so the retry loop reconnects to
+  it without the chooser. `disconnect()` and `reconnectNow()` forget it, which
+  is how the pilot picks another controller.
+- **The plugin never reports a drop it did not cause** — it ignores
+  `gattserverdisconnected`. The silence watchdog above is what notices.
+- **There is no MTU.** `mtuNow` stays at 23, which would cap the DFU at
+  20-byte packets. `maxDfuWriteBytes` is 509 (the 512-byte attribute limit)
+  instead; the DFU then sends the controller's `chunkSize`, its MTU minus 3,
+  and `LOG_READ` replies are trimmed to the MTU by the firmware.
+- **No GitHub downloads.** `GitHubReleaseFeed` is `dart:io`; the web build gets
+  a stub that finds no release. Release assets are served without CORS
+  anyway. The Firmware screen tells the pilot to fetch the `.bin` themselves
+  and use the file picker, and the app-update notice has nothing to say — the
+  page is always the newest app.
+- **A downloaded log waits for a tap.** The share sheet and a scripted
+  download both need a recent user gesture, and the BLE transfer outlasts it,
+  so share_plus's path did nothing. The web build shows a dialog —
+  Compartilhar (where the browser can share files), Salvar arquivo (a blob
+  URL) and Abrir (the CSV as text in a new tab, the way out of a browser that
+  does neither) — each acting inside its own button's tap
+  (`lib/ui/settings/csv_delivery_web.dart`).
 
 ## Licensing
 
