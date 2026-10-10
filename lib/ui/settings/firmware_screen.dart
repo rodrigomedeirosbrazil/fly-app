@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../../protocol/control_info.dart';
@@ -508,6 +509,19 @@ class _FirmwareSettingsScreenState extends State<FirmwareSettingsScreen> {
       fontSize: 13,
       color: Theme.of(context).colorScheme.error,
     );
+
+    // The web build cannot download a release: GitHub serves its assets
+    // without CORS headers, so the browser would refuse the bytes. Say where
+    // the file comes from instead of offering a check that always fails.
+    if (kIsWeb) {
+      return [
+        Text(
+          'Na versão web, baixe o .bin da página de releases do '
+          'fly-controller no GitHub e escolha o arquivo abaixo.',
+          style: muted,
+        ),
+      ];
+    }
 
     if (u.checking || u.availability == null) {
       return [Text('Verificando no GitHub…', style: muted)];
