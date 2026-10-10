@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io' show Platform;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -137,11 +138,27 @@ class FlyControllerLink {
   /// `mtuNow` is the plugin's own accounting of that cap — on iOS it is
   /// literally `MIN(maximumWriteValueLength, 512) + 3` — so this is the same
   /// number the write is checked against, not a guess at it.
+  ///
+  /// **On the web there is no such number.** Web Bluetooth never exposes the
+  /// MTU, so `mtuNow` stays at its 23-byte default and would cap the DFU at
+  /// 20-byte packets. The cap there is the 512-byte attribute limit instead:
+  /// the DFU then sends the controller's `chunkSize` — its own MTU minus 3,
+  /// and the MTU is one number per link — and `LOG_READ` replies are already
+  /// trimmed to the MTU by the firmware.
   int get maxDfuWriteBytes {
+    if (kIsWeb) return webMaxWriteBytes;
     final device = _device;
     if (device == null) return 20; // the 23-byte ATT default, minus overhead
     return device.mtuNow - 3;
   }
+
+  /// The largest attribute value Web Bluetooth will write, minus ATT overhead.
+  static const int webMaxWriteBytes = 509;
+
+  /// The device the browser's chooser returned. Kept across teardowns so a
+  /// dropped link reconnects to it directly: the chooser only opens from a
+  /// tap, so a retry that went back to it would fail on every attempt.
+  BluetoothDevice? _webChosen;
 
   /// Writes one `CMD` frame.
   ///
@@ -188,6 +205,10 @@ class FlyControllerLink {
   /// fails need three different things from the pilot, and every one of them
   /// otherwise looks identical from the outside: a scan that finds nothing.
   Future<LinkStatus?> blockingCondition() async {
+    // The browser owns permission and adapter state: its chooser is the
+    // prompt, and it reports a missing radio by failing to open.
+    if (kIsWeb) return null;
+
     if (Platform.isAndroid) {
       final required = requirementsForAndroid(await _host.sdkInt());
 
@@ -301,9 +322,15 @@ class FlyControllerLink {
     try {
       _statusController.add(LinkStatus.scanning);
 
-      final device = await _scanForController(generation);
+      final device = _webChosen ?? await _scanForController(generation);
       if (abandoned()) return;
-      if (device == null) return _scheduleRetry(generation);
+      if (device == null) {
+        // On the web, null means the pilot closed the chooser or the browser
+        // refused to open it. Neither gets better on a timer: wait for a tap.
+        if (kIsWeb) return _giveUpOnWeb();
+        return _scheduleRetry(generation);
+      }
+      if (kIsWeb) _webChosen = device;
 
       _statusController.add(LinkStatus.connecting);
       _device = device;
@@ -375,6 +402,9 @@ class FlyControllerLink {
         // A cancelled attempt must not wake up inside the next one's results
         // and race it for _device. The generation is the way out.
         if (generation != _generation) return finish(null);
+        // The browser's chooser is the filter: whatever the pilot picked is
+        // the controller, and Web Bluetooth carries no advertised name.
+        if (kIsWeb && results.isNotEmpty) return finish(results.first.device);
         for (final r in results) {
           // Two different names: platformName is what the OS has cached for
           // the device, advName is what the advertisement carries. Android
@@ -393,6 +423,9 @@ class FlyControllerLink {
       withServices: [serviceUuid],
       withNames: [deviceName],
       timeout: scanWindow,
+      // Web Bluetooth only exposes services named up front, and the control
+      // service is not advertised, so the filter above cannot reach it.
+      webOptionalServices: [controlServiceUuid],
     );
 
     // The scan *ending* is what finishes an unsuccessful attempt, and it has
@@ -478,6 +511,12 @@ class FlyControllerLink {
     _info = null;
     final tx = find(serviceUuid, txCharacteristicUuid);
     return tx == null ? null : (TelemetrySource.xctod, tx);
+  }
+
+  /// Leaves the link at rest after the chooser came back empty.
+  void _giveUpOnWeb() {
+    _wantConnection = false;
+    _statusController.add(LinkStatus.idle);
   }
 
   /// Backoff caps at 8 s: the pilot may be walking back to a controller that is
