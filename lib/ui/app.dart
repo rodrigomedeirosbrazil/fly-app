@@ -160,6 +160,12 @@ class _FlyAppState extends State<FlyApp> {
             muted: _repo.muted,
               audioError: _repo.audioError,
             onSetMuted: _repo.setMuted,
+            linkStatus: _repo.status,
+            lastFrameAt: _repo.lastFrameAt,
+            lastFrameArmed: _repo.lastFrameArmed,
+            now: _repo.now,
+            onReconnect: () => _repo.reconnect(),
+            onDisconnect: () => _repo.stop(),
             onOpenSettings: _repo.session == null
                 ? null
                 : () => openSettings(context, _repo, updates: _updates),

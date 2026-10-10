@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../ble/fly_controller_link.dart';
 import '../protocol/config_groups.dart';
 import '../protocol/telemetry_frame.dart';
 import 'reading_text.dart';
@@ -30,9 +31,33 @@ class FlightScreen extends StatefulWidget {
     this.muted = false,
     this.audioError,
     this.onSetMuted,
+    this.linkStatus,
+    this.lastFrameAt,
+    this.lastFrameArmed = false,
+    this.now,
+    this.onReconnect,
+    this.onDisconnect,
   });
 
   final TelemetryFrame? frame;
+
+  /// What the radio is doing. Lets the status chip tell "trying" from
+  /// "given up" while the panel is stale.
+  final LinkStatus? linkStatus;
+
+  /// When the last frame arrived, however old, and whether it said armed.
+  /// For the disconnect confirmation only.
+  final DateTime? lastFrameAt;
+  final bool lastFrameArmed;
+
+  /// The clock [lastFrameAt] is measured against. Null uses the wall clock.
+  final DateTime Function()? now;
+
+  /// Tries the link again without leaving this screen.
+  final VoidCallback? onReconnect;
+
+  /// Stops the link and returns to the connection screen.
+  final VoidCallback? onDisconnect;
 
   /// True when a frame was received but has aged out.
   final bool stale;
@@ -64,8 +89,69 @@ class FlightScreen extends StatefulWidget {
   State<FlightScreen> createState() => _FlightScreenState();
 }
 
+enum _LinkAction { reconnect, disconnect }
+
 class _FlightScreenState extends State<FlightScreen> {
   bool _drawerOpen = false;
+
+  /// The only way off this screen. Never automatic — replacing the panel in
+  /// flight is the one thing it must not do on its own — so it is the
+  /// pilot's, behind a confirmation a stray tap cannot get through.
+  void _confirmLink(BuildContext context) {
+    final at = widget.lastFrameAt;
+    final silentFor = (widget.stale && at != null)
+        ? (widget.now ?? DateTime.now)().difference(at).inSeconds
+        : null;
+
+    showDialog<_LinkAction>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(widget.stale
+            ? 'Sem dados do controlador'
+            : 'Desconectar do controlador?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (silentFor != null) Text('Último dado há $silentFor s.'),
+            if (widget.lastFrameArmed) ...[
+              if (silentFor != null) const SizedBox(height: 12),
+              const Text(
+                'O último dado dizia ARMADO. Desconectar o app não desliga o '
+                'motor, mas o painel sai da tela.',
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () =>
+                Navigator.pop(dialogContext, _LinkAction.disconnect),
+            child: const Text('Desconectar'),
+          ),
+          if (widget.stale && widget.onReconnect != null)
+            TextButton(
+              onPressed: () =>
+                  Navigator.pop(dialogContext, _LinkAction.reconnect),
+              child: const Text('Reconectar'),
+            ),
+        ],
+      ),
+    ).then((action) {
+      switch (action) {
+        case _LinkAction.reconnect:
+          widget.onReconnect?.call();
+        case _LinkAction.disconnect:
+          widget.onDisconnect?.call();
+        case null:
+          break;
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -89,7 +175,20 @@ class _FlightScreenState extends State<FlightScreen> {
                 padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
                 child: Column(
                   children: [
-                    _StatusRow(frame: f, stale: widget.stale),
+                    _StatusRow(
+                      frame: f,
+                      stale: widget.stale,
+                      // `disconnected` is the wait between two attempts: the
+                      // link reports it and then schedules the retry.
+                      reconnecting: const {
+                        LinkStatus.scanning,
+                        LinkStatus.connecting,
+                        LinkStatus.disconnected,
+                      }.contains(widget.linkStatus),
+                      onTap: widget.onDisconnect == null
+                          ? null
+                          : () => _confirmLink(context),
+                    ),
                     const SizedBox(height: 8),
                     Expanded(child: _BatteryCard(frame: f)),
                     const SizedBox(height: 8),
@@ -164,10 +263,21 @@ class _Card extends StatelessWidget {
 }
 
 class _StatusRow extends StatelessWidget {
-  const _StatusRow({required this.frame, required this.stale});
+  const _StatusRow({
+    required this.frame,
+    required this.stale,
+    this.reconnecting = false,
+    this.onTap,
+  });
 
   final TelemetryFrame? frame;
   final bool stale;
+
+  /// The link is retrying. Only shown while stale: a live frame says more.
+  final bool reconnecting;
+
+  /// Opens the reconnect / disconnect confirmation.
+  final VoidCallback? onTap;
 
   /// `mm:ss`, and minutes keep counting past 60 rather than rolling over — a
   /// paramotor flight is measured in minutes and an hour hand would be one
@@ -196,7 +306,11 @@ class _StatusRow extends StatelessWidget {
     late final Color color;
 
     if (f == null) {
-      text = stale ? 'SEM SINAL' : 'AGUARDANDO';
+      text = !stale
+          ? 'AGUARDANDO'
+          : reconnecting
+              ? 'RECONECTANDO'
+              : 'SEM SINAL';
       color = stale ? theme.colorScheme.error : theme.colorScheme.outline;
     } else if (f.disarmCode != null) {
       text = f.disarmCode!;
@@ -225,7 +339,13 @@ class _StatusRow extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 10),
-          _Chip(text: text, color: color),
+          // The chip is the handle for leaving this screen; see
+          // _confirmLink. A plain GestureDetector keeps the fixed row height.
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: onTap,
+            child: _Chip(text: text, color: color),
+          ),
           // hasTelemetry is the controller saying none of its own readings
           // arrived — no ESC over CAN, no sensors. Null is the sentence path,
           // which cannot say, and shows nothing.
