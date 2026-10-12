@@ -8,6 +8,7 @@ import 'package:fly_app/protocol/control_info.dart';
 import 'package:fly_app/protocol/set_time.dart';
 import 'package:fly_app/state/buzzer_mirror.dart';
 import 'package:fly_app/state/telemetry_repository.dart';
+import 'package:fly_app/state/telemetry_source_policy.dart';
 
 import 'fake_link.dart';
 
@@ -161,6 +162,31 @@ void main() {
     expect(repo.frame!.socCoulomb, 87);
     expect(repo.frame!.sessionSec, isNull,
         reason: 'the sentence cannot carry a flight clock');
+  });
+
+  group('telemetry source', () {
+    test('is unknown before any frame', () {
+      expect(repo.telemetrySource, isNull);
+    });
+
+    test('is the sentence after a CSV frame', () async {
+      await receiveOneFrame();
+      expect(repo.telemetrySource, TelemetrySource.xctod);
+    });
+
+    test('is the control service after a binary frame', () async {
+      link.emit(LinkStatus.connected);
+      link.feedBinary(binarySample());
+      await pumpEventQueue();
+      expect(repo.telemetrySource, TelemetrySource.control);
+    });
+
+    test('an explicit stop forgets it', () async {
+      await receiveOneFrame();
+      link.emit(LinkStatus.idle);
+      await pumpEventQueue();
+      expect(repo.telemetrySource, isNull);
+    });
   });
 
   test('an undecodable first binary frame falls back to the sentence',

@@ -3,7 +3,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../ble/fly_controller_link.dart';
 import '../protocol/config_groups.dart';
+import '../protocol/control_info.dart';
 import '../protocol/telemetry_frame.dart';
+import '../state/telemetry_source_policy.dart';
 import 'reading_text.dart';
 import 'widgets/dial.dart';
 import 'widgets/status_chip.dart';
@@ -37,6 +39,10 @@ class FlightScreen extends StatefulWidget {
     this.now,
     this.onReconnect,
     this.onDisconnect,
+    this.controllerType = ControllerType.unknown,
+    this.powerConfig,
+    this.telemetrySource,
+    this.rejectedFrames = 0,
   });
 
   final TelemetryFrame? frame;
@@ -84,6 +90,17 @@ class FlightScreen extends StatefulWidget {
 
   /// Called when the mute state changes.
   final Future<void> Function(bool)? onSetMuted;
+
+  /// The board, from `INFO`. Picks the bottom row and the ESC temperature
+  /// source. Unknown on the `$XCTOD` path.
+  final ControllerType controllerType;
+
+  /// The pilot's voltage window. Null draws the voltage with no arc.
+  final PowerConfig? powerConfig;
+
+  /// For the details screen.
+  final TelemetrySource? telemetrySource;
+  final int rejectedFrames;
 
   @override
   State<FlightScreen> createState() => _FlightScreenState();

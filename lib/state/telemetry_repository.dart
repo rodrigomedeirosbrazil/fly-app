@@ -116,6 +116,11 @@ class TelemetryRepository extends ChangeNotifier {
 
   int get rejectedFrames => _health.rejectedCount;
 
+  /// Which stream the frame on screen came from, for the details screen.
+  /// Null before the first frame and after an explicit stop.
+  TelemetrySource? get telemetrySource => _telemetrySource;
+  TelemetrySource? _telemetrySource;
+
   /// When the last frame arrived, however old, or null when none has since
   /// the last explicit stop. Lets the panel say how long it has been silent.
   DateTime? get lastFrameAt => _health.last?.receivedAt;
@@ -431,6 +436,7 @@ class TelemetryRepository extends ChangeNotifier {
       // from replacing the instrument panel with the connection screen while
       // the pilot is in the air. Nothing stale reaches the UI regardless —
       // frameAt already withholds anything older than staleAfter.
+      _telemetrySource = null;
       _health.reset();
     }
     notifyListeners();
@@ -444,6 +450,7 @@ class TelemetryRepository extends ChangeNotifier {
         for (final line in _assembler.add(payload.bytes)) {
           if (_health.onFrame(XctodParser.parse(line, receivedAt: now))) {
             _anyFrameRendered = true;
+            _telemetrySource = TelemetrySource.xctod;
           }
         }
 
@@ -463,6 +470,7 @@ class TelemetryRepository extends ChangeNotifier {
           unawaited(_link.fallBackToXctod());
         }
         if (decoded) {
+          _telemetrySource = TelemetrySource.control;
           _anyFrameRendered = true;
           _retuneGesture();
           if (!_thermalRequested && _link.canSendCommands) {
