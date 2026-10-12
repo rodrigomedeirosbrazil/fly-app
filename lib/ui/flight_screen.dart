@@ -682,8 +682,14 @@ class _InstrumentRow extends StatelessWidget {
                   _ => null,
                 },
                 note: signalNote(f?.motorTempState),
-                bandStart: thermalConfig?.motorBandStartC,
-                bandEnd: thermalConfig?.motorBandEndC,
+                stripes: [
+                  if (thermalConfig?.motorBandStartC != null) ...[
+                    DialStripe(thermalConfig!.motorBandStartC!,
+                        Theme.of(context).colorScheme.tertiary),
+                    DialStripe(thermalConfig!.motorBandEndC!,
+                        Theme.of(context).colorScheme.error),
+                  ],
+                ],
               ),
             ),
           ),
@@ -700,8 +706,14 @@ class _InstrumentRow extends StatelessWidget {
                 unit: '°C',
                 caption: 'ESC',
                 note: signalNote(f?.escTempState),
-                bandStart: thermalConfig?.escBandStartC,
-                bandEnd: thermalConfig?.escBandEndC,
+                stripes: [
+                  if (thermalConfig?.escBandStartC != null) ...[
+                    DialStripe(thermalConfig!.escBandStartC!,
+                        Theme.of(context).colorScheme.tertiary),
+                    DialStripe(thermalConfig!.escBandEndC!,
+                        Theme.of(context).colorScheme.error),
+                  ],
+                ],
               ),
             ),
           ),

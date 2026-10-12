@@ -62,110 +62,91 @@ void main() {
     expect(find.text('140'), findsNothing);
   });
 
-  group('the reduction band', () {
-    // The band is painted, so these assert on the painter's inputs rather
-    // than on pixels: a CustomPainter's fields are the contract here.
-    _DialPainterProbe probe(WidgetTester tester) {
-      final paint = tester.widget<CustomPaint>(
-        find.descendant(
-          of: find.byType(Dial),
-          matching: find.byType(CustomPaint),
-        ).first,
-      );
-      final painter = paint.painter!;
-      return _DialPainterProbe(
-        start: (painter as dynamic).bandStartFraction as double?,
-        cut: (painter as dynamic).cutFraction as double?,
-      );
-    }
+  group('stripes and colour', () {
+    // Painted, so these read the painter's inputs: its fields are the contract.
+    dynamic painter(WidgetTester tester) => tester
+        .widget<CustomPaint>(find
+            .descendant(of: find.byType(Dial), matching: find.byType(CustomPaint))
+            .first)
+        .painter;
 
-    testWidgets('is absent when no thresholds are known', (tester) async {
-      await tester.pumpWidget(wrap(const Dial(
-        value: 61,
-        max: 140,
-        unit: '°C',
-      )));
-      expect(probe(tester).start, isNull);
-    });
-
-    testWidgets('the ramp spans start to the cut point', (tester) async {
-      await tester.pumpWidget(wrap(const Dial(
-        value: 61,
-        max: 140,
-        unit: '°C',
-        bandStart: 70,
-        bandEnd: 140,
-      )));
-      final p = probe(tester);
-      expect(p.start, closeTo(0.5, 1e-9));
-      expect(p.cut, closeTo(1.0, 1e-9));
-    });
-
-    testWidgets('the cut point sits where power reaches zero, not at the end',
-        (tester) async {
-      // The firmware's calcMotorTempLimit constrains to 0 above maxTemp, so
-      // everything past it is full cut, not a return to normal. The painter
-      // fills cut..1.0 as the danger zone.
-      await tester.pumpWidget(wrap(const Dial(
-        value: 61,
-        max: 140,
-        unit: '°C',
-        bandStart: 70,
-        bandEnd: 105,
-      )));
-      final p = probe(tester);
-      expect(p.start, closeTo(0.5, 1e-9), reason: '70 of 140');
-      expect(p.cut, closeTo(0.75, 1e-9), reason: '105 of 140');
-    });
-
-    testWidgets('a maximum beyond the scale runs to the end of the arc',
+    testWidgets('stripes sit at their values as fractions of the scale',
         (tester) async {
       await tester.pumpWidget(wrap(const Dial(
         value: 61,
         max: 140,
         unit: '°C',
-        bandStart: 70,
-        bandEnd: 200,
+        stripes: [
+          DialStripe(70, Colors.amber),
+          DialStripe(105, Colors.red),
+        ],
       )));
-      expect(probe(tester).cut, closeTo(1.0, 1e-9),
-          reason: 'clamped, never drawn off the arc');
+      final p = painter(tester);
+      expect(p.stripeFractions as List<double>, [0.5, 0.75]);
+      expect(p.stripeColors as List<Color>, [Colors.amber, Colors.red]);
     });
 
-    testWidgets('numbers that do not form a range draw nothing',
-        (tester) async {
-      for (final (start, end) in [(0.0, 0.0), (100.0, 100.0), (110.0, 100.0)]) {
-        await tester.pumpWidget(wrap(Dial(
-          value: 61,
-          max: 140,
-          unit: '°C',
-          bandStart: start,
-          bandEnd: end,
-        )));
-        expect(probe(tester).start, isNull, reason: '$start to $end');
-      }
-    });
-
-    testWidgets('a band does not require a value', (tester) async {
-      // A missing sensor still has configured thresholds.
+    testWidgets('the whole arc takes the given colour', (tester) async {
       await tester.pumpWidget(wrap(const Dial(
-        value: null,
+        value: 90,
         max: 140,
         unit: '°C',
-        bandStart: 70,
-        bandEnd: 140,
+        color: Colors.amber,
       )));
-      expect(probe(tester).start, closeTo(0.5, 1e-9));
-      expect(find.text('–'), findsOneWidget);
+      expect(painter(tester).valueColor as Color, Colors.amber);
+    });
+
+    testWidgets('a scale that does not start at zero', (tester) async {
+      await tester.pumpWidget(wrap(const Dial(
+        value: 50.4,
+        min: 42,
+        max: 58.8,
+        unit: 'V',
+      )));
+      expect(painter(tester).fraction as double, closeTo(0.5, 1e-9));
+    });
+
+    testWidgets('out-of-scale values clamp, the number does not',
+        (tester) async {
+      await tester.pumpWidget(wrap(Dial(
+        value: -12,
+        max: 300,
+        unit: 'A',
+        format: (v) => v.round().toString(),
+      )));
+      expect(painter(tester).fraction as double, 0.0);
+      expect(find.text('-12'), findsOneWidget);
+
+      await tester.pumpWidget(wrap(Dial(
+        value: 320,
+        max: 300,
+        unit: 'A',
+        format: (v) => v.round().toString(),
+      )));
+      expect(painter(tester).fraction as double, 1.0);
+      expect(find.text('320'), findsOneWidget);
+    });
+
+    testWidgets('no arc shows the number alone', (tester) async {
+      await tester.pumpWidget(wrap(Dial(
+        value: 50.8,
+        max: 1,
+        unit: 'V',
+        showArc: false,
+        format: (v) => v.toStringAsFixed(1),
+      )));
+      expect(painter(tester).showArc as bool, isFalse);
+      expect(find.text('50.8'), findsOneWidget);
+    });
+
+    testWidgets('a scale with no width draws no arc', (tester) async {
+      await tester.pumpWidget(wrap(const Dial(
+        value: 3,
+        min: 5,
+        max: 5,
+        unit: 'V',
+      )));
+      expect(painter(tester).showArc as bool, isFalse);
     });
   });
-}
-
-class _DialPainterProbe {
-  const _DialPainterProbe({required this.start, required this.cut});
-
-  /// Where reduction begins, as a fraction of the arc.
-  final double? start;
-
-  /// Where power reaches zero. Everything from here to 1.0 is full cut.
-  final double? cut;
 }

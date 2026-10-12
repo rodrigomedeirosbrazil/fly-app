@@ -1,6 +1,15 @@
-import 'dart:math' show pi;
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+
+/// A threshold drawn as a thin radial line across the track, in the same unit
+/// as the dial's value.
+class DialStripe {
+  const DialStripe(this.at, this.color);
+
+  final double at;
+  final Color color;
+}
 
 /// A 270° gauge.
 ///
@@ -10,25 +19,15 @@ import 'package:flutter/material.dart';
 /// Sized only as a proportion of the space it is given — no point sizes — which
 /// is what survives an orientation change and a 320 pt phone alike.
 ///
-/// The reduction band is the arc between where the controller begins cutting
-/// power and where it cuts it entirely. Both come from the controller's NVS
-/// over `CFG_GET`, so they are this pilot's numbers rather than the factory
-/// defaults — which is why the band could not be drawn before phase 2.
-///
-/// It has two zones, because the firmware's derating has two. From
-/// [bandStart] to [bandEnd] power ramps down proportionally; **above**
-/// [bandEnd] `Power::calcMotorTempLimit` constrains it to zero and leaves it
-/// there. So the arc past [bandEnd] is not a return to normal — it is the one
-/// region where the motor is certainly not pushing, and it is drawn solid.
-///
-/// [bandStart] and [bandEnd] null means no band: the sentence path, firmware
-/// that cannot answer, or thresholds that do not describe a range. The scale
-/// stays [max] regardless, so the needle angle means the same temperature on
-/// every aircraft.
+/// Thresholds are [stripes], not filled bands, and the **whole** value arc
+/// takes [color]: green below the first threshold, amber between, red past the
+/// second. The caller decides the colour from `gauge_levels.dart`, so the alert
+/// card and the dial read the same level and cannot disagree.
 class Dial extends StatelessWidget {
   const Dial({
     super.key,
     required this.value,
+    this.min = 0,
     required this.max,
     required this.unit,
     this.label,
@@ -36,11 +35,17 @@ class Dial extends StatelessWidget {
     this.badge,
     this.note,
     this.showScale = false,
-    this.bandStart,
-    this.bandEnd,
+    this.stripes = const [],
+    this.color,
+    this.format,
+    this.showArc = true,
   });
 
   final double? value;
+
+  /// The scale. Fixed for temperature, power, current and RPM; the pilot's
+  /// own voltage window for voltage.
+  final double min;
   final double max;
   final String unit;
 
@@ -49,31 +54,41 @@ class Dial extends StatelessWidget {
   /// number, and a second copy made the ring read "68 % BATERIA %".
   final String? label;
 
-  /// Caption under the whole dial (the thermals' "MOTOR" / "ESC").
+  /// Caption under the whole dial ("TEMP MOTOR", "TENSÃO").
   final String? caption;
 
-  /// Provenance tag inside the ring, e.g. the motor temperature source.
+  /// Provenance tag inside the ring, e.g. the temperature source.
   final String? badge;
 
   /// Why there is no reading, shown under the dash. Ignored when [value] is
   /// present: a valid number needs no excuse.
   final String? note;
 
-  /// Draw 0 and [max] at the ring's open ends.
+  /// Draw [min] and [max] at the ring's open ends.
   final bool showScale;
 
-  /// Where power reduction begins, in the same unit as [value].
-  final double? bandStart;
+  final List<DialStripe> stripes;
 
-  /// Where power reaches zero. Everything hotter is also zero.
-  final double? bandEnd;
+  /// The value arc's colour. Null is the theme's primary (green).
+  final Color? color;
+
+  /// How the number is written. Null rounds to an integer.
+  final String Function(double)? format;
+
+  /// False draws the number with no ring at all: a scale the app cannot know
+  /// is not invented.
+  final bool showArc;
+
+  bool get _hasScale => showArc && max > min;
+
+  double _fractionOf(double v) => ((v - min) / (max - min)).clamp(0.0, 1.0);
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final v = value;
-    final fraction = (v == null || max <= 0) ? 0.0 : (v / max).clamp(0.0, 1.0);
-    final band = _bandFractions();
+    final hasScale = _hasScale;
+    final fraction = (v == null || !hasScale) ? 0.0 : _fractionOf(v);
 
     return Column(
       children: [
@@ -85,11 +100,14 @@ class Dial extends StatelessWidget {
                 painter: _DialPainter(
                   fraction: fraction,
                   trackColor: theme.colorScheme.surfaceContainerHighest,
-                  valueColor: theme.colorScheme.primary,
-                  rampColor: theme.colorScheme.tertiary,
-                  cutColor: theme.colorScheme.error,
-                  bandStartFraction: band.$1,
-                  cutFraction: band.$2,
+                  valueColor: color ?? theme.colorScheme.primary,
+                  stripeFractions: hasScale
+                      ? [for (final s in stripes) _fractionOf(s.at)]
+                      : const [],
+                  stripeColors: hasScale
+                      ? [for (final s in stripes) s.color]
+                      : const [],
+                  showArc: hasScale,
                 ),
                 child: Stack(
                   children: [
@@ -97,8 +115,18 @@ class Dial extends StatelessWidget {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          _Value(text: v == null ? '–' : v.round().toString(),
-                              unit: v == null ? null : unit, side: side),
+                          // Scales down rather than overflowing: a formatted
+                          // number ("5.830", "-12") can be wider than "61".
+                          FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: _Value(
+                                text: v == null
+                                    ? '–'
+                                    : (format?.call(v) ??
+                                        v.round().toString()),
+                                unit: v == null || unit.isEmpty ? null : unit,
+                                side: side),
+                          ),
                           if (label != null)
                             Text(
                               label!,
@@ -175,23 +203,13 @@ class Dial extends StatelessWidget {
       color: theme.colorScheme.onSurfaceVariant,
     );
     return [
-      Positioned(left: 0, bottom: 0, child: Text('0', style: style)),
-      Positioned(
-          right: 0, bottom: 0, child: Text(max.round().toString(), style: style)),
+      Positioned(left: 0, bottom: 0, child: Text(_trim(min), style: style)),
+      Positioned(right: 0, bottom: 0, child: Text(_trim(max), style: style)),
     ];
   }
 
-  /// The band as fractions of the arc, or (null, null) when there is none.
-  ///
-  /// Guards the same rule `ThermalConfig` does, because a Dial can be built
-  /// from anywhere: numbers that do not describe a range do not become one.
-  (double?, double?) _bandFractions() {
-    final start = bandStart;
-    final end = bandEnd;
-    if (start == null || end == null) return (null, null);
-    if (max <= 0 || start <= 0 || start >= end) return (null, null);
-    return ((start / max).clamp(0.0, 1.0), (end / max).clamp(0.0, 1.0));
-  }
+  static String _trim(double v) =>
+      v == v.roundToDouble() ? v.round().toString() : v.toStringAsFixed(1);
 }
 
 /// The number and its unit on one baseline. The unit is small and adjacent, not
@@ -245,81 +263,54 @@ class _DialPainter extends CustomPainter {
     required this.fraction,
     required this.trackColor,
     required this.valueColor,
-    required this.rampColor,
-    required this.cutColor,
-    required this.bandStartFraction,
-    required this.cutFraction,
+    required this.stripeFractions,
+    required this.stripeColors,
+    required this.showArc,
   });
 
   final double fraction;
   final Color trackColor;
   final Color valueColor;
-  /// Amber for the ramp, red for the cut. Two colours rather than two
-  /// opacities of one: caution and danger are different states, and the
-  /// instrument convention for them is older than this app.
-  final Color rampColor;
-  final Color cutColor;
-  /// Where reduction begins, as a fraction of the arc.
-  final double? bandStartFraction;
-
-  /// Where power reaches zero. From here to the end of the arc is full cut.
-  final double? cutFraction;
+  final List<double> stripeFractions;
+  final List<Color> stripeColors;
+  final bool showArc;
 
   /// Bottom-left, sweeping clockwise through the top to bottom-right.
-  static const double _start = 3 * pi / 4;
-  static const double _sweep = 3 * pi / 2;
+  static const double _start = 3 * math.pi / 4;
+  static const double _sweep = 3 * math.pi / 2;
 
   @override
   void paint(Canvas canvas, Size size) {
+    if (!showArc) return;
+
     final side = size.shortestSide;
     final stroke = side * 0.11;
-    final rect = Rect.fromCenter(
-      center: Offset(size.width / 2, size.height / 2),
-      width: side - stroke,
-      height: side - stroke,
-    );
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = (side - stroke) / 2;
+    final rect = Rect.fromCircle(center: center, radius: radius);
 
-    final track = Paint()
+    Paint arc(Color c) => Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = stroke
       ..strokeCap = StrokeCap.round
-      ..color = trackColor;
-    canvas.drawArc(rect, _start, _sweep, false, track);
+      ..color = c;
 
-    final bandStart = bandStartFraction;
-    final cut = cutFraction;
-    if (bandStart != null && cut != null) {
-      // Both under the value arc, so a warning never obscures the number it
-      // warns about. Butt caps: a round cap overhangs its own threshold and
-      // would put red where the controller is not yet reducing.
-      Paint zone(Color color) => Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = stroke
-        ..strokeCap = StrokeCap.butt
-        ..color = color;
-
-      // The ramp: power falls proportionally across this span.
-      if (cut > bandStart) {
-        canvas.drawArc(rect, _start + _sweep * bandStart,
-            _sweep * (cut - bandStart), false, zone(rampColor));
-      }
-      // The cut: power is zero from here to the end of the scale, so the
-      // band does not stop at the threshold -- stopping would suggest the
-      // arc beyond it is safe again, which is the opposite of true.
-      if (cut < 1.0) {
-        canvas.drawArc(rect, _start + _sweep * cut, _sweep * (1.0 - cut),
-            false, zone(cutColor));
-      }
+    canvas.drawArc(rect, _start, _sweep, false, arc(trackColor));
+    if (fraction > 0) {
+      canvas.drawArc(rect, _start, _sweep * fraction, false, arc(valueColor));
     }
 
-    if (fraction <= 0) return;
-
-    final value = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = stroke
-      ..strokeCap = StrokeCap.round
-      ..color = valueColor;
-    canvas.drawArc(rect, _start, _sweep * fraction, false, value);
+    // Over the value arc, so the threshold stays visible once it is passed.
+    final line = Paint()..strokeWidth = math.max(1.5, side * 0.025);
+    for (var i = 0; i < stripeFractions.length; i++) {
+      final angle = _start + _sweep * stripeFractions[i];
+      final dir = Offset(math.cos(angle), math.sin(angle));
+      canvas.drawLine(
+        center + dir * (radius - stroke * 0.85),
+        center + dir * (radius + stroke * 0.5),
+        line..color = stripeColors[i],
+      );
+    }
   }
 
   @override
@@ -327,8 +318,15 @@ class _DialPainter extends CustomPainter {
       old.fraction != fraction ||
       old.valueColor != valueColor ||
       old.trackColor != trackColor ||
-      old.rampColor != rampColor ||
-      old.cutColor != cutColor ||
-      old.bandStartFraction != bandStartFraction ||
-      old.cutFraction != cutFraction;
+      old.showArc != showArc ||
+      !_sameList(old.stripeFractions, stripeFractions) ||
+      !_sameList(old.stripeColors, stripeColors);
+
+  static bool _sameList<T>(List<T> a, List<T> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
 }

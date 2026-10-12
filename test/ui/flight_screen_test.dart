@@ -690,27 +690,26 @@ void main() {
     });
   });
 
-  group('the thermal band reaches the dials', () {
+  group('the thermal thresholds reach the dials', () {
     Dial dialWithCaption(WidgetTester tester, String caption) =>
         tester.widgetList<Dial>(find.byType(Dial)).firstWhere(
               (d) => d.caption == caption,
             );
 
-    testWidgets('motor and ESC each get their own thresholds',
-        (tester) async {
+    testWidgets('motor and ESC each get their own stripes', (tester) async {
       await tester.pumpWidget(wrap(FlightScreen(
         frame: frame(),
         stale: false,
         thermalConfig: ThermalConfig.decode(thermalGroupBytes())!,
       )));
 
-      expect(dialWithCaption(tester, 'MOTOR').bandStart, closeTo(80.0, 1e-9));
-      expect(dialWithCaption(tester, 'MOTOR').bandEnd, closeTo(100.0, 1e-9));
-      expect(dialWithCaption(tester, 'ESC').bandStart, closeTo(70.0, 1e-9));
-      expect(dialWithCaption(tester, 'ESC').bandEnd, closeTo(95.0, 1e-9));
+      expect(dialWithCaption(tester, 'MOTOR').stripes.map((s) => s.at),
+          [80.0, 100.0]);
+      expect(dialWithCaption(tester, 'ESC').stripes.map((s) => s.at),
+          [70.0, 95.0]);
     });
 
-    testWidgets('no config means no band, and nothing else changes',
+    testWidgets('no config means no stripes, and nothing else changes',
         (tester) async {
       await tester.pumpWidget(wrap(FlightScreen(
         frame: frame(),
@@ -718,8 +717,8 @@ void main() {
         thermalConfig: null,
       )));
 
-      expect(dialWithCaption(tester, 'MOTOR').bandStart, isNull);
-      expect(dialWithCaption(tester, 'ESC').bandStart, isNull);
+      expect(dialWithCaption(tester, 'MOTOR').stripes, isEmpty);
+      expect(dialWithCaption(tester, 'ESC').stripes, isEmpty);
       expect(find.text('61'), findsOneWidget, reason: 'the reading is intact');
     });
   });
