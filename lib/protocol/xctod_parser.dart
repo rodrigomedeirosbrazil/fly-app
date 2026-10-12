@@ -56,6 +56,8 @@ class XctodParser {
     final bmsMaxTempC = optInt(f[13]);
     final cellMinMv = optInt(f[14]);
     final cellMaxMv = optInt(f[15]);
+    // Field 17, newer firmware: whole minutes, empty with no estimate.
+    final remainingMin = f.length > 16 ? optInt(f[16]) : null;
 
     if (corrupt) return null;
 
@@ -89,6 +91,7 @@ class XctodParser {
       bmsMaxTempC: bmsMaxTempC,
       cellMinMv: cellMinMv,
       cellMaxMv: cellMaxMv,
+      remainingMin: remainingMin,
       receivedAt: receivedAt,
     );
   }

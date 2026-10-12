@@ -51,7 +51,7 @@ import 'panel_cards.dart';
 
 /// The single most important alert: what has the problem, then what kind.
 ///
-/// Without a frame it shows a dash. "Tudo certo" from no data would be the
+/// Without a frame it shows a dash. "Nenhum alerta" from no data would be the
 /// one reading on the panel that is confidently wrong.
 class AlertCard extends StatelessWidget {
   const AlertCard({
@@ -71,7 +71,7 @@ class AlertCard extends StatelessWidget {
     final top = alerts.isEmpty ? null : alerts.first;
     final style = alertStyle(s, top?.severity);
     final label =
-        top == null ? (line1: 'TUDO', line2: 'CERTO') : alertLabel(top);
+        top == null ? (line1: 'NENHUM', line2: 'ALERTA') : alertLabel(top);
 
     return PanelCard(
       key: const Key('alert-card'),

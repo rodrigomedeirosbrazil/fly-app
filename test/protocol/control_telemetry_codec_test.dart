@@ -418,4 +418,36 @@ void main() {
       expect(state(9), BmsLinkState.unknown);
     });
   });
+
+  group('remaining-time tail', () {
+    Uint8List withRemaining({int minutes = 0, int quality = 0}) {
+      final tail = ByteData(5)
+        ..setUint16(0, minutes, Endian.little) // remainingMin @69
+        ..setUint8(2, quality) // remainingQuality @71
+        ..setUint16(3, 412, Endian.little); // avgCurrentDa @72
+      return Uint8List.fromList(
+          [...withBmsTail(), ...tail.buffer.asUint8List()]);
+    }
+
+    test('coulomb count is a number', () {
+      final f = decode(withRemaining(minutes: 23, quality: 2));
+      expect(f.remainingMin, 23);
+      expect(f.remainingByVoltage, isFalse);
+    });
+
+    test('a voltage estimate is a number marked as such', () {
+      final f = decode(withRemaining(minutes: 0x0102, quality: 1));
+      expect(f.remainingMin, 258);
+      expect(f.remainingByVoltage, isTrue);
+    });
+
+    test('quality 0 is absent, not zero minutes', () {
+      expect(decode(withRemaining(minutes: 0, quality: 0)).remainingMin,
+          isNull);
+    });
+
+    test('a 69-byte packet from older firmware has no estimate', () {
+      expect(decode(withBmsTail()).remainingMin, isNull);
+    });
+  });
 }

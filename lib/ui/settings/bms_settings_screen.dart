@@ -172,6 +172,7 @@ class _BmsSettingsScreenState extends State<BmsSettingsScreen> {
         content: TextField(
           controller: _pinController,
           obscureText: true,
+          keyboardType: TextInputType.number,
           autofocus: true,
           decoration: const InputDecoration(hintText: 'Digite o PIN'),
         ),

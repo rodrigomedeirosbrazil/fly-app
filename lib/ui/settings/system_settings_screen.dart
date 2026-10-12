@@ -148,6 +148,7 @@ class _SystemSettingsScreenState extends State<SystemSettingsScreen> {
         content: TextField(
           controller: _pinController,
           obscureText: true,
+          keyboardType: TextInputType.number,
           autofocus: true,
           decoration: const InputDecoration(hintText: 'Digite o PIN'),
         ),
@@ -474,6 +475,7 @@ class _SystemSettingsScreenState extends State<SystemSettingsScreen> {
                 key: key,
                 controller: c,
                 obscureText: true,
+                keyboardType: TextInputType.number,
                 maxLength: kPinMaxLength,
                 decoration: InputDecoration(labelText: label, counterText: ''),
                 onChanged: (_) => setDialogState(() {}),

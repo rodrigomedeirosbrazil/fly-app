@@ -25,18 +25,18 @@ const near = FlightAlert(
 );
 
 void main() {
-  testWidgets('no alerts with a frame is TUDO CERTO', (tester) async {
+  testWidgets('no alerts with a frame is NENHUM ALERTA', (tester) async {
     await tester.pumpWidget(
         wrap(const AlertCard(alerts: [], hasFrame: true)));
-    expect(find.text('TUDO'), findsOneWidget);
-    expect(find.text('CERTO'), findsOneWidget);
+    expect(find.text('NENHUM'), findsOneWidget);
+    expect(find.text('ALERTA'), findsOneWidget);
     expect(find.text('ALERTAS'), findsOneWidget);
   });
 
   testWidgets('no frame is never an all-clear', (tester) async {
     await tester.pumpWidget(
         wrap(const AlertCard(alerts: [], hasFrame: false)));
-    expect(find.text('TUDO'), findsNothing);
+    expect(find.text('NENHUM'), findsNothing);
     expect(find.byIcon(Icons.check_circle_outline), findsNothing);
     expect(find.text('–'), findsOneWidget);
   });

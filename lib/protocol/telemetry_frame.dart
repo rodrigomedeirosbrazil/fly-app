@@ -104,6 +104,8 @@ class TelemetryFrame {
     this.bmsSoc,
     this.bmsCellCount,
     this.bmsLinkState,
+    this.remainingMin,
+    this.remainingByVoltage = false,
   });
 
   /// State of charge from coulomb counting, percent. Both sources always
@@ -181,6 +183,14 @@ class TelemetryFrame {
 
   /// Null only on firmware without the tail; otherwise always known.
   final BmsLinkState? bmsLinkState;
+
+  /// Remaining motor-on minutes, floored. Null when the controller has no
+  /// estimate or predates the field -- never zero for "unknown".
+  final int? remainingMin;
+
+  /// True when [remainingMin] comes from voltage alone (no current reading),
+  /// so it is approximate and does not follow the throttle.
+  final bool remainingByVoltage;
 
   bool get isArmed => armState == ArmState.armed;
 

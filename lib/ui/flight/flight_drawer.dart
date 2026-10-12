@@ -150,7 +150,7 @@ class _AlertList extends StatelessWidget {
           style: TextStyle(color: s.onSurfaceVariant));
     }
     if (alerts.isEmpty) {
-      return Text('Tudo certo', style: TextStyle(color: s.primary));
+      return Text('Nenhum alerta', style: TextStyle(color: s.primary));
     }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,

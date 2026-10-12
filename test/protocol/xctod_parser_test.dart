@@ -169,4 +169,20 @@ void main() {
       expect(XctodParser.parse(short, receivedAt: t0), isNull);
     });
   });
+
+  group('remaining minutes, field 17', () {
+    test('is read when present', () {
+      final f = XctodParser.parse('$healthy,27', receivedAt: t0)!;
+      expect(f.remainingMin, 27);
+    });
+
+    test('empty means no estimate', () {
+      expect(XctodParser.parse('$healthy,', receivedAt: t0)!.remainingMin,
+          isNull);
+    });
+
+    test('a 16-field sentence has no estimate', () {
+      expect(XctodParser.parse(healthy, receivedAt: t0)!.remainingMin, isNull);
+    });
+  });
 }

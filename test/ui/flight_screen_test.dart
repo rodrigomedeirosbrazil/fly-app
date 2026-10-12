@@ -33,6 +33,8 @@ TelemetryFrame frame({
   int? cellMinMv = 3712,
   Set<LimitCause>? limitCauses,
   Duration? sessionSec,
+  int? remainingMin,
+  bool remainingByVoltage = false,
   Duration? hourMeterSec,
   Duration? uptimeSec,
   int? cellDeltaMv,
@@ -66,6 +68,8 @@ TelemetryFrame frame({
       receivedAt: DateTime.utc(2026, 9, 9),
       limitCauses: limitCauses,
       sessionSec: sessionSec,
+      remainingMin: remainingMin,
+      remainingByVoltage: remainingByVoltage,
       hourMeterSec: hourMeterSec,
       uptimeSec: uptimeSec,
       cellDeltaMv: cellDeltaMv,
@@ -326,7 +330,7 @@ void main() {
       await tester.pumpWidget(wrap(FlightScreen(
           frame: frame(hasTelemetry: true), stale: false)));
       await open(tester);
-      expect(find.text('Tudo certo'), findsOneWidget);
+      expect(find.text('Nenhum alerta'), findsOneWidget);
     });
 
     testWidgets('the latched fault is explained in the new words',
@@ -485,6 +489,20 @@ void main() {
   });
 
   group('the portrait panel', () {
+    testWidgets('remaining time shows the estimate and its source',
+        (tester) async {
+      Finder inCard(String t) => find.descendant(
+          of: find.byKey(const Key('time-remaining')), matching: find.text(t));
+      await tester.pumpWidget(
+          wrap(FlightScreen(frame: frame(remainingMin: 23), stale: false)));
+      expect(inCard('23'), findsOneWidget);
+      expect(inCard('min'), findsOneWidget);
+      await tester.pumpWidget(wrap(FlightScreen(
+          frame: frame(remainingMin: 9, remainingByVoltage: true),
+          stale: false)));
+      expect(inCard('min · tensão'), findsOneWidget);
+    });
+
     testWidgets('times sit under the battery, remaining waits for firmware',
         (tester) async {
       await tester.pumpWidget(wrap(FlightScreen(
@@ -822,12 +840,12 @@ void main() {
   });
 
   group('the alert card', () {
-    testWidgets('a healthy frame says TUDO CERTO', (tester) async {
+    testWidgets('a healthy frame says NENHUM ALERTA', (tester) async {
       await tester.pumpWidget(wrap(FlightScreen(
         frame: frame(hasTelemetry: true),
         stale: false,
       )));
-      expect(find.text('TUDO'), findsOneWidget);
+      expect(find.text('NENHUM'), findsOneWidget);
     });
 
     testWidgets('a limited frame names the cause', (tester) async {
@@ -853,7 +871,7 @@ void main() {
     testWidgets('a stale link shows no all-clear', (tester) async {
       await tester.pumpWidget(
           wrap(const FlightScreen(frame: null, stale: true)));
-      expect(find.text('TUDO'), findsNothing);
+      expect(find.text('NENHUM'), findsNothing);
     });
 
     testWidgets('tapping the card opens the drawer', (tester) async {

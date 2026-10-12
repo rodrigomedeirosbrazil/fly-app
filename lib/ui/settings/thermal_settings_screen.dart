@@ -210,6 +210,7 @@ class _ThermalSettingsScreenState extends State<ThermalSettingsScreen> {
         content: TextField(
           controller: _pinController,
           obscureText: true,
+          keyboardType: TextInputType.number,
           autofocus: true,
           decoration: const InputDecoration(hintText: 'Digite o PIN'),
         ),

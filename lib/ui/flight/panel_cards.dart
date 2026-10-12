@@ -137,6 +137,7 @@ class FlightTimesRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final session = frame?.sessionSec;
+    final remaining = frame?.remainingMin;
     return Row(
       children: [
         Expanded(
@@ -149,15 +150,15 @@ class FlightTimesRow extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 8),
-        // Filled by the remaining-flight-time work. Until then the card is in
-        // place and says so, so adding the number later moves nothing.
-        const Expanded(
+        // Motor-on minutes from the controller's own estimate. A voltage-only
+        // estimate does not follow the throttle, so it says so.
+        Expanded(
           child: PanelCard(
-            key: Key('time-remaining'),
+            key: const Key('time-remaining'),
             child: _Figure(
               label: 'TEMPO RESTANTE',
-              value: null,
-              unit: 'min',
+              value: remaining == null ? null : '$remaining',
+              unit: frame?.remainingByVoltage == true ? 'min · tensão' : 'min',
               note: 'indisponível',
             ),
           ),

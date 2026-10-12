@@ -33,6 +33,10 @@ class ControlTelemetryCodec {
   /// firmware, and the tail's readings are absent rather than zero.
   static const int _bmsTailLength = 69;
 
+  /// The struct up to and including `avgCurrentDa`, which carries the
+  /// remaining-time estimate. Shorter is older firmware: absent, not zero.
+  static const int _remainingTailLength = 74;
+
   // Availability: does this build and configuration produce the reading at
   // all? Sensor *health* is a different question, answered by signalStates.
   static const int _vCurrent = 1 << 0;
@@ -80,6 +84,10 @@ class ControlTelemetryCodec {
     final limits = d.getUint8(13);
     final hasTail = bytes.length >= _bmsTailLength;
     final bmsData = hasTail && has(_vBms);
+    // 0 unavailable, 1 voltage estimate, 2 coulomb count. Quality is the
+    // availability answer; there is no validity bit.
+    final remainingQuality =
+        bytes.length >= _remainingTailLength ? d.getUint8(71) : 0;
 
     return TelemetryFrame(
       socCoulomb: d.getUint8(7),
@@ -134,6 +142,10 @@ class ControlTelemetryCodec {
       bmsSoc: bmsData ? d.getUint8(66) : null,
       bmsCellCount: bmsData ? d.getUint8(67) : null,
       bmsLinkState: hasTail ? _linkState(d.getUint8(68)) : null,
+      remainingMin: remainingQuality == 1 || remainingQuality == 2
+          ? d.getUint16(69, Endian.little)
+          : null,
+      remainingByVoltage: remainingQuality == 1,
     );
   }
 
