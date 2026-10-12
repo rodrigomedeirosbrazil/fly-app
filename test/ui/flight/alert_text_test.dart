@@ -27,17 +27,29 @@ FlightAlert a(
 void main() {
   test('labels name the component, then the problem', () {
     expect(alertLabel(a(AlertComponent.motor, AlertProblem.reducing)),
-        (line1: 'MOTOR', line2: 'REDUZINDO'));
+        (line1: 'MOTOR', line2: 'POTÊNCIA REDUZIDA'));
     expect(alertLabel(a(AlertComponent.esc, AlertProblem.noData)),
         (line1: 'ESC', line2: 'SEM DADOS'));
     expect(alertLabel(a(AlertComponent.battery, AlertProblem.critical)),
         (line1: 'BATERIA', line2: 'CRÍTICA'));
-    expect(alertLabel(a(AlertComponent.throttle, AlertProblem.disarmed)),
-        (line1: 'ACELERADOR', line2: 'DESARMOU'));
+    expect(
+        alertLabel(a(AlertComponent.throttle, AlertProblem.disarmed,
+            reason: DisarmReason.throttleLinkLost)),
+        (line1: 'ACELERADOR', line2: 'SEM SINAL'));
+    expect(
+        alertLabel(a(AlertComponent.battery, AlertProblem.disarmed,
+            reason: DisarmReason.batteryVoltageLost)),
+        (line1: 'BATERIA', line2: 'SEM TENSÃO'));
+    expect(
+        alertLabel(a(AlertComponent.esc, AlertProblem.disarmed,
+            reason: DisarmReason.escTempLost)),
+        (line1: 'ESC', line2: 'SEM TEMPERATURA'));
+    expect(alertLabel(a(AlertComponent.battery, AlertProblem.noSensor)),
+        (line1: 'BATERIA', line2: 'SEM TENSÃO'));
     expect(
         alertLabel(a(AlertComponent.controller, AlertProblem.unknownCode,
             code: 'NEW ERR')),
-        (line1: 'CONTROLADOR', line2: 'NEW ERR'));
+        (line1: 'CONTROLADOR', line2: 'CÓDIGO NEW ERR'));
   });
 
   test('every latched fault has its own sentence', () {

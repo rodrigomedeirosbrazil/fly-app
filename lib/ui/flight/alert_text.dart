@@ -29,15 +29,24 @@ String _noun(AlertComponent c) => switch (c) {
 ({String line1, String line2}) alertLabel(FlightAlert a) => (
       line1: _name(a.component),
       line2: switch (a.problem) {
-        AlertProblem.disarmed => 'DESARMOU',
-        AlertProblem.unknownCode => a.code ?? '?',
+        // The red card already says the motor stopped; the second line says
+        // why, which "DESARMOU" did not -- and "BATERIA DESARMOU" was wrong.
+        AlertProblem.disarmed => switch (a.reason) {
+            DisarmReason.throttleWiredInvalid => 'SINAL INVÁLIDO',
+            DisarmReason.throttleLinkLost => 'SEM SINAL',
+            DisarmReason.motorTempSourceChanged => 'SENSOR TROCOU',
+            DisarmReason.batteryVoltageLost => 'SEM TENSÃO',
+            _ => 'SEM TEMPERATURA',
+          },
+        AlertProblem.unknownCode => 'CÓDIGO ${a.code ?? '?'}',
         AlertProblem.overheated => 'SUPERAQUECIDO',
         AlertProblem.aboveLimit => 'ACIMA DO LIMITE',
-        AlertProblem.reducing => 'REDUZINDO',
+        AlertProblem.reducing => 'POTÊNCIA REDUZIDA',
         AlertProblem.critical => 'CRÍTICA',
         AlertProblem.low => 'BAIXA',
         AlertProblem.limited => 'LIMITADA',
-        AlertProblem.noSensor => 'SEM SENSOR',
+        AlertProblem.noSensor =>
+          a.component == AlertComponent.battery ? 'SEM TENSÃO' : 'SEM SENSOR',
         AlertProblem.noData => 'SEM DADOS',
         AlertProblem.noBms => 'SEM BMS',
         AlertProblem.nearLimit => 'PERTO DO LIMITE',

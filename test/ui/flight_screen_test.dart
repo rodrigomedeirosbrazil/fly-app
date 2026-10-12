@@ -314,7 +314,7 @@ void main() {
       await open(tester);
 
       final list = find.byKey(const Key('drawer-alerts'));
-      expect(find.descendant(of: list, matching: find.text('BATERIA · REDUZINDO')),
+      expect(find.descendant(of: list, matching: find.text('BATERIA · POTÊNCIA REDUZIDA')),
           findsOneWidget);
       expect(
           find.descendant(
@@ -853,7 +853,7 @@ void main() {
         frame: frame(powerPct: 70, limitCauses: {LimitCause.battery}),
         stale: false,
       )));
-      expect(find.text('REDUZINDO'), findsOneWidget);
+      expect(find.text('POTÊNCIA REDUZIDA'), findsOneWidget);
       // find.text matches a Text.rich by its plain text.
       expect(find.text('CONFIGURAÇÕES · 1 ALERTA'), findsOneWidget);
     });
@@ -894,9 +894,9 @@ void main() {
           )));
 
       await show(81);
-      expect(find.text('REDUZINDO'), findsOneWidget);
+      expect(find.text('POTÊNCIA REDUZIDA'), findsOneWidget);
       await show(79); // within 2 °C below the start
-      expect(find.text('REDUZINDO'), findsOneWidget);
+      expect(find.text('POTÊNCIA REDUZIDA'), findsOneWidget);
       await show(77);
       expect(find.text('PERTO DO LIMITE'), findsOneWidget);
     });
@@ -907,14 +907,14 @@ void main() {
       // after the first frame, and the alerts must not wait for the next one.
       final f = frame(motorTempC: 85, motorTempState: SignalState.valid);
       await tester.pumpWidget(wrap(FlightScreen(frame: f, stale: false)));
-      expect(find.text('REDUZINDO'), findsNothing);
+      expect(find.text('POTÊNCIA REDUZIDA'), findsNothing);
 
       await tester.pumpWidget(wrap(FlightScreen(
         frame: f,
         stale: false,
         thermalConfig: ThermalConfig.decode(thermalGroupBytes())!,
       )));
-      expect(find.text('REDUZINDO'), findsOneWidget);
+      expect(find.text('POTÊNCIA REDUZIDA'), findsOneWidget);
     });
   });
 

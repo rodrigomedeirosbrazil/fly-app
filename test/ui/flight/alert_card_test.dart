@@ -30,7 +30,7 @@ void main() {
         wrap(const AlertCard(alerts: [], hasFrame: true)));
     expect(find.text('NENHUM'), findsOneWidget);
     expect(find.text('ALERTA'), findsOneWidget);
-    expect(find.text('ALERTAS'), findsOneWidget);
+    expect(find.text('ALERTAS'), findsNothing);
   });
 
   testWidgets('no frame is never an all-clear', (tester) async {
@@ -45,7 +45,7 @@ void main() {
     await tester.pumpWidget(
         wrap(const AlertCard(alerts: [reducing, near], hasFrame: true)));
     expect(find.text('MOTOR'), findsOneWidget);
-    expect(find.text('REDUZINDO'), findsOneWidget);
+    expect(find.text('POTÊNCIA REDUZIDA'), findsOneWidget);
     expect(find.text('ESC'), findsNothing);
     expect(
       tester.widget<Text>(find.descendant(

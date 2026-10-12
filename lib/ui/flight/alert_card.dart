@@ -81,12 +81,6 @@ class AlertCard extends StatelessWidget {
       fillColor: hasFrame ? style.fill : null,
       child: LayoutBuilder(builder: (context, c) {
         final side = c.biggest.shortestSide;
-        final muted = TextStyle(
-          fontSize: 11,
-          letterSpacing: 1.5,
-          fontWeight: FontWeight.w600,
-          color: s.onSurfaceVariant,
-        );
         return Stack(
           children: [
             // Scales down rather than overflowing: on a 320x480 phone this
@@ -123,8 +117,6 @@ class AlertCard extends StatelessWidget {
                           ),
                           c.maxWidth),
                     ],
-                    const SizedBox(height: 2),
-                    Text('ALERTAS', maxLines: 1, style: muted),
                   ],
                 ),
               ),
