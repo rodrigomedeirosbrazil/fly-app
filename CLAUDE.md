@@ -19,7 +19,6 @@ flutter build ios --release   # needs Xcode
 flutter build apk --release   # signed APK, ~45 MB (all three ABIs)
 flutter build apk --debug     # validates the Android config with no device
 tool/build_web.sh             # web build for GitHub Pages, into build/web
-tool/deploy_web.sh            # builds and publishes it — see Web below
 ```
 
 `flutter build apk --debug` is worth knowing: it is the cheapest way to
@@ -43,6 +42,8 @@ commit and the tag follows it:
 git commit -am "build: release 2026-10-04.1"
 git tag 2026-10-04.1 && git push origin main 2026-10-04.1
 ```
+
+The tag publishes **both** the APK and the web app — see Web below.
 
 Push the tag by name. `--follow-tags` pushes only annotated tags, and
 `git tag <name>` makes a lightweight one, so it would leave the tag behind and
@@ -1225,9 +1226,19 @@ Bluetooth; [Bluefy](https://bluefy.app/) (free, App Store) is a browser that
 adds it, and the page is opened there. Chrome on Android and on the desktop
 supports it natively. Safari and Firefox do not, anywhere.
 
-Deploy with `tool/deploy_web.sh` from a clean checkout. It runs
-`tool/build_web.sh` and replaces the contents of the **`gh-pages`** branch,
-which holds only the build output and is what Pages serves. The build:
+**A release tag deploys it**, in the same workflow as the APK. The `pages`
+job in `release.yml` waits for the APK job, runs `tool/build_web.sh` and hands
+`build/web` to `actions/deploy-pages` — Pages is set to "GitHub Actions", so
+there is no build-output branch and nothing to push by hand. A tag that fails
+the version check or the tests publishes neither, and the site and the APK
+never come from different commits. A merge to `main` changes nothing a pilot
+sees until the next tag.
+
+The deploy runs in the `github-pages` environment, whose deployment policy
+must admit **tags** matching the release pattern, not just branches; without
+that rule the job is refused before it starts.
+
+The build:
 
 - serves CanvasKit from the page's own origin (`--no-web-resources-cdn`);
 - generates **`sw.js`**, a cache-first service worker that precaches the app

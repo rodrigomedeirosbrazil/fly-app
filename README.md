@@ -54,6 +54,7 @@ The same app runs on the web over Web Bluetooth:
   [fly-controller releases](https://github.com/rodrigomedeirosbrazil/fly-controller/releases)
   through the file picker — the web build does not download from GitHub.
 
+Every release tag publishes it together with the APK.
 [CLAUDE.md](CLAUDE.md) (section Web) has what differs from the native build
 and how the site is deployed.
 

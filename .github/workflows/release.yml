@@ -1,4 +1,5 @@
-# Builds the signed Android APK for a release tag and publishes it.
+# Builds the signed Android APK for a release tag and publishes it, then
+# builds the web app from the same commit and deploys it to GitHub Pages.
 #
 # iOS is deliberately absent. The app is signed with a free personal Apple ID,
 # which issues no distribution certificate, so a headless build cannot be
@@ -185,3 +186,50 @@ jobs:
             | versionName | `${{ steps.version.outputs.versionName }}` |
             | versionCode | `${{ steps.version.outputs.code }}` |
             | SHA-256 | `${{ steps.artifact.outputs.sha256 }}` |
+
+  # --- web ----------------------------------------------------------------
+  # The same tag, deployed to https://rodrigomedeirosbrazil.github.io/fly-app/.
+  # It waits for the APK job so the version check and the test gates run once
+  # and bind both: a tag that does not become an APK does not become a site
+  # either, and the two never serve different commits.
+  pages:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write      # deploy-pages
+      id-token: write   # deploy-pages proves the run's identity with OIDC
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    # Two tags pushed close together must deploy in order, not race.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      - name: Build the web app
+        run: tool/build_web.sh
+
+      # Debug symbols are megabytes nobody loads, and sw.js does not
+      # precache them either.
+      - name: Drop what the site does not serve
+        run: |
+          find build/web -name '*.symbols' -delete
+          rm -f build/web/.last_build_id
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+
+      - id: deploy
+        uses: actions/deploy-pages@v4
