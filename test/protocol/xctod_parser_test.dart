@@ -160,6 +160,8 @@ void main() {
 
       final g = XctodParser.parse('$healthy,23,,x', receivedAt: t0);
       expect(g, isNotNull);
+      expect(g!.socCoulomb, 87);
+      expect(g.cellMaxMv, 3745);
     });
 
     test('still rejects a line shorter than 16 fields', () {
