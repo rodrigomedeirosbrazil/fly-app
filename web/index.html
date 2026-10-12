@@ -33,6 +33,15 @@
   <link rel="manifest" href="manifest.json">
   <!-- The app's page colour, so loading is not a white flash. -->
   <style>body { background: #0D1117; }</style>
+  <!--
+    A downward drag on the status row opens the details screen. Without this
+    a browser can read it as pull-to-refresh, reload the page and drop the
+    Web Bluetooth link; reconnecting needs a tap on Conectar, so the pilot
+    would lose the panel in flight.
+  -->
+  <style>
+    html, body { overscroll-behavior: none; }
+  </style>
 </head>
 <body>
   <!--

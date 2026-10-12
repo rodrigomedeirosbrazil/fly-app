@@ -13,7 +13,7 @@ fly-controller, and only listens.
 **Framework:** Flutter 3.47.3 (stable) · **Dart SDK:** ^3.13.3
 
 ```bash
-flutter test                  # 776 tests, no hardware needed
+flutter test                  # 978 tests, no hardware needed
 flutter analyze               # must be clean
 flutter build ios --release   # needs Xcode
 flutter build apk --release   # signed APK, ~45 MB (all three ABIs)
@@ -23,7 +23,10 @@ tool/build_web.sh             # web build for GitHub Pages, into build/web
 
 `flutter build apk --debug` is worth knowing: it is the cheapest way to
 exercise the manifest merger and the Kotlin compile, and it needs no phone.
-`flutter analyze` and `flutter test` touch none of that.
+`flutter analyze` and `flutter test` touch none of that. In the same way
+`flutter build web --release` is the check for the web guard in
+`web/index.html` (`overscroll-behavior: none`, which keeps the pull on the
+status row from being read as pull-to-refresh and reloading the page).
 
 Handing the APK to another pilot:
 
@@ -275,15 +278,14 @@ is wrong is worse than no band, because it looks like information.
 zeros, and a band from zero to zero — or to the end of the scale — would paint
 the whole dial red. Motor and ESC are judged separately.
 
-**The band has two zones, because the derating does.** `Power::calcMotorTempLimit`
-returns 100 below the reduction start, ramps linearly to 0 at the maximum, and
-then `constrain(..., 0, 100)` holds it at **zero for every temperature above
-that**. So the arc past the maximum is not a return to normal — it is the one
-region where the motor is certainly not pushing. The ramp is drawn
-translucent, the cut solid, and the cut runs to the end of the scale.
-
-Drawing only the ramp was the first attempt and it was wrong in the most
-misleading direction: it left the hottest part of the dial looking untouched.
+**Thresholds are stripes, and the whole arc takes the zone's colour.** Amber
+stripe at the reduction start, red at the maximum; the value arc is green below
+the first, amber between, red from the second (`gauge_levels.dart`). Leaving a
+level needs 2 °C below its threshold, so a motor on a stripe does not flicker.
+The alert card reads the same levels, so it can never disagree with the dial
+beside it (its list is cached and rebuilt only when the frame or the thermal
+configuration changes identity). The first band drawing — a translucent ramp
+and a solid cut — read as two states at once.
 
 The dial's scale stays **fixed at 140 °C**; only the band is configured. The
 needle angle has to mean the same temperature on every aircraft and across a
@@ -363,7 +365,7 @@ mirrored ranges have moved apart. It is reported as that, not as a pilot error.
 (Besides the status chip, which disconnects — see "The connection screen is a
 door, not a fallback".)
 
-The entry sits in the "MAIS DADOS" drawer — already outside the card stack,
+The entry sits in the drawer behind the CONFIGURAÇÕES bar — already outside the card stack,
 already opened deliberately — and is **disabled with its reason** while armed
 or on a connection with no request channel, rather than hidden. Fixed presence,
 varying state, the same rule the status chips follow.
@@ -624,7 +626,7 @@ full-scale square into a rasp. `buildSquareWaveWav` returns **empty** for
 anything unplayable rather than a header describing samples that are not
 there.
 
-Mute lives in the "MAIS DADOS" drawer, defaults to sound on, and is **not
+Mute lives in the drawer behind the CONFIGURAÇÕES bar, defaults to sound on, and is **not
 persisted** — per-connection UI state, like everything else in that drawer.
 The repository owns the flag; the screen must not keep a copy.
 
@@ -843,6 +845,15 @@ explicit `switch` and must never index one by the other's integer.
 `DisarmReason` *is* positional, with a trailing `unknown` this repo adds so a
 reason from newer firmware degrades instead of throwing.
 
+### Two hand-copied facts about the boards
+
+`panel_layout_policy.dart` copies fly-controller's `TelemetryAvailability.cpp`:
+current needs the Tmotor board's sensor and ESC data, **or** a BMS; power exists
+exactly when current does; RPM only on the Tmotor board. It also copies where
+the ESC temperature comes from — CAN on Tmotor, the NTC on
+`ADS1115_ESC_TEMP_CHANNEL` on XAG — because the telemetry does not say. A
+firmware change to either is a change here.
+
 ## The app checks GitHub for a newer build
 
 Once per launch, `UpdateChecker` compares the installed build number with the
@@ -901,6 +912,7 @@ lib/
 │               pin_change.dart · log_protocol.dart
 ├── state/      link_health.dart · telemetry_repository.dart
 │               ble_permission_policy.dart
+│               gauge_levels.dart · panel_layout_policy.dart · flight_alerts.dart
 │               log_browser.dart · log_download.dart
 │               app_update_policy.dart · update_checker.dart
 │               github_release.dart · firmware_update_policy.dart
@@ -910,6 +922,10 @@ lib/
 ├── ble/        fly_controller_link.dart · android_host.dart · app_host.dart
 └── ui/         app.dart · connection_screen.dart · flight_screen.dart
                 reading_text.dart · widgets/dial.dart
+                flight/alert_card.dart · alert_text.dart · details_view.dart
+                flight/flight_drawer.dart · number_format.dart
+                flight/orientation_lock.dart · panel_cards.dart
+                flight/panel_prefs.dart
                 settings/logs_screen.dart · settings/share_csv.dart
                 settings/firmware_screen.dart
 ```
@@ -918,7 +934,9 @@ The layering is the point, and it is worth preserving:
 
 - **`protocol/`**, **`state/link_health.dart`**,
   **`state/ble_permission_policy.dart`**, **`state/app_update_policy.dart`**,
-  **`state/firmware_update_policy.dart`** and **`state/github_release.dart`**
+  **`state/firmware_update_policy.dart`**, **`state/github_release.dart`**,
+  **`state/gauge_levels.dart`**, **`state/panel_layout_policy.dart`** and
+  **`state/flight_alerts.dart`**
   import nothing from
   `package:flutter`. They are the Dart analogue of the firmware's host-testable
   headers (`ThrottleSignalLogic.h`, `PowerAlertLogic.h`): pure decision logic,
@@ -1041,29 +1059,34 @@ device never bonded with); the second is the one in the advertisement.
 
 ### Nothing enters or leaves the card stack
 
-Status, battery, instruments, throttle, drawer bar — fixed order, fixed
-presence. A fault shows as a chip in space the status row already reserves; a
-limiter shows as a `DISPONÍVEL xx %` chip. No banner, ever. An alert must not
-shift a number the pilot is in the middle of reading. Missing data collapses
-within its own card (no current → the cell drops and the voltage centres).
-
-The limiting card's red outline is a border every card always draws —
-transparent when idle — and a missing reading's reason takes the unit's
-place, so neither changes a size.
+Status, battery, flight times, alerts and temperatures, throttle, the bottom
+row, drawer bar — fixed order, fixed presence. Every alert is the **alert
+card**, in a slot it always occupies: the component on one line, the problem on
+the next, coloured like the gauges. No banner, ever. The bottom row's cards are
+chosen by the board and the BMS (`panel_layout_policy.dart`), which cannot
+change in flight; a reading lost in use keeps its card and shows its reason.
 
 ### The drawer is in the tree, not a route
 
 `showModalBottomSheet` pushes a route that builds once from the frame captured
 at push time and never sees another, so its readings silently freeze at 1 Hz.
-The secondary-data overlay is a `Stack` child of `FlightScreen`, rebuilt by the
-same `setState`. There is a regression test for this.
+The drawer is a `Stack` child of `FlightScreen`, rebuilt by the same
+`setState`. There is a regression test for this.
+
+The details screen follows the same rule. It is pulled down from the status
+row — never the screen edge, where iOS and Android keep their own shades — and
+opens only past 40 % of the height. Its strip on top keeps the live dot and
+honours `reconnecting`, like the status row it continues; the handle bar on the
+row takes no taps (`IgnorePointer`), so it cannot steal the chip's, and a
+cancelled drag settles exactly like a release.
 
 ### Sizes are proportional, never point constants
 
 Dials and readouts size against their box, the way the web panel uses `clamp()`.
 A fixed 38 pt number looks right on the phone it was written on and wraps into
 two lines on a narrower one — that is how the panel first overflowed. Every
-string that must not wrap carries `maxLines: 1`.
+string that must not wrap carries `maxLines: 1`. The dial's number sits in a
+`FittedBox(scaleDown)`, so a long reading shrinks instead of wrapping.
 
 `test/ui/flight_screen_test.dart` pumps the screen at four device sizes; a
 widget test fails on `RenderFlex overflowed`, so the pump *is* the assertion.
@@ -1072,9 +1095,9 @@ widget test fails on `RenderFlex overflowed`, so the pump *is* the assertion.
 
 `ColorScheme.fromSeed` tints every surface toward the seed hue, which turned
 the background green. The palette in `ui/app.dart` is explicit and neutral, so
-the only colour on screen is the data: green for the gauge, blue for throttle,
-red for armed, faults and the thermal cut, amber for the thermal reduction
-ramp.
+the only colour on screen is the data: green for a gauge in its normal zone,
+blue for throttle, amber for caution (thermal reduction, battery ≤ 10 %), red
+for danger (thermal cut, battery ≤ 5 %, armed, faults).
 
 Amber was added for the ramp rather than a second opacity of red. Caution and
 danger are different states and the instrument convention for them predates
@@ -1183,9 +1206,9 @@ identical from outside — a scan that finds nothing.
 
 ### Back does not leave the flight screen
 
-It closes the secondary-data overlay, which is a `Stack` child rather than a
-route and therefore has no route for back to pop; unguarded, back popped the
-app. `canPop` stays false with the overlay closed too — leaving mid-flight is
+It closes the details screen, then the drawer; both are `Stack` children
+rather than routes and therefore have no route for back to pop; unguarded, back
+popped the app. `canPop` stays false with the overlay closed too — leaving mid-flight is
 home or the app switcher, deliberately.
 
 ### Signing
@@ -1303,7 +1326,7 @@ Not oversights — this data does not exist on the `$XCTOD` stream, and is
 available only when the binary service is present:
 
 - **Flight clock** (`sessionSec`) — **done**, shown in the status row
-- **Which limiter is acting** (`limitCauses`) — **done**, named on the chip
+- **Which limiter is acting** (`limitCauses`) — **done**, named by the alert card
 - **The red reduction band** on the thermal dials — **done**, from `CFG_GET`
 - **Buzzer mirroring** — **done**, subsystem 5
 - **Flight-log download** — **done** (2026-10-02): list, export to the share sheet, delete one or all.
