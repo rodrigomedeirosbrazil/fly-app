@@ -290,88 +290,87 @@ void main() {
     expect(find.text('–'), findsWidgets);
   });
 
-  group('secondary data drawer', () {
-    testWidgets('the readings the panel does not show are reachable',
-        (tester) async {
-      await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
-
-      // Not on the panel.
-      expect(find.text('4200'), findsNothing);
-
+  group('the drawer', () {
+    Future<void> open(WidgetTester tester) async {
       await tester.tap(find.byKey(const Key('drawer-bar')));
       await tester.pumpAndSettle();
+    }
 
-      expect(find.text('4200'), findsOneWidget); // rpm
-      expect(find.text('91 %'), findsOneWidget); // soc from voltage
-      expect(find.text('1234'), findsOneWidget); // raw throttle
-      expect(find.text('38 °C'), findsOneWidget); // bms max temp
-      expect(find.text('3712 / 3745 mV'), findsOneWidget); // cell min / max
-      expect(find.text('CAN'), findsWidgets); // motor temp source
-    });
-
-    testWidgets('unavailable secondary readings show a dash, not a zero',
-        (tester) async {
-      await tester.pumpWidget(wrap(FlightScreen(
-        frame: frame(rpm: null, bmsMaxTempC: null, cellMinMv: null, cellMaxMv: null),
-        stale: false,
-      )));
-
-      await tester.tap(find.byKey(const Key('drawer-bar')));
-      await tester.pumpAndSettle();
-
-      // Each unavailable row reads as a dash. Checked row by row: a bare
-      // find.text('0') would collide with the battery dial's scale end.
-      for (final label in const ['RPM', 'Temp. máx. BMS', 'Células mín / máx']) {
-        final row = find.ancestor(of: find.text(label), matching: find.byType(Row));
-        expect(find.descendant(of: row.first, matching: find.text('–')),
-            findsOneWidget,
-            reason: '$label should read as a dash');
-      }
-      expect(find.text('0 °C'), findsNothing);
-    });
-
-    testWidgets('the drawer keeps updating while it is open', (tester) async {
-      // A modal route builds once from the frame captured when it was pushed
-      // and never sees another. The drawer has to live in the tree that the
-      // 1 Hz frames rebuild, or it silently freezes.
-      await tester.pumpWidget(wrap(FlightScreen(frame: frame(rpm: 4200), stale: false)));
-      await tester.tap(find.byKey(const Key('drawer-bar')));
-      await tester.pumpAndSettle();
-      expect(find.text('4200'), findsOneWidget);
-
-      await tester.pumpWidget(wrap(FlightScreen(frame: frame(rpm: 5100), stale: false)));
-      await tester.pumpAndSettle();
-
-      expect(find.text('5100'), findsOneWidget);
-      expect(find.text('4200'), findsNothing);
-    });
-
-    testWidgets('the handle is present with no frame at all', (tester) async {
-      await tester.pumpWidget(wrap(const FlightScreen(frame: null, stale: true)));
-
-      // The band stack never changes shape, so the handle exists even with no
-      // data behind it.
-      expect(find.byKey(const Key('drawer-bar')), findsOneWidget);
-    });
-
-    testWidgets('the binary-only readings reach the drawer', (tester) async {
+    testWidgets('lists every alert with its sentence', (tester) async {
       await tester.pumpWidget(wrap(FlightScreen(
         frame: frame(
-          hourMeterSec: const Duration(seconds: 123456),
-          cellDeltaMv: 33,
-          uptimeSec: const Duration(seconds: 900),
-          motorTempState: SignalState.valid,
-          escTempState: SignalState.stale,
-          batteryVoltageState: SignalState.valid,
+          powerPct: 50,
+          limitCauses: {LimitCause.battery},
+          hasTelemetry: false,
         ),
         stale: false,
       )));
-      await tester.tap(find.byKey(const Key('drawer-bar')));
-      await tester.pumpAndSettle();
+      await open(tester);
 
-      expect(find.text('34:17:36'), findsOneWidget); // hour meter
-      expect(find.text('33 mV'), findsOneWidget);
+      final list = find.byKey(const Key('drawer-alerts'));
+      expect(find.descendant(of: list, matching: find.text('BATERIA · REDUZINDO')),
+          findsOneWidget);
+      expect(
+          find.descendant(
+              of: list,
+              matching: find.text(
+                  'A bateria está baixa e o controlador limitou a potência a 50 %.')),
+          findsOneWidget);
+      expect(find.descendant(of: list, matching: find.text('ESC · SEM DADOS')),
+          findsOneWidget);
     });
+
+    testWidgets('says all is well when it is', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+          frame: frame(hasTelemetry: true), stale: false)));
+      await open(tester);
+      expect(find.text('Tudo certo'), findsOneWidget);
+    });
+
+    testWidgets('the latched fault is explained in the new words',
+        (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(
+          armState: ArmState.disarmed,
+          disarmReason: DisarmReason.throttleLinkLost,
+        ),
+        stale: false,
+      )));
+      await open(tester);
+      expect(find.textContaining('controle sem fio ficou mais de 3 segundos'),
+          findsOneWidget);
+    });
+
+    testWidgets('keeps updating while open', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(powerPct: 70, limitCauses: {LimitCause.battery}),
+        stale: false,
+      )));
+      await open(tester);
+      expect(find.textContaining('a 70 %'), findsOneWidget);
+
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(powerPct: 40, limitCauses: {LimitCause.battery}),
+        stale: false,
+      )));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('a 40 %'), findsOneWidget);
+      expect(find.textContaining('a 70 %'), findsNothing);
+    });
+
+    testWidgets('carries no telemetry readings any more', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
+      await open(tester);
+      expect(find.text('Horímetro'), findsNothing);
+      expect(find.text('Detalhes da telemetria'), findsNothing);
+    });
+
+    testWidgets('the bar is present with no frame at all', (tester) async {
+      await tester.pumpWidget(
+          wrap(const FlightScreen(frame: null, stale: true)));
+      expect(find.byKey(const Key('drawer-bar')), findsOneWidget);
+    });
+
 
     testWidgets('the settings entry is present and live when disarmed',
         (tester) async {
@@ -430,13 +429,12 @@ void main() {
 
       await tester.tap(find.byKey(const Key('drawer-bar')));
       await tester.pumpAndSettle();
-      // 4200 is the rpm, which only the overlay shows.
-      expect(find.text('4200'), findsOneWidget);
+      expect(find.byKey(const Key('drawer')), findsOneWidget);
 
       await simulateSystemBack();
       await tester.pumpAndSettle();
 
-      expect(find.text('4200'), findsNothing);
+      expect(find.byKey(const Key('drawer')), findsNothing);
       // Still mounted: back closed the overlay, it did not pop the screen.
       expect(find.byType(FlightScreen), findsOneWidget);
     });
@@ -672,95 +670,6 @@ void main() {
 
       expect(find.text('DESLIGADO'), findsOneWidget);
       expect(find.text('LIGADO'), findsNothing);
-    });
-  });
-
-  group('the drawer names what the panel only implies', () {
-    Future<void> openDrawer(WidgetTester tester) async {
-      await tester.tap(find.byKey(const Key('drawer-bar')));
-      await tester.pumpAndSettle();
-    }
-
-    testWidgets('the drawer explains the latched fault', (tester) async {
-      await tester.pumpWidget(wrap(FlightScreen(
-        frame: frame(
-          armState: ArmState.disarmed,
-          disarmReason: DisarmReason.throttleLinkLost,
-        ),
-        stale: false,
-      )));
-      await openDrawer(tester);
-
-      expect(find.text('Desarmado: falha no acelerador (sem fio)'),
-          findsOneWidget);
-    });
-
-    testWidgets('a code the app has no sentence for gets the portal fallback',
-        (tester) async {
-      await tester.pumpWidget(wrap(FlightScreen(
-        frame: frame(
-          armState: ArmState.disarmed,
-          disarmReason: DisarmReason.unknown,
-          rawDisarmCode: 'NEW ERR',
-        ),
-        stale: false,
-      )));
-      await openDrawer(tester);
-
-      expect(find.byKey(const Key('fault-explanation')), findsOneWidget);
-      expect(find.text('Desarmado por falha'), findsOneWidget);
-      expect(find.text('Código: NEW ERR'), findsOneWidget);
-    });
-
-    testWidgets('a manual disarm explains nothing', (tester) async {
-      await tester.pumpWidget(wrap(FlightScreen(
-        frame: frame(
-            armState: ArmState.disarmed, disarmReason: DisarmReason.manual),
-        stale: false,
-      )));
-      await openDrawer(tester);
-
-      expect(find.byKey(const Key('fault-explanation')), findsNothing);
-    });
-
-    testWidgets('the drawer names where per-cell voltage comes from',
-        (tester) async {
-      await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
-      await openDrawer(tester);
-      expect(find.text('BMS · menor célula'), findsOneWidget);
-    });
-
-    testWidgets('without a BMS cell the source is the pack divided by 14',
-        (tester) async {
-      await tester.pumpWidget(wrap(FlightScreen(
-        frame: frame(cellMinMv: null, cellMaxMv: null),
-        stale: false,
-      )));
-      await openDrawer(tester);
-      expect(find.text('Calculado ÷14S'), findsOneWidget);
-    });
-
-    testWidgets('the drawer shows the BMS link state', (tester) async {
-      await tester.pumpWidget(wrap(FlightScreen(
-        frame: frame(bmsConfigured: true, bmsConnected: false),
-        stale: false,
-      )));
-      await openDrawer(tester);
-      expect(find.text('Sem conexão'), findsOneWidget);
-    });
-
-    testWidgets('the drawer says the BMS is connecting when it is',
-        (tester) async {
-      await tester.pumpWidget(wrap(FlightScreen(
-        frame: frame(
-          bmsConfigured: true,
-          bmsConnected: false,
-          bmsLinkState: BmsLinkState.connecting,
-        ),
-        stale: false,
-      )));
-      await openDrawer(tester);
-      expect(find.text('Conectando'), findsOneWidget);
     });
   });
 

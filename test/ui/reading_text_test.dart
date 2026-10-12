@@ -10,18 +10,4 @@ void main() {
     expect(signalNote(SignalState.valid), isNull);
     expect(signalNote(null), isNull); // the sentence path cannot say
   });
-
-  test('every fault the firmware can latch has an explanation', () {
-    for (final r in [
-      DisarmReason.throttleWiredInvalid,
-      DisarmReason.throttleLinkLost,
-      DisarmReason.motorTempLost,
-      DisarmReason.escTempLost,
-      DisarmReason.batteryVoltageLost,
-      DisarmReason.motorTempSourceChanged,
-    ]) {
-      expect(kFaultExplanations[r], isNotNull, reason: '$r');
-    }
-    expect(kFaultExplanations[DisarmReason.manual], isNull);
-  });
 }
