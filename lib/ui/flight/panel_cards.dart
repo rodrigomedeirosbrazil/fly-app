@@ -384,7 +384,7 @@ class BottomRowCards extends StatelessWidget {
       min: range?.min ?? 0,
       max: range?.max ?? 1,
       showArc: range != null,
-      unit: cell ? 'V/cél' : 'V',
+      unit: 'V',
       caption: caption,
       note: signalNote(f?.batteryVoltageState),
       format: cell
@@ -406,7 +406,7 @@ class BottomRowCards extends StatelessWidget {
         child: Stack(children: [
           _voltageDial(s, cell,
               key: const Key('gauge-voltage'),
-              caption: cell ? 'TENSÃO/CÉL' : 'TENSÃO'),
+              caption: cell ? 'CÉLULA' : 'TENSÃO'),
           const SwitchMark(),
         ]),
       );

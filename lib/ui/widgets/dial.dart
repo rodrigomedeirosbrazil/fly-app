@@ -120,15 +120,21 @@ class Dial extends StatelessWidget {
                         children: [
                           // Scales down rather than overflowing: a formatted
                           // number ("5.830", "-12") can be wider than "61".
-                          FittedBox(
-                            fit: BoxFit.scaleDown,
-                            child: _Value(
+                          // Bounded by the ring's inside, not the card: the
+                          // card is wider than the hole and "58,1 V" ran
+                          // over the arc.
+                          ConstrainedBox(
+                            constraints: BoxConstraints(maxWidth: side * 0.68),
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: _Value(
                                 text: v == null
                                     ? '–'
-                                    : (format?.call(v) ??
-                                        v.round().toString()),
+                                    : (format?.call(v) ?? v.round().toString()),
                                 unit: v == null || unit.isEmpty ? null : unit,
-                                side: side),
+                                side: side,
+                              ),
+                            ),
                           ),
                           if (label != null)
                             Text(
@@ -241,6 +247,7 @@ class _Value extends StatelessWidget {
             fontSize: side * 0.30,
             fontWeight: FontWeight.w600,
             height: 1.0,
+            letterSpacing: -side * 0.012,
             fontFeatures: const [FontFeature.tabularFigures()],
           ),
         ),
