@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../ble/fly_controller_link.dart';
 import '../protocol/config_groups.dart';
@@ -7,24 +6,28 @@ import '../protocol/control_info.dart';
 import '../protocol/telemetry_frame.dart';
 import '../state/flight_alerts.dart';
 import '../state/gauge_levels.dart';
+import '../state/panel_layout_policy.dart';
 import '../state/telemetry_source_policy.dart';
 import 'flight/alert_card.dart';
 import 'flight/panel_cards.dart';
+import 'flight/panel_prefs.dart';
 import 'reading_text.dart';
-import 'widgets/dial.dart';
 import 'widgets/status_chip.dart';
 
-/// The instrument.
+/// The instrument, portrait.
 ///
-/// Card stack, fixed order: status, battery, instruments, throttle, drawer bar.
-/// Nothing is added to or removed from that stack at runtime, so an alert can
-/// never shift a number the pilot is in the middle of reading — a fault shows
-/// as a chip in space the status row already reserves.
+/// Fixed order, fixed presence: status row, battery arc, flight times, the
+/// alert card beside the motor and ESC temperatures, throttle, then voltage,
+/// power or current, and RPM, and the drawer bar. Nothing is added to or
+/// removed from that stack at runtime, so an alert can never shift a number
+/// the pilot is in the middle of reading — a fault shows as a chip in space
+/// the status row already reserves, a limiter as a line on the alert card.
 ///
-/// Two things the web panel has are absent here and cannot be added from this
-/// data: the flight clock and the red reduction band on the thermal dials.
-/// Neither `sessionSec` nor the thermal thresholds travel over the $XCTOD
-/// stream. They arrive with phase 2.
+/// Every gauge is an arc whose colour is its whole state, from
+/// `gauge_levels.dart`. Which cards the bottom row carries is decided by the
+/// board and the BMS configuration, never by what the last frame lacked, so
+/// a reading that disappears in use keeps its card and shows its reason.
+///
 class FlightScreen extends StatefulWidget {
   const FlightScreen({
     super.key,
@@ -115,17 +118,52 @@ enum _LinkAction { reconnect, disconnect }
 class _FlightScreenState extends State<FlightScreen> {
   bool _drawerOpen = false;
 
+  bool _perCell = false;
+  bool _showCurrent = false;
+
   final ThermalHysteresis _thermal = ThermalHysteresis();
   TelemetryFrame? _alertsFrame;
+  ThermalConfig? _alertsConfig;
   List<FlightAlert> _alerts = const [];
 
-  /// Recomputed only for a new frame. The repository notifies for reasons
-  /// other than telemetry, and the hysteresis must advance once per frame.
+  @override
+  void initState() {
+    super.initState();
+    PanelPrefs.load().then((p) {
+      if (!mounted) return;
+      setState(() {
+        _perCell = p.perCell;
+        _showCurrent = p.showCurrent;
+      });
+    });
+  }
+
+  void _togglePerCell() {
+    setState(() => _perCell = !_perCell);
+    PanelPrefs.savePerCell(_perCell);
+  }
+
+  void _toggleCurrent() {
+    setState(() => _showCurrent = !_showCurrent);
+    PanelPrefs.saveShowCurrent(_showCurrent);
+  }
+
+  /// Recomputed once per new frame or new thermal config, not per build: the
+  /// repository notifies for reasons other than telemetry, and the hysteresis
+  /// must advance once per frame. The config arrives a moment after the first
+  /// frame, so a change of it recomputes too, or thermal alerts would lag a
+  /// frame behind it.
+  ///
+  /// Mutating [_thermal] from a getter that build calls is acceptable here
+  /// because it is idempotent per input: applying the same frame and config
+  /// again leaves the levels where they are.
   List<FlightAlert> get alerts {
     final f = widget.frame;
     if (f == null) return const [];
-    if (!identical(f, _alertsFrame)) {
+    if (!identical(f, _alertsFrame) ||
+        !identical(widget.thermalConfig, _alertsConfig)) {
       _alertsFrame = f;
+      _alertsConfig = widget.thermalConfig;
       _thermal.update(f, widget.thermalConfig);
       _alerts = flightAlerts(
         f,
@@ -198,6 +236,114 @@ class _FlightScreenState extends State<FlightScreen> {
     });
   }
 
+  void _openDrawer() => setState(() => _drawerOpen = true);
+
+  /// Fixed order, fixed presence: status, battery, flight times, alerts beside
+  /// the two temperatures, throttle, bottom row, drawer bar.
+  Widget _portrait(
+    BuildContext context,
+    TelemetryFrame? f,
+    List<FlightAlert> alerts,
+  ) {
+    const gap = SizedBox(height: 8);
+    final thermal = widget.thermalConfig;
+    return Column(
+      children: [
+        _statusRow(context, f),
+        gap,
+        Expanded(flex: 5, child: BatteryGaugeCard(frame: f)),
+        gap,
+        FlightTimesRow(frame: f),
+        gap,
+        Expanded(flex: 3, child: _thermalRow(f, alerts, thermal)),
+        gap,
+        ThrottleCard(frame: f),
+        gap,
+        Expanded(flex: 3, child: _bottomRow(f)),
+        gap,
+        _DrawerBar(onTap: _openDrawer, alerts: alerts, hasFrame: f != null),
+      ],
+    );
+  }
+
+  Widget _statusRow(BuildContext context, TelemetryFrame? f) => _StatusRow(
+    frame: f,
+    stale: widget.stale,
+    // `disconnected` is the wait between two attempts: the link reports it
+    // and then schedules the retry.
+    reconnecting: const {
+      LinkStatus.scanning,
+      LinkStatus.connecting,
+      LinkStatus.disconnected,
+    }.contains(widget.linkStatus),
+    onTap: widget.onDisconnect == null ? null : () => _confirmLink(context),
+  );
+
+  Widget _thermalRow(
+    TelemetryFrame? f,
+    List<FlightAlert> alerts,
+    ThermalConfig? thermal,
+  ) {
+    const gap = SizedBox(width: 8);
+    return Row(
+      children: [
+        Expanded(
+          child: AlertCard(
+            alerts: alerts,
+            hasFrame: f != null,
+            onTap: _openDrawer,
+          ),
+        ),
+        gap,
+        Expanded(
+          child: TemperatureGauge(
+            dialKey: const Key('gauge-motor'),
+            caption: 'TEMP MOTOR',
+            value: f?.motorTempC,
+            state: f?.motorTempState,
+            badge: switch (f?.motorTempSource) {
+              MotorTempSource.can => 'CAN',
+              MotorTempSource.ntc => 'NTC',
+              _ => null,
+            },
+            start: thermal?.motorBandStartC,
+            end: thermal?.motorBandEndC,
+            level: _thermal.motor,
+          ),
+        ),
+        gap,
+        Expanded(
+          child: TemperatureGauge(
+            dialKey: const Key('gauge-esc'),
+            caption: 'TEMP ESC',
+            value: f?.escTempC,
+            state: f?.escTempState,
+            // A missing reading carries no provenance, same as the motor.
+            badge: f?.escTempC == null
+                ? null
+                : escTempSourceFor(widget.controllerType),
+            start: thermal?.escBandStartC,
+            end: thermal?.escBandEndC,
+            level: _thermal.esc,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _bottomRow(TelemetryFrame? f) => BottomRowCards(
+    layout: bottomRowFor(
+      type: widget.controllerType,
+      bmsConfigured: f?.bmsConfigured ?? false,
+    ),
+    frame: f,
+    powerConfig: widget.powerConfig,
+    perCell: _perCell,
+    showCurrent: _showCurrent,
+    onTogglePerCell: _togglePerCell,
+    onToggleCurrent: _toggleCurrent,
+  );
+
   @override
   Widget build(BuildContext context) {
     final f = widget.frame;
@@ -219,41 +365,7 @@ class _FlightScreenState extends State<FlightScreen> {
             children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
-                child: Column(
-                  children: [
-                    _StatusRow(
-                      frame: f,
-                      stale: widget.stale,
-                      // `disconnected` is the wait between two attempts: the
-                      // link reports it and then schedules the retry.
-                      reconnecting: const {
-                        LinkStatus.scanning,
-                        LinkStatus.connecting,
-                        LinkStatus.disconnected,
-                      }.contains(widget.linkStatus),
-                      onTap: widget.onDisconnect == null
-                          ? null
-                          : () => _confirmLink(context),
-                    ),
-                    const SizedBox(height: 8),
-                    Expanded(child: _BatteryCard(frame: f)),
-                    const SizedBox(height: 8),
-                    _InstrumentRow(
-                      frame: f,
-                      thermalConfig: widget.thermalConfig,
-                      alerts: alerts,
-                      onOpenDrawer: () => setState(() => _drawerOpen = true),
-                    ),
-                    const SizedBox(height: 8),
-                    _ThrottleCard(frame: f),
-                    const SizedBox(height: 8),
-                    _DrawerBar(
-                      onTap: () => setState(() => _drawerOpen = true),
-                      alerts: alerts,
-                      hasFrame: f != null,
-                    ),
-                  ],
-                ),
+                child: _portrait(context, f, alerts),
               ),
               // In the tree, not a pushed route. A modal route builds once
               // from the frame captured when it opened and never sees
@@ -295,16 +407,6 @@ class _StatusRow extends StatelessWidget {
   /// Opens the reconnect / disconnect confirmation.
   final VoidCallback? onTap;
 
-  /// `mm:ss`, and minutes keep counting past 60 rather than rolling over — a
-  /// paramotor flight is measured in minutes and an hour hand would be one
-  /// more thing to read.
-  static String _clock(Duration d) {
-    final minutes = d.inMinutes;
-    final seconds = d.inSeconds % 60;
-    return '${minutes.toString().padLeft(2, '0')}:'
-        '${seconds.toString().padLeft(2, '0')}';
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -341,27 +443,6 @@ class _StatusRow extends StatelessWidget {
             child: _Chip(text: chip.text, color: chip.color),
           ),
           const Spacer(),
-          if (f?.sessionSec != null) ...[
-            // Flexible for the same reason the chip beside it is: this row is
-            // a fixed height, so anything that cannot shrink overflows hard
-            // instead of ellipsizing.
-            Flexible(
-              child: Text(
-                _clock(f!.sessionSec!),
-                maxLines: 1,
-                softWrap: false,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.2,
-                  color: theme.colorScheme.onSurfaceVariant,
-                  // Tabular figures, so digits do not shuffle every second.
-                  fontFeatures: const [FontFeature.tabularFigures()],
-                ),
-              ),
-            ),
-            const SizedBox(width: 10),
-          ],
         ],
       ),
     );
@@ -378,395 +459,6 @@ class _Chip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => StatusChip(text: text, color: color);
-}
-
-/// The dominant card: state of charge as a large dial, with pack voltage and
-/// current beneath it. Those two are secondary to the gauge and sized to say so
-/// — three numbers at equal weight read as one number.
-class _BatteryCard extends StatefulWidget {
-  const _BatteryCard({required this.frame});
-
-  final TelemetryFrame? frame;
-
-  @override
-  State<_BatteryCard> createState() => _BatteryCardState();
-}
-
-class _BatteryCardState extends State<_BatteryCard> {
-  static const String _prefKey = 'voltMode';
-
-  bool _perCell = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _restore();
-  }
-
-  Future<void> _restore() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final saved = prefs.getBool(_prefKey);
-      if (saved != null && mounted) setState(() => _perCell = saved);
-    } catch (_) {
-      // Storage can be unavailable (restricted profile, blocked site data).
-      // The default view is correct without it; never let this kill the screen.
-    }
-  }
-
-  Future<void> _toggle() async {
-    setState(() => _perCell = !_perCell);
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool(_prefKey, _perCell);
-    } catch (_) {
-      // Same reasoning: the toggle still works for this session.
-    }
-  }
-
-  /// Per-cell prefers the BMS minimum cell — a measurement. Falling back to
-  /// pack voltage over [kSeriesCells] is a mean dressed up as a minimum, and
-  /// says so with a tilde.
-  ({String text, String unit})? _perCellReading(TelemetryFrame f) {
-    final min = f.cellMinMv;
-    if (min != null) {
-      return (text: (min / 1000).toStringAsFixed(2), unit: 'V/cél');
-    }
-    final v = f.voltage;
-    if (v == null) return null;
-    return (text: '~${(v / kSeriesCells).toStringAsFixed(2)}', unit: 'V/cél');
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final f = widget.frame;
-
-    String? voltageText;
-    var voltageUnit = 'V';
-    if (f != null) {
-      if (_perCell) {
-        final reading = _perCellReading(f);
-        voltageText = reading?.text;
-        voltageUnit = reading?.unit ?? 'V/cél';
-      } else {
-        voltageText = f.voltage?.toStringAsFixed(2);
-      }
-    }
-
-    return PanelCard(
-      child: Column(
-        children: [
-          Expanded(
-            child: Dial(
-              value: f?.socCoulomb.toDouble(),
-              max: 100,
-              unit: '%',
-              label: 'BATERIA',
-              showScale: true,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Divider(height: 1, color: theme.colorScheme.outlineVariant),
-          const SizedBox(height: 6),
-          IntrinsicHeight(
-            child: Row(
-              children: [
-                Expanded(
-                  child: _Reading(
-                    // The arrows mark the cell as switchable, as the web panel
-                    // does; the unit changes with the mode so a per-cell 3.71
-                    // can never be read as a flat pack.
-                    label: 'TENSÃO ⇆',
-                    value: voltageText,
-                    unit: voltageUnit,
-                    onTap: f == null ? null : _toggle,
-                    note: voltageText == null
-                        ? signalNote(f?.batteryVoltageState)
-                        : null,
-                  ),
-                ),
-                // No current sensing (XAG) drops the cell entirely and lets the
-                // voltage centre, rather than reserving space for a dash.
-                if (f?.currentA != null) ...[
-                  VerticalDivider(
-                    width: 1,
-                    color: theme.colorScheme.outlineVariant,
-                  ),
-                  Expanded(
-                    child: _Reading(
-                      label: 'CORRENTE',
-                      value: f!.currentA!.round().toString(),
-                      unit: 'A',
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Label above, number and small adjacent unit below. A null value is a dash
-/// with no unit — the controller said it has no reading, and a zero would read
-/// as a measurement.
-class _Reading extends StatelessWidget {
-  const _Reading({
-    required this.label,
-    required this.value,
-    required this.unit,
-    this.onTap,
-    this.note,
-  });
-
-  final String label;
-  final String? value;
-  final String unit;
-  final VoidCallback? onTap;
-
-  /// Why [value] is missing. Takes the unit's place, so the row never grows.
-  final String? note;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            label,
-            maxLines: 1,
-            softWrap: false,
-            style: TextStyle(
-              fontSize: 11,
-              letterSpacing: 1.5,
-              fontWeight: FontWeight.w600,
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 2),
-          FittedBox(
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.baseline,
-              textBaseline: TextBaseline.alphabetic,
-              children: [
-                Text(
-                  value ?? '–',
-                  maxLines: 1,
-                  softWrap: false,
-                  style: const TextStyle(
-                    fontSize: 30,
-                    fontWeight: FontWeight.w700,
-                    height: 1.0,
-                    fontFeatures: [FontFeature.tabularFigures()],
-                  ),
-                ),
-                if (value != null) ...[
-                  const SizedBox(width: 3),
-                  Text(
-                    unit,
-                    maxLines: 1,
-                    softWrap: false,
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-                if (value == null && note != null) ...[
-                  const SizedBox(width: 4),
-                  Text(
-                    note!,
-                    maxLines: 1,
-                    softWrap: false,
-                    style: TextStyle(
-                      fontSize: 11,
-                      letterSpacing: 1.0,
-                      fontWeight: FontWeight.w600,
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Power, then the two temperatures.
-///
-/// Only the temperatures get dials. Power has no maximum, so a circular gauge
-/// would have to invent a full scale — and a needle at 80% of an invented scale
-/// reads as a real limit.
-class _InstrumentRow extends StatelessWidget {
-  const _InstrumentRow({
-    required this.frame,
-    required this.alerts,
-    required this.onOpenDrawer,
-    this.thermalConfig,
-  });
-
-  final TelemetryFrame? frame;
-  final ThermalConfig? thermalConfig;
-  final List<FlightAlert> alerts;
-  final VoidCallback onOpenDrawer;
-
-  @override
-  Widget build(BuildContext context) {
-    final f = frame;
-
-    return SizedBox(
-      height: 118,
-      child: Row(
-        children: [
-          Expanded(
-            child: AlertCard(
-              alerts: alerts,
-              hasFrame: f != null,
-              onTap: onOpenDrawer,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: PanelCard(
-              child: Dial(
-                value: f?.motorTempC,
-                max: 140,
-                unit: '°C',
-                caption: 'MOTOR',
-                badge: switch (f?.motorTempSource) {
-                  MotorTempSource.can => 'CAN',
-                  MotorTempSource.ntc => 'NTC',
-                  _ => null,
-                },
-                note: signalNote(f?.motorTempState),
-                stripes: [
-                  if (thermalConfig?.motorBandStartC != null) ...[
-                    DialStripe(
-                      thermalConfig!.motorBandStartC!,
-                      Theme.of(context).colorScheme.tertiary,
-                    ),
-                    DialStripe(
-                      thermalConfig!.motorBandEndC!,
-                      Theme.of(context).colorScheme.error,
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: PanelCard(
-              child: Dial(
-                value: f?.escTempC,
-                max: 140,
-                unit: '°C',
-                caption: 'ESC',
-                note: signalNote(f?.escTempState),
-                stripes: [
-                  if (thermalConfig?.escBandStartC != null) ...[
-                    DialStripe(
-                      thermalConfig!.escBandStartC!,
-                      Theme.of(context).colorScheme.tertiary,
-                    ),
-                    DialStripe(
-                      thermalConfig!.escBandEndC!,
-                      Theme.of(context).colorScheme.error,
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ThrottleCard extends StatelessWidget {
-  const _ThrottleCard({required this.frame});
-
-  final TelemetryFrame? frame;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final f = frame;
-    final pct = f?.throttlePct ?? 0;
-
-    return PanelCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'ACELERADOR',
-                style: TextStyle(
-                  fontSize: 11,
-                  letterSpacing: 1.5,
-                  fontWeight: FontWeight.w600,
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-              Text(
-                f == null ? '–' : '$pct %',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w700,
-                  color: theme.colorScheme.secondary,
-                  fontFeatures: const [FontFeature.tabularFigures()],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          // The ceiling is where the throttle stops mattering: past powerPct
-          // the controller delivers no more. The portal draws the same tick.
-          LayoutBuilder(
-            builder: (context, constraints) => Stack(
-              clipBehavior: Clip.none,
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(5),
-                  child: LinearProgressIndicator(
-                    value: pct / 100,
-                    minHeight: 10,
-                    color: theme.colorScheme.secondary,
-                    backgroundColor: theme.colorScheme.surfaceContainerHighest,
-                  ),
-                ),
-                if (f != null && f.isLimited)
-                  Positioned(
-                    key: const Key('throttle-ceiling'),
-                    left: (constraints.maxWidth * f.powerPct / 100).clamp(
-                      0.0,
-                      constraints.maxWidth - 2,
-                    ),
-                    top: -3,
-                    bottom: -3,
-                    child: Container(width: 2, color: theme.colorScheme.error),
-                  ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 /// Bottom bar. Names what is behind it, and how many alerts wait there.
@@ -891,7 +583,7 @@ class _SecondaryDataState extends State<_SecondaryData> {
     _ => '–',
   };
 
-  /// Where the per-cell figure on the battery card comes from. The card only
+  /// Where the per-cell figure on the voltage card comes from. The card only
   /// shows a tilde for the computed one; the portal names both.
   String get _cellSource {
     final f = frame;
