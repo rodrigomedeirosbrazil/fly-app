@@ -9,6 +9,7 @@ import '../state/gauge_levels.dart';
 import '../state/panel_layout_policy.dart';
 import '../state/telemetry_source_policy.dart';
 import 'flight/alert_card.dart';
+import 'flight/details_view.dart';
 import 'flight/flight_drawer.dart';
 import 'flight/panel_cards.dart';
 import 'flight/panel_prefs.dart';
@@ -115,8 +116,17 @@ class FlightScreen extends StatefulWidget {
 
 enum _LinkAction { reconnect, disconnect }
 
-class _FlightScreenState extends State<FlightScreen> {
+class _FlightScreenState extends State<FlightScreen>
+    with SingleTickerProviderStateMixin {
   bool _drawerOpen = false;
+
+  /// 0 is the panel, 1 is details fully down. Dragged by the status row.
+  late final AnimationController _details = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 220),
+  );
+  bool _pullStartedOpen = false;
+  double _height = 1;
 
   bool _perCell = false;
   bool _showCurrent = false;
@@ -137,6 +147,28 @@ class _FlightScreenState extends State<FlightScreen> {
       });
     });
   }
+
+  @override
+  void dispose() {
+    _details.dispose();
+    super.dispose();
+  }
+
+  void _pullStart(DragStartDetails _) => _pullStartedOpen = _details.value == 1;
+
+  void _pullUpdate(DragUpdateDetails d) =>
+      _details.value += (d.primaryDelta ?? 0) / _height;
+
+  /// Opening needs 40 % of the height pulled down; closing needs 40 % pulled
+  /// back up. Anything less returns to where it started.
+  void _pullEnd(DragEndDetails _) {
+    final open = _pullStartedOpen
+        ? _details.value > 1 - kDetailsOpenFraction
+        : _details.value >= kDetailsOpenFraction;
+    open ? _details.forward() : _details.reverse();
+  }
+
+  void _closeDetails() => _details.reverse();
 
   void _togglePerCell() {
     setState(() => _perCell = !_perCell);
@@ -277,6 +309,9 @@ class _FlightScreenState extends State<FlightScreen> {
       LinkStatus.disconnected,
     }.contains(widget.linkStatus),
     onTap: widget.onDisconnect == null ? null : () => _confirmLink(context),
+    onPullStart: _pullStart,
+    onPullUpdate: _pullUpdate,
+    onPullEnd: _pullEnd,
   );
 
   Widget _thermalRow(
@@ -357,31 +392,75 @@ class _FlightScreenState extends State<FlightScreen> {
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
-        if (_drawerOpen) setState(() => _drawerOpen = false);
+        if (_details.value > 0) {
+          _closeDetails();
+        } else if (_drawerOpen) {
+          setState(() => _drawerOpen = false);
+        }
       },
       child: Scaffold(
         body: SafeArea(
-          child: Stack(
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
-                child: _portrait(context, f, alerts),
-              ),
-              // In the tree, not a pushed route. A modal route builds once
-              // from the frame captured when it opened and never sees
-              // another, so its alerts would silently freeze at 1 Hz.
-              if (_drawerOpen)
-                FlightDrawer(
-                  alerts: alerts,
-                  hasFrame: f != null,
-                  muted: widget.muted,
-                  audioError: widget.audioError,
-                  onSetMuted: widget.onSetMuted,
-                  armed: f?.isArmed ?? false,
-                  onOpenSettings: widget.onOpenSettings,
-                  onClose: () => setState(() => _drawerOpen = false),
-                ),
-            ],
+          // The pull is a fraction of the visible height, so it is measured
+          // here, inside the safe area.
+          child: LayoutBuilder(
+            builder: (context, c) {
+              _height = c.maxHeight;
+              return Stack(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
+                    child: _portrait(context, f, alerts),
+                  ),
+                  // In the tree, not a pushed route. A modal route builds once
+                  // from the frame captured when it opened and never sees
+                  // another, so its alerts would silently freeze at 1 Hz.
+                  if (_drawerOpen)
+                    FlightDrawer(
+                      alerts: alerts,
+                      hasFrame: f != null,
+                      muted: widget.muted,
+                      audioError: widget.audioError,
+                      onSetMuted: widget.onSetMuted,
+                      armed: f?.isArmed ?? false,
+                      onOpenSettings: widget.onOpenSettings,
+                      onClose: () => setState(() => _drawerOpen = false),
+                    ),
+                  // Details, for the same reason: in the tree, so every frame
+                  // reaches it. Slid down from above by the controller the
+                  // status row drives.
+                  AnimatedBuilder(
+                    animation: _details,
+                    builder: (context, _) => _details.value == 0
+                        ? const SizedBox.shrink()
+                        : Positioned.fill(
+                            child: Transform.translate(
+                              offset: Offset(
+                                0,
+                                -_height * (1 - _details.value),
+                              ),
+                              child: DetailsView(
+                                frame: f,
+                                stale: widget.stale,
+                                alerts: alerts,
+                                thermalConfig: widget.thermalConfig,
+                                controllerType: widget.controllerType,
+                                telemetrySource: widget.telemetrySource,
+                                rejectedFrames: widget.rejectedFrames,
+                                firmwareVersion: widget.firmwareVersion,
+                                firmwareBuild: widget.firmwareBuild,
+                                onClose: _closeDetails,
+                                onHandleDragUpdate: (d) {
+                                  _pullStartedOpen = true;
+                                  _pullUpdate(d);
+                                },
+                                onHandleDragEnd: _pullEnd,
+                              ),
+                            ),
+                          ),
+                  ),
+                ],
+              );
+            },
           ),
         ),
       ),
@@ -395,6 +474,9 @@ class _StatusRow extends StatelessWidget {
     required this.stale,
     this.reconnecting = false,
     this.onTap,
+    this.onPullStart,
+    this.onPullUpdate,
+    this.onPullEnd,
   });
 
   final TelemetryFrame? frame;
@@ -405,6 +487,12 @@ class _StatusRow extends StatelessWidget {
 
   /// Opens the reconnect / disconnect confirmation.
   final VoidCallback? onTap;
+
+  /// The row is the handle for pulling details down. A tap on the chip and a
+  /// vertical drag anywhere on the row resolve in the gesture arena.
+  final GestureDragStartCallback? onPullStart;
+  final GestureDragUpdateCallback? onPullUpdate;
+  final GestureDragEndCallback? onPullEnd;
 
   @override
   Widget build(BuildContext context) {
@@ -419,30 +507,53 @@ class _StatusRow extends StatelessWidget {
     );
 
     // Fixed height: the chips change colour and text, never the layout.
-    return SizedBox(
-      height: 30,
-      child: Row(
-        children: [
-          Container(
-            width: 10,
-            height: 10,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: (f != null && !stale)
-                  ? theme.colorScheme.primary
-                  : theme.colorScheme.outline,
+    return GestureDetector(
+      key: const Key('details-handle'),
+      behavior: HitTestBehavior.opaque,
+      onVerticalDragStart: onPullStart,
+      onVerticalDragUpdate: onPullUpdate,
+      onVerticalDragEnd: onPullEnd,
+      child: SizedBox(
+        height: 30,
+        child: Stack(
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 10,
+                  height: 10,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: (f != null && !stale)
+                        ? theme.colorScheme.primary
+                        : theme.colorScheme.outline,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                // The chip is the handle for leaving this screen; see
+                // _confirmLink. A plain GestureDetector keeps the fixed row
+                // height.
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: onTap,
+                  child: _Chip(text: chip.text, color: chip.color),
+                ),
+                const Spacer(),
+              ],
             ),
-          ),
-          const SizedBox(width: 10),
-          // The chip is the handle for leaving this screen; see
-          // _confirmLink. A plain GestureDetector keeps the fixed row height.
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: onTap,
-            child: _Chip(text: chip.text, color: chip.color),
-          ),
-          const Spacer(),
-        ],
+            // The handle: the only sign the row can be pulled.
+            Center(
+              child: Container(
+                width: 40,
+                height: 5,
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.outline,
+                  borderRadius: BorderRadius.circular(3),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -751,4 +751,76 @@ void main() {
       expect(find.text('REDUZINDO'), findsOneWidget);
     });
   });
+
+  group('details', () {
+    // The default test surface is 800x600, so 40 % is 240 px.
+    Future<void> pull(WidgetTester tester, double dy) async {
+      await tester.drag(find.byKey(const Key('details-handle')), Offset(0, dy));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('a short pull springs back', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
+      await pull(tester, 150);
+      expect(find.byKey(const Key('details-view')), findsNothing);
+    });
+
+    testWidgets('past 40 % it opens', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
+      await pull(tester, 400);
+      expect(find.byKey(const Key('details-view')), findsOneWidget);
+    });
+
+    testWidgets('stays live while open', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
+      await pull(tester, 400);
+      expect(find.text('50,4 V'), findsOneWidget);
+
+      await tester.pumpWidget(
+          wrap(FlightScreen(frame: frame(voltage: 49.1), stale: false)));
+      await tester.pumpAndSettle();
+      expect(find.text('49,1 V'), findsOneWidget);
+      expect(find.text('50,4 V'), findsNothing);
+    });
+
+    testWidgets('closes with the button', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
+      await pull(tester, 400);
+      await tester.tap(find.byKey(const Key('details-close')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('details-view')), findsNothing);
+    });
+
+    testWidgets('closes by pulling the bottom handle up', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
+      await pull(tester, 400);
+      await tester.drag(find.byKey(const Key('details-bottom-handle')),
+          const Offset(0, -400));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('details-view')), findsNothing);
+    });
+
+    testWidgets('back closes details first, then nothing leaves',
+        (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
+      await pull(tester, 400);
+      await simulateSystemBack();
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('details-view')), findsNothing);
+      expect(find.byType(FlightScreen), findsOneWidget);
+    });
+
+    testWidgets('a tap on the state chip still offers the link dialog',
+        (tester) async {
+      var disconnects = 0;
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(),
+        stale: false,
+        onDisconnect: () => disconnects++,
+      )));
+      await tester.tap(find.text('ARMADO'));
+      await tester.pumpAndSettle();
+      expect(find.text('Desconectar do controlador?'), findsOneWidget);
+    });
+  });
 }
