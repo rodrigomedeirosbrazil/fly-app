@@ -7,6 +7,7 @@ import 'package:fly_app/protocol/config_groups.dart';
 import 'package:fly_app/protocol/telemetry_frame.dart';
 import 'package:fly_app/ui/flight_screen.dart';
 import 'package:fly_app/ui/widgets/dial.dart';
+import 'package:fly_app/ui/widgets/status_chip.dart';
 
 import 'navigator_utils.dart';
 
@@ -162,21 +163,6 @@ void main() {
     expect(find.text('MOT SRC'), findsOneWidget);
   });
 
-  testWidgets('a limited frame shows the available-power chip', (tester) async {
-    await tester.pumpWidget(wrap(FlightScreen(
-      frame: frame(powerPct: 73),
-      stale: false,
-    )));
-
-    expect(find.text('DISPONÍVEL 73 %'), findsOneWidget);
-  });
-
-  testWidgets('an unlimited frame shows no chip', (tester) async {
-    await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
-
-    expect(find.textContaining('DISPONÍVEL'), findsNothing);
-  });
-
   testWidgets('stale link replaces every reading with SEM SINAL',
       (tester) async {
     await tester.pumpWidget(wrap(const FlightScreen(frame: null, stale: true)));
@@ -322,29 +308,6 @@ void main() {
     expect(find.text('–'), findsWidgets);
   });
 
-  group('power is a readout, not a gauge', () {
-    testWidgets('only the two temperatures get dials', (tester) async {
-      await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
-
-      // Battery, motor and ESC. Power has no maximum, so a circular gauge
-      // would have to invent a full scale -- it is a number, and the dial
-      // count is the same whether power is present or not.
-      expect(find.byType(Dial), findsNWidgets(3));
-      expect(find.text('1.5'), findsOneWidget);
-      expect(find.text('kW'), findsOneWidget);
-    });
-
-    testWidgets('no power reading drops the readout entirely', (tester) async {
-      await tester.pumpWidget(wrap(FlightScreen(
-        frame: frame(powerKw: null),
-        stale: false,
-      )));
-
-      expect(find.text('kW'), findsNothing);
-      expect(find.byType(Dial), findsNWidgets(3));
-    });
-  });
-
   group('current in the hero band', () {
     testWidgets('current is a primary reading', (tester) async {
       await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
@@ -373,7 +336,7 @@ void main() {
       // Not on the panel.
       expect(find.text('4200'), findsNothing);
 
-      await tester.tap(find.byTooltip('Mais dados'));
+      await tester.tap(find.byKey(const Key('drawer-bar')));
       await tester.pumpAndSettle();
 
       expect(find.text('4200'), findsOneWidget); // rpm
@@ -391,7 +354,7 @@ void main() {
         stale: false,
       )));
 
-      await tester.tap(find.byTooltip('Mais dados'));
+      await tester.tap(find.byKey(const Key('drawer-bar')));
       await tester.pumpAndSettle();
 
       // Each unavailable row reads as a dash. Checked row by row: a bare
@@ -410,7 +373,7 @@ void main() {
       // and never sees another. The drawer has to live in the tree that the
       // 1 Hz frames rebuild, or it silently freezes.
       await tester.pumpWidget(wrap(FlightScreen(frame: frame(rpm: 4200), stale: false)));
-      await tester.tap(find.byTooltip('Mais dados'));
+      await tester.tap(find.byKey(const Key('drawer-bar')));
       await tester.pumpAndSettle();
       expect(find.text('4200'), findsOneWidget);
 
@@ -426,7 +389,7 @@ void main() {
 
       // The band stack never changes shape, so the handle exists even with no
       // data behind it.
-      expect(find.byTooltip('Mais dados'), findsOneWidget);
+      expect(find.byKey(const Key('drawer-bar')), findsOneWidget);
     });
 
     testWidgets('the binary-only readings reach the drawer', (tester) async {
@@ -441,7 +404,7 @@ void main() {
         ),
         stale: false,
       )));
-      await tester.tap(find.text('MAIS DADOS'));
+      await tester.tap(find.byKey(const Key('drawer-bar')));
       await tester.pumpAndSettle();
 
       expect(find.text('34:17:36'), findsOneWidget); // hour meter
@@ -451,7 +414,7 @@ void main() {
     testWidgets('a sentence-fed frame dashes them instead of showing zeros',
         (tester) async {
       await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
-      await tester.tap(find.text('MAIS DADOS'));
+      await tester.tap(find.byKey(const Key('drawer-bar')));
       await tester.pumpAndSettle();
 
       expect(find.text('Horímetro'), findsOneWidget);
@@ -478,11 +441,11 @@ void main() {
         stale: false,
         onOpenSettings: () => opened = true,
       )));
-      await tester.tap(find.text('MAIS DADOS'));
+      await tester.tap(find.byKey(const Key('drawer-bar')));
       await tester.pumpAndSettle();
 
-      await tester.ensureVisible(find.text('CONFIGURAÇÕES'));
-      await tester.tap(find.text('CONFIGURAÇÕES'));
+      await tester.ensureVisible(find.byKey(const Key('settings-entry')));
+      await tester.tap(find.byKey(const Key('settings-entry')));
       await tester.pumpAndSettle();
       expect(opened, isTrue);
     });
@@ -494,12 +457,12 @@ void main() {
         stale: false,
         onOpenSettings: () => opened = true,
       )));
-      await tester.tap(find.text('MAIS DADOS'));
+      await tester.tap(find.byKey(const Key('drawer-bar')));
       await tester.pumpAndSettle();
 
-      expect(find.text('CONFIGURAÇÕES'), findsOneWidget,
+      expect(find.byKey(const Key('settings-entry')), findsOneWidget,
           reason: 'fixed presence, varying state');
-      await tester.tap(find.text('CONFIGURAÇÕES'));
+      await tester.tap(find.byKey(const Key('settings-entry')));
       await tester.pumpAndSettle();
       expect(opened, isFalse);
     });
@@ -511,10 +474,10 @@ void main() {
         stale: false,
         onOpenSettings: null,
       )));
-      await tester.tap(find.text('MAIS DADOS'));
+      await tester.tap(find.byKey(const Key('drawer-bar')));
       await tester.pumpAndSettle();
 
-      expect(find.text('CONFIGURAÇÕES'), findsOneWidget);
+      expect(find.byKey(const Key('settings-entry')), findsOneWidget);
     });
   });
 
@@ -525,7 +488,7 @@ void main() {
     testWidgets('closes the overlay instead of leaving', (tester) async {
       await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
 
-      await tester.tap(find.byTooltip('Mais dados'));
+      await tester.tap(find.byKey(const Key('drawer-bar')));
       await tester.pumpAndSettle();
       // 4200 is the rpm, which only the overlay shows.
       expect(find.text('4200'), findsOneWidget);
@@ -546,14 +509,14 @@ void main() {
 
       // Leaving mid-flight is home or the app switcher, deliberately.
       expect(find.byType(FlightScreen), findsOneWidget);
-      expect(find.byTooltip('Mais dados'), findsOneWidget);
+      expect(find.byKey(const Key('drawer-bar')), findsOneWidget);
     });
 
     testWidgets('a second back with the overlay already closed still holds',
         (tester) async {
       await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
 
-      await tester.tap(find.byTooltip('Mais dados'));
+      await tester.tap(find.byKey(const Key('drawer-bar')));
       await tester.pumpAndSettle();
       await simulateSystemBack();
       await tester.pumpAndSettle();
@@ -564,69 +527,7 @@ void main() {
     });
   });
 
-  group('the limiter chip names its cause', () {
-    testWidgets('one cause leads the chip', (tester) async {
-      await tester.pumpWidget(wrap(FlightScreen(
-        frame: frame(powerPct: 80, limitCauses: {LimitCause.motorTemp}),
-        stale: false,
-      )));
-
-      expect(find.text('MOT 80 %'), findsOneWidget);
-      expect(find.textContaining('DISPONÍVEL'), findsNothing);
-    });
-
-    testWidgets('causes combine in a fixed order', (tester) async {
-      await tester.pumpWidget(wrap(FlightScreen(
-        frame: frame(powerPct: 70, limitCauses: {
-          LimitCause.escTemp,
-          LimitCause.battery,
-        }),
-        stale: false,
-      )));
-
-      expect(find.text('BAT ESC 70 %'), findsOneWidget);
-    });
-
-    testWidgets('a source that cannot say keeps the original wording',
-        (tester) async {
-      await tester.pumpWidget(wrap(FlightScreen(
-        frame: frame(powerPct: 80, limitCauses: null),
-        stale: false,
-      )));
-
-      expect(find.text('DISPONÍVEL 80 %'), findsOneWidget);
-    });
-
-    testWidgets('an empty cause set with full power shows no chip at all',
-        (tester) async {
-      await tester.pumpWidget(wrap(FlightScreen(
-        frame: frame(powerPct: 100, limitCauses: const <LimitCause>{}),
-        stale: false,
-      )));
-
-      // Asserted against the chip's own wording, not against '%' — the
-      // throttle and battery cards carry percentages of their own.
-      expect(find.textContaining('DISPONÍVEL'), findsNothing);
-      expect(find.textContaining('100 %'), findsNothing);
-    });
-  });
-
   group('portal parity on the flight screen', () {
-    testWidgets('a controller with no telemetry says SEM DADOS',
-        (tester) async {
-      await tester.pumpWidget(wrap(FlightScreen(
-        frame: frame(hasTelemetry: false),
-        stale: false,
-      )));
-      expect(find.text('SEM DADOS'), findsOneWidget);
-    });
-
-    testWidgets('the sentence path, which cannot say, shows no SEM DADOS',
-        (tester) async {
-      await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
-      expect(find.text('SEM DADOS'), findsNothing);
-    });
-
     testWidgets('a limited frame marks the ceiling on the throttle bar',
         (tester) async {
       await tester.pumpWidget(wrap(FlightScreen(
@@ -641,15 +542,6 @@ void main() {
       expect(find.byKey(const Key('throttle-ceiling')), findsNothing);
     });
 
-    testWidgets('the card that is limiting is outlined', (tester) async {
-      await tester.pumpWidget(wrap(FlightScreen(
-        frame: frame(powerPct: 60, limitCauses: {LimitCause.motorTemp}),
-        stale: false,
-      )));
-      expect(find.byKey(const Key('limiting-motor')), findsOneWidget);
-      expect(find.byKey(const Key('limiting-esc')), findsNothing);
-      expect(find.byKey(const Key('limiting-battery')), findsNothing);
-    });
   });
 
   group('the flight clock', () {
@@ -758,7 +650,7 @@ void main() {
 
         // Also test the overlay open at this size, especially the 852x393
         // landscape where rows would overflow without scrolling.
-        await tester.tap(find.text('MAIS DADOS'));
+        await tester.tap(find.byKey(const Key('drawer-bar')));
         await tester.pumpAndSettle();
 
         expect(tester.takeException(), isNull);
@@ -774,7 +666,7 @@ void main() {
         muted: false,
       )));
 
-      await tester.tap(find.byTooltip('Mais dados'));
+      await tester.tap(find.byKey(const Key('drawer-bar')));
       await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('mute-buzzer')), findsOneWidget);
@@ -793,7 +685,7 @@ void main() {
         },
       )));
 
-      await tester.tap(find.byTooltip('Mais dados'));
+      await tester.tap(find.byKey(const Key('drawer-bar')));
       await tester.pumpAndSettle();
 
       expect(find.text('LIGADO'), findsOneWidget);
@@ -819,7 +711,7 @@ void main() {
         audioError: 'PlatformException(DarwinAudioError, ...)',
       )));
 
-      await tester.tap(find.byTooltip('Mais dados'));
+      await tester.tap(find.byKey(const Key('drawer-bar')));
       await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('audio-error')), findsOneWidget);
@@ -829,7 +721,7 @@ void main() {
     testWidgets('no failure, no line', (tester) async {
       await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
 
-      await tester.tap(find.byTooltip('Mais dados'));
+      await tester.tap(find.byKey(const Key('drawer-bar')));
       await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('audio-error')), findsNothing);
@@ -842,7 +734,7 @@ void main() {
         muted: true,
       )));
 
-      await tester.tap(find.byTooltip('Mais dados'));
+      await tester.tap(find.byKey(const Key('drawer-bar')));
       await tester.pumpAndSettle();
 
       expect(find.text('DESLIGADO'), findsOneWidget);
@@ -852,7 +744,7 @@ void main() {
 
   group('the drawer names what the panel only implies', () {
     Future<void> openDrawer(WidgetTester tester) async {
-      await tester.tap(find.text('MAIS DADOS'));
+      await tester.tap(find.byKey(const Key('drawer-bar')));
       await tester.pumpAndSettle();
     }
 
@@ -936,6 +828,69 @@ void main() {
       )));
       await openDrawer(tester);
       expect(find.text('Conectando'), findsOneWidget);
+    });
+  });
+
+  group('the alert card', () {
+    testWidgets('a healthy frame says TUDO CERTO', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(hasTelemetry: true),
+        stale: false,
+      )));
+      expect(find.text('TUDO'), findsOneWidget);
+    });
+
+    testWidgets('a limited frame names the cause', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(powerPct: 70, limitCauses: {LimitCause.battery}),
+        stale: false,
+      )));
+      expect(find.text('REDUZINDO'), findsOneWidget);
+      // find.text matches a Text.rich by its plain text.
+      expect(find.text('CONFIGURAÇÕES · 1 ALERTA'), findsOneWidget);
+    });
+
+    testWidgets('no ESC data is an alert, not a chip', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(hasTelemetry: false),
+        stale: false,
+      )));
+      expect(find.text('SEM DADOS'), findsOneWidget);
+      expect(find.byType(StatusChip), findsOneWidget,
+          reason: 'only the state chip is left in the status row');
+    });
+
+    testWidgets('a stale link shows no all-clear', (tester) async {
+      await tester.pumpWidget(
+          wrap(const FlightScreen(frame: null, stale: true)));
+      expect(find.text('TUDO'), findsNothing);
+    });
+
+    testWidgets('tapping the card opens the drawer', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(powerPct: 70, limitCauses: {LimitCause.battery}),
+        stale: false,
+      )));
+      await tester.tap(find.byKey(const Key('alert-card')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('mute-buzzer')), findsOneWidget);
+    });
+
+    testWidgets('hysteresis holds across frames, not across rebuilds',
+        (tester) async {
+      final config = ThermalConfig.decode(thermalGroupBytes())!; // motor 80–100
+      Future<void> show(double motor) => tester.pumpWidget(wrap(FlightScreen(
+            frame: frame(motorTempC: motor, motorTempState: SignalState.valid),
+            stale: false,
+            thermalConfig: config,
+          )));
+
+      await show(81);
+      expect(find.text('REDUZINDO'), findsOneWidget);
+      await show(79); // within 2 °C below the start
+      expect(find.text('REDUZINDO'), findsOneWidget);
+      await show(77);
+      expect(find.text('PERTO DO LIMITE'), findsOneWidget);
     });
   });
 }

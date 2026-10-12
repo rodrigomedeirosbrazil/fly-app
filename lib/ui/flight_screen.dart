@@ -5,7 +5,11 @@ import '../ble/fly_controller_link.dart';
 import '../protocol/config_groups.dart';
 import '../protocol/control_info.dart';
 import '../protocol/telemetry_frame.dart';
+import '../state/flight_alerts.dart';
+import '../state/gauge_levels.dart';
 import '../state/telemetry_source_policy.dart';
+import 'flight/alert_card.dart';
+import 'flight/panel_cards.dart';
 import 'reading_text.dart';
 import 'widgets/dial.dart';
 import 'widgets/status_chip.dart';
@@ -111,6 +115,28 @@ enum _LinkAction { reconnect, disconnect }
 class _FlightScreenState extends State<FlightScreen> {
   bool _drawerOpen = false;
 
+  final ThermalHysteresis _thermal = ThermalHysteresis();
+  TelemetryFrame? _alertsFrame;
+  List<FlightAlert> _alerts = const [];
+
+  /// Recomputed only for a new frame. The repository notifies for reasons
+  /// other than telemetry, and the hysteresis must advance once per frame.
+  List<FlightAlert> get alerts {
+    final f = widget.frame;
+    if (f == null) return const [];
+    if (!identical(f, _alertsFrame)) {
+      _alertsFrame = f;
+      _thermal.update(f, widget.thermalConfig);
+      _alerts = flightAlerts(
+        f,
+        motorLevel: _thermal.motor,
+        escLevel: _thermal.esc,
+        thermal: widget.thermalConfig,
+      );
+    }
+    return _alerts;
+  }
+
   /// The only way off this screen. Never automatic — replacing the panel in
   /// flight is the one thing it must not do on its own — so it is the
   /// pilot's, behind a confirmation a stray tap cannot get through.
@@ -123,9 +149,11 @@ class _FlightScreenState extends State<FlightScreen> {
     showDialog<_LinkAction>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: Text(widget.stale
-            ? 'Sem dados do controlador'
-            : 'Desconectar do controlador?'),
+        title: Text(
+          widget.stale
+              ? 'Sem dados do controlador'
+              : 'Desconectar do controlador?',
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -173,6 +201,7 @@ class _FlightScreenState extends State<FlightScreen> {
   @override
   Widget build(BuildContext context) {
     final f = widget.frame;
+    final alerts = this.alerts;
 
     // Back is the one input Android has and iOS does not. The overlay below
     // is a Stack child rather than a route, so there is nothing for back to
@@ -212,11 +241,17 @@ class _FlightScreenState extends State<FlightScreen> {
                     _InstrumentRow(
                       frame: f,
                       thermalConfig: widget.thermalConfig,
+                      alerts: alerts,
+                      onOpenDrawer: () => setState(() => _drawerOpen = true),
                     ),
                     const SizedBox(height: 8),
                     _ThrottleCard(frame: f),
                     const SizedBox(height: 8),
-                    _DrawerBar(onTap: () => setState(() => _drawerOpen = true)),
+                    _DrawerBar(
+                      onTap: () => setState(() => _drawerOpen = true),
+                      alerts: alerts,
+                      hasFrame: f != null,
+                    ),
                   ],
                 ),
               ),
@@ -239,42 +274,6 @@ class _FlightScreenState extends State<FlightScreen> {
           ),
         ),
       ),
-    );
-  }
-}
-
-/// Rounded surface every band sits on.
-class _Card extends StatelessWidget {
-  const _Card({
-    super.key,
-    required this.child,
-    this.padding = const EdgeInsets.all(10),
-    this.highlight = false,
-  });
-
-  final Widget child;
-  final EdgeInsets padding;
-
-  /// Outlined in red while this card's reading is what limits power. The
-  /// border is always drawn — transparent when idle — so highlighting moves
-  /// nothing.
-  final bool highlight;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: padding,
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainer,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          width: 2,
-          color: highlight
-              ? Theme.of(context).colorScheme.error
-              : Colors.transparent,
-        ),
-      ),
-      child: child,
     );
   }
 }
@@ -306,39 +305,17 @@ class _StatusRow extends StatelessWidget {
         '${seconds.toString().padLeft(2, '0')}';
   }
 
-  /// The short codes the firmware already uses for disarm reasons, so the two
-  /// chips in this row speak the same vocabulary.
-  static String _causes(Set<LimitCause> causes) => [
-    if (causes.contains(LimitCause.battery)) 'BAT',
-    if (causes.contains(LimitCause.motorTemp)) 'MOT',
-    if (causes.contains(LimitCause.escTemp)) 'ESC',
-  ].join(' ');
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final f = frame;
 
-    late final String text;
-    late final Color color;
-
-    if (f == null) {
-      text = !stale
-          ? 'AGUARDANDO'
-          : reconnecting
-              ? 'RECONECTANDO'
-              : 'SEM SINAL';
-      color = stale ? theme.colorScheme.error : theme.colorScheme.outline;
-    } else if (f.disarmCode != null) {
-      text = f.disarmCode!;
-      color = theme.colorScheme.error;
-    } else if (f.isArmed) {
-      text = 'ARMADO';
-      color = theme.colorScheme.error;
-    } else {
-      text = 'DESARMADO';
-      color = theme.colorScheme.outline;
-    }
+    final chip = statusChipFor(
+      theme.colorScheme,
+      f,
+      stale: stale,
+      reconnecting: reconnecting,
+    );
 
     // Fixed height: the chips change colour and text, never the layout.
     return SizedBox(
@@ -361,17 +338,8 @@ class _StatusRow extends StatelessWidget {
           GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: onTap,
-            child: _Chip(text: text, color: color),
+            child: _Chip(text: chip.text, color: chip.color),
           ),
-          // hasTelemetry is the controller saying none of its own readings
-          // arrived — no ESC over CAN, no sensors. Null is the sentence path,
-          // which cannot say, and shows nothing.
-          if (f != null && f.hasTelemetry == false) ...[
-            const SizedBox(width: 6),
-            Flexible(
-              child: _Chip(text: 'SEM DADOS', color: theme.colorScheme.outline),
-            ),
-          ],
           const Spacer(),
           if (f?.sessionSec != null) ...[
             // Flexible for the same reason the chip beside it is: this row is
@@ -394,20 +362,6 @@ class _StatusRow extends StatelessWidget {
             ),
             const SizedBox(width: 10),
           ],
-          if (f != null && f.isLimited)
-            Flexible(
-              child: _Chip(
-                // Leading with the cause is shorter than the old wording in
-                // the single-cause case, which is the common one: the chip
-                // gains information and loses width at the same time. A
-                // source that cannot say which limiter is acting keeps the
-                // original text.
-                text: f.limitCauses == null || f.limitCauses!.isEmpty
-                    ? 'DISPONÍVEL ${f.powerPct} %'
-                    : '${_causes(f.limitCauses!)} ${f.powerPct} %',
-                color: theme.colorScheme.error,
-              ),
-            ),
         ],
       ),
     );
@@ -500,10 +454,7 @@ class _BatteryCardState extends State<_BatteryCard> {
       }
     }
 
-    final limiting = _limiting(f, LimitCause.battery);
-    return _Card(
-      key: limiting ? const Key('limiting-battery') : null,
-      highlight: limiting,
+    return PanelCard(
       child: Column(
         children: [
           Expanded(
@@ -658,10 +609,17 @@ class _Reading extends StatelessWidget {
 /// would have to invent a full scale — and a needle at 80% of an invented scale
 /// reads as a real limit.
 class _InstrumentRow extends StatelessWidget {
-  const _InstrumentRow({required this.frame, this.thermalConfig});
+  const _InstrumentRow({
+    required this.frame,
+    required this.alerts,
+    required this.onOpenDrawer,
+    this.thermalConfig,
+  });
 
   final TelemetryFrame? frame;
   final ThermalConfig? thermalConfig;
+  final List<FlightAlert> alerts;
+  final VoidCallback onOpenDrawer;
 
   @override
   Widget build(BuildContext context) {
@@ -671,23 +629,16 @@ class _InstrumentRow extends StatelessWidget {
       height: 118,
       child: Row(
         children: [
-          if (f?.powerKw != null)
-            Expanded(
-              child: _Card(
-                child: _Readout(
-                  label: 'POTÊNCIA',
-                  value: f!.powerKw!.toStringAsFixed(1),
-                  unit: 'kW',
-                ),
-              ),
-            ),
-          if (f?.powerKw != null) const SizedBox(width: 8),
           Expanded(
-            child: _Card(
-              key: _limiting(f, LimitCause.motorTemp)
-                  ? const Key('limiting-motor')
-                  : null,
-              highlight: _limiting(f, LimitCause.motorTemp),
+            child: AlertCard(
+              alerts: alerts,
+              hasFrame: f != null,
+              onTap: onOpenDrawer,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: PanelCard(
               child: Dial(
                 value: f?.motorTempC,
                 max: 140,
@@ -701,10 +652,14 @@ class _InstrumentRow extends StatelessWidget {
                 note: signalNote(f?.motorTempState),
                 stripes: [
                   if (thermalConfig?.motorBandStartC != null) ...[
-                    DialStripe(thermalConfig!.motorBandStartC!,
-                        Theme.of(context).colorScheme.tertiary),
-                    DialStripe(thermalConfig!.motorBandEndC!,
-                        Theme.of(context).colorScheme.error),
+                    DialStripe(
+                      thermalConfig!.motorBandStartC!,
+                      Theme.of(context).colorScheme.tertiary,
+                    ),
+                    DialStripe(
+                      thermalConfig!.motorBandEndC!,
+                      Theme.of(context).colorScheme.error,
+                    ),
                   ],
                 ],
               ),
@@ -712,11 +667,7 @@ class _InstrumentRow extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           Expanded(
-            child: _Card(
-              key: _limiting(f, LimitCause.escTemp)
-                  ? const Key('limiting-esc')
-                  : null,
-              highlight: _limiting(f, LimitCause.escTemp),
+            child: PanelCard(
               child: Dial(
                 value: f?.escTempC,
                 max: 140,
@@ -725,10 +676,14 @@ class _InstrumentRow extends StatelessWidget {
                 note: signalNote(f?.escTempState),
                 stripes: [
                   if (thermalConfig?.escBandStartC != null) ...[
-                    DialStripe(thermalConfig!.escBandStartC!,
-                        Theme.of(context).colorScheme.tertiary),
-                    DialStripe(thermalConfig!.escBandEndC!,
-                        Theme.of(context).colorScheme.error),
+                    DialStripe(
+                      thermalConfig!.escBandStartC!,
+                      Theme.of(context).colorScheme.tertiary,
+                    ),
+                    DialStripe(
+                      thermalConfig!.escBandEndC!,
+                      Theme.of(context).colorScheme.error,
+                    ),
                   ],
                 ],
               ),
@@ -736,55 +691,6 @@ class _InstrumentRow extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-/// A labelled number with no gauge behind it, for quantities with no full
-/// scale. Sized like the dials beside it: a fixed point size looks right on the
-/// phone it was written on and wraps on a narrower one.
-class _Readout extends StatelessWidget {
-  const _Readout({
-    required this.label,
-    required this.value,
-    required this.unit,
-  });
-
-  final String label;
-  final String value;
-  final String unit;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final muted = TextStyle(
-      fontSize: 11,
-      letterSpacing: 1.5,
-      fontWeight: FontWeight.w600,
-      color: theme.colorScheme.onSurfaceVariant,
-    );
-
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Text(label, maxLines: 1, softWrap: false, style: muted),
-        Flexible(
-          child: FittedBox(
-            child: Text(
-              value,
-              maxLines: 1,
-              softWrap: false,
-              style: const TextStyle(
-                fontSize: 34,
-                fontWeight: FontWeight.w700,
-                height: 1.2,
-                fontFeatures: [FontFeature.tabularFigures()],
-              ),
-            ),
-          ),
-        ),
-        Text(unit, maxLines: 1, softWrap: false, style: muted),
-      ],
     );
   }
 }
@@ -800,7 +706,7 @@ class _ThrottleCard extends StatelessWidget {
     final f = frame;
     final pct = f?.throttlePct ?? 0;
 
-    return _Card(
+    return PanelCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -846,8 +752,10 @@ class _ThrottleCard extends StatelessWidget {
                 if (f != null && f.isLimited)
                   Positioned(
                     key: const Key('throttle-ceiling'),
-                    left: (constraints.maxWidth * f.powerPct / 100)
-                        .clamp(0.0, constraints.maxWidth - 2),
+                    left: (constraints.maxWidth * f.powerPct / 100).clamp(
+                      0.0,
+                      constraints.maxWidth - 2,
+                    ),
                     top: -3,
                     bottom: -3,
                     child: Container(width: 2, color: theme.colorScheme.error),
@@ -861,50 +769,60 @@ class _ThrottleCard extends StatelessWidget {
   }
 }
 
-/// Bottom bar: names what is behind it rather than being a bare chevron.
+/// Bottom bar. Names what is behind it, and how many alerts wait there.
 class _DrawerBar extends StatelessWidget {
-  const _DrawerBar({required this.onTap});
+  const _DrawerBar({
+    required this.onTap,
+    required this.alerts,
+    required this.hasFrame,
+  });
 
   final VoidCallback onTap;
+  final List<FlightAlert> alerts;
+  final bool hasFrame;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final n = hasFrame ? alerts.length : 0;
+    final accent = n == 0
+        ? null
+        : alertStyle(theme.colorScheme, alerts.first.severity).accent;
+    final style = TextStyle(
+      fontSize: 12,
+      letterSpacing: 1.5,
+      fontWeight: FontWeight.w700,
+      color: theme.colorScheme.onSurface,
+    );
     return Tooltip(
-      message: 'Mais dados',
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
+      message: 'Configurações e alertas',
+      child: PanelCard(
+        key: const Key('drawer-bar'),
         onTap: onTap,
-        child: _Card(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: Row(
-            children: [
-              const Icon(Icons.keyboard_arrow_up, size: 20),
-              const SizedBox(width: 8),
-              Text(
-                'MAIS DADOS',
-                style: TextStyle(
-                  fontSize: 12,
-                  letterSpacing: 1.5,
-                  fontWeight: FontWeight.w700,
-                  color: theme.colorScheme.onSurface,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.keyboard_arrow_up, size: 20),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text.rich(
+                TextSpan(
+                  text: 'CONFIGURAÇÕES',
+                  children: [
+                    if (n > 0)
+                      TextSpan(
+                        text: ' · $n ${n == 1 ? 'ALERTA' : 'ALERTAS'}',
+                        style: TextStyle(color: accent),
+                      ),
+                  ],
                 ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: style,
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  'RPM · BMS · CÉLULAS · LEITURAS',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 11,
-                    letterSpacing: 1.0,
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -1090,7 +1008,8 @@ class _SecondaryDataState extends State<_SecondaryData> {
                                   // A reason newer firmware sent has no
                                   // sentence here; the portal falls back to
                                   // the bare code rather than saying nothing.
-                                  text: kFaultExplanations[f.disarmReason] ??
+                                  text:
+                                      kFaultExplanations[f.disarmReason] ??
                                       (
                                         title: 'Desarmado por falha',
                                         detail: 'Código: ${f.disarmCode}',
@@ -1138,6 +1057,7 @@ class _SecondaryDataState extends State<_SecondaryData> {
                               ),
                               const SizedBox(height: 8),
                               _SettingsEntry(
+                                key: const Key('settings-entry'),
                                 // Disabled rather than hidden: presence is fixed and
                                 // only the state changes, the same rule the status
                                 // chips follow. A gate the pilot can see beats an
@@ -1169,7 +1089,7 @@ class _SecondaryDataState extends State<_SecondaryData> {
 /// offers from the flight screen, and deliberately behind the drawer the
 /// pilot has to open on purpose.
 class _SettingsEntry extends StatelessWidget {
-  const _SettingsEntry({required this.onTap, required this.reason});
+  const _SettingsEntry({super.key, required this.onTap, required this.reason});
 
   final VoidCallback? onTap;
   final String? reason;
@@ -1306,9 +1226,6 @@ class _MuteControl extends StatelessWidget {
     );
   }
 }
-
-bool _limiting(TelemetryFrame? f, LimitCause cause) =>
-    f?.limitCauses?.contains(cause) ?? false;
 
 /// The latched fault, in words. The status row has room for the code only;
 /// this is the sentence behind it, one tap away, as on the portal.
