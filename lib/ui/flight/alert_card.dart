@@ -4,8 +4,11 @@ import '../../state/flight_alerts.dart';
 import 'alert_text.dart';
 import 'panel_cards.dart';
 
-/// Severity to look. The same three colours the gauges use, so the card
-/// beside a dial never disagrees with it. Null is the all-clear.
+/// Severity to look. The same three colours the gauges use, over the same
+/// thresholds and hysteresis. The card also reflects the firmware's own
+/// `limitCauses`, so it may be amber while a dial is still green; that is
+/// deliberate (the firmware is the truth about a reduction), so nobody should
+/// "fix" it by ignoring `limitCauses`. Null is the all-clear.
 ({Color accent, Color iconColor, Color? border, Color? fill, IconData icon})
     alertStyle(ColorScheme s, AlertSeverity? severity) => switch (severity) {
           null => (

@@ -1,8 +1,11 @@
 import '../protocol/config_groups.dart';
 import '../protocol/telemetry_frame.dart';
 
-/// The colour a gauge is in. The whole arc takes it — never a band — so the
-/// alert card beside it, which reads the same levels, can never disagree.
+/// The colour a gauge is in. The whole arc takes it — never a band. The alert
+/// card beside it shares these thresholds and their hysteresis, but it also
+/// reflects the firmware's own `limitCauses`, so it may be amber while a dial
+/// is still green. That is deliberate: the firmware is the truth about a
+/// reduction, so do not "fix" it by ignoring `limitCauses`.
 enum GaugeZone { normal, caution, danger }
 
 /// A temperature against this pilot's thresholds. [near] is the margin below

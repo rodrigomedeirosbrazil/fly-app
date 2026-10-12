@@ -553,6 +553,7 @@ void main() {
       Size(320, 480),
       Size(852, 393),
       Size(1280, 800),
+      Size(640, 360),
     ]) {
       testWidgets('${size.width.toInt()}x${size.height.toInt()}',
           (tester) async {
@@ -685,6 +686,25 @@ void main() {
       )));
       expect(find.byKey(const Key('gauge-power')), findsOneWidget);
       expect(find.byKey(const Key('gauge-rpm')), findsNothing);
+    });
+
+    testWidgets('XAG with a BMS keeps its row when the link goes stale',
+        (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(bmsConfigured: true),
+        stale: false,
+        controllerType: ControllerType.xag,
+      )));
+      expect(find.byKey(const Key('gauge-power')), findsOneWidget);
+
+      // FlyApp hands over a null frame once the last one is older than 3 s.
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: null,
+        stale: true,
+        controllerType: ControllerType.xag,
+      )));
+      expect(find.byKey(const Key('gauge-power')), findsOneWidget);
+      expect(find.byKey(const Key('voltage-wide')), findsNothing);
     });
 
     testWidgets('Tmotor shows RPM', (tester) async {

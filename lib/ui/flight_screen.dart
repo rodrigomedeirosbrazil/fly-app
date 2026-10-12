@@ -139,6 +139,13 @@ class _FlightScreenState extends State<FlightScreen>
   ThermalConfig? _alertsConfig;
   List<FlightAlert> _alerts = const [];
 
+  /// Whether a BMS is configured, as of the last frame that said. FlyApp
+  /// hands over a null frame once the link is stale, and reading the flag off
+  /// that would flip the bottom row (XAG: no RPM, power or wide voltage) on
+  /// signal loss and back on recovery. The row's shape follows the aircraft,
+  /// not the link.
+  bool _bmsConfigured = false;
+
   @override
   void initState() {
     super.initState();
@@ -478,18 +485,22 @@ class _FlightScreenState extends State<FlightScreen>
     );
   }
 
-  Widget _bottomRow(TelemetryFrame? f) => BottomRowCards(
-    layout: bottomRowFor(
-      type: widget.controllerType,
-      bmsConfigured: f?.bmsConfigured ?? false,
-    ),
-    frame: f,
-    powerConfig: widget.powerConfig,
-    perCell: _perCell,
-    showCurrent: _showCurrent,
-    onTogglePerCell: _togglePerCell,
-    onToggleCurrent: _toggleCurrent,
-  );
+  Widget _bottomRow(TelemetryFrame? f) {
+    final configured = f?.bmsConfigured;
+    if (configured != null) _bmsConfigured = configured;
+    return BottomRowCards(
+      layout: bottomRowFor(
+        type: widget.controllerType,
+        bmsConfigured: _bmsConfigured,
+      ),
+      frame: f,
+      powerConfig: widget.powerConfig,
+      perCell: _perCell,
+      showCurrent: _showCurrent,
+      onTogglePerCell: _togglePerCell,
+      onToggleCurrent: _toggleCurrent,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {

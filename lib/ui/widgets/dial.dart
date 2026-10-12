@@ -21,8 +21,11 @@ class DialStripe {
 ///
 /// Thresholds are [stripes], not filled bands, and the **whole** value arc
 /// takes [color]: green below the first threshold, amber between, red past the
-/// second. The caller decides the colour from `gauge_levels.dart`, so the alert
-/// card and the dial read the same level and cannot disagree.
+/// second. The caller decides the colour from `gauge_levels.dart`. The alert
+/// card shares those thresholds and hysteresis, but it also reflects the
+/// firmware's own `limitCauses`, so it may be amber while the dial is still
+/// green; that is deliberate (the firmware is the truth about a reduction), so
+/// nobody should "fix" it by ignoring `limitCauses`.
 class Dial extends StatelessWidget {
   const Dial({
     super.key,

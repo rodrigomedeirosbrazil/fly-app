@@ -1,11 +1,11 @@
 import '../../protocol/telemetry_frame.dart';
 import '../../state/flight_alerts.dart';
 
-/// What the alert card says, and the sentence the drawer adds.
-///
-/// Replaces `kFaultExplanations`, which copied the web portal word for word.
-/// The portal is being removed, so the sentences now say what happened and
-/// what to do, in that order.
+// What the alert card says, and the sentence the drawer adds.
+//
+// Replaces `kFaultExplanations`, which copied the web portal word for word.
+// The portal is being removed, so the sentences now say what happened and
+// what to do, in that order.
 
 String _name(AlertComponent c) => switch (c) {
       AlertComponent.motor => 'MOTOR',
@@ -64,8 +64,15 @@ String alertSentence(FlightAlert a) {
           'potência sozinho.',
     AlertProblem.reducing => a.component == AlertComponent.battery
         ? 'A bateria está baixa e o controlador limitou a potência a $p %.'
-        : 'O $noun está quente e o controlador limitou a potência a $p %. '
-            'Ela volta quando a temperatura baixar.',
+        // The app holds the ramp level through hysteresis, so it can outlast
+        // the firmware's own limiting. The label stays; the sentence must not
+        // claim a limit the controller has already lifted.
+        : a.powerPct != null && a.powerPct! >= 100
+            ? 'O $noun ainda está perto do ponto de redução, mas a potência '
+                'já voltou a 100 %. Ela volta a ser reduzida se a '
+                'temperatura subir.'
+            : 'O $noun está quente e o controlador limitou a potência a $p %. '
+                'Ela volta quando a temperatura baixar.',
     AlertProblem.critical => 'Bateria em 5 % ou menos. Pouse agora.',
     AlertProblem.low => 'Bateria em 10 % ou menos. Planeje o pouso.',
     AlertProblem.limited => 'O controlador limitou a potência a $p %.',

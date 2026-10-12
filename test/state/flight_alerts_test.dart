@@ -137,6 +137,19 @@ void main() {
       expect(a.first.powerPct, 70);
     });
 
+    test('a held ramp is still REDUZINDO when the firmware is at 100 %', () {
+      // Hysteresis keeps the level at ramp after the controller stopped
+      // limiting. The label stays (demoting to near would flicker); the
+      // sentence is what has to be honest about the 100 %.
+      final a = flightAlerts(
+        f(motorTempC: 79, powerPct: 100, limitCauses: const {}),
+        motorLevel: ThermalLevel.ramp,
+        thermal: thermal,
+      );
+      expect(top(a), (AlertComponent.motor, AlertProblem.reducing));
+      expect(a.first.powerPct, 100);
+    });
+
     test('near is information, with the margin to the start', () {
       final a = flightAlerts(f(motorTempC: 74.2),
           motorLevel: ThermalLevel.near, thermal: thermal);

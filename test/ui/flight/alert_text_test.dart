@@ -72,6 +72,21 @@ void main() {
     );
   });
 
+  test('a held ramp that is back to 100 % does not claim a limit', () {
+    expect(
+      alertSentence(
+          a(AlertComponent.motor, AlertProblem.reducing, powerPct: 100)),
+      'O motor ainda está perto do ponto de redução, mas a potência já voltou '
+      'a 100 %. Ela volta a ser reduzida se a temperatura subir.',
+    );
+    expect(
+      alertSentence(
+          a(AlertComponent.esc, AlertProblem.reducing, powerPct: 100)),
+      'O ESC ainda está perto do ponto de redução, mas a potência já voltou '
+      'a 100 %. Ela volta a ser reduzida se a temperatura subir.',
+    );
+  });
+
   test('power control off says the motor will not reduce', () {
     expect(
       alertSentence(a(AlertComponent.motor, AlertProblem.overheated, off: true)),

@@ -262,7 +262,7 @@ before auth precisely so a client does not ask for a password to do something
 refused either way), and **`errBadOp` means "this firmware cannot do that"**,
 not an error to show.
 
-### The thermal band is the pilot's numbers, or nothing
+### The thermal thresholds are the pilot's numbers, or nothing
 
 `CFG_GET` of the `Thermal` group (17 bytes, id 1) is fetched **once per
 connection**, triggered by the first decoded binary frame rather than by
@@ -271,23 +271,25 @@ something.
 
 **Nothing is cached.** The app cannot distinguish one controller from another
 and the pilot can change these from the web portal, so a remembered threshold
-would draw the band at a temperature that is not this aircraft's. A band that
-is wrong is worse than no band, because it looks like information.
+would draw a stripe at a temperature that is not this aircraft's. A threshold
+that is wrong is worse than none, because it looks like information.
 
-**A band is drawn only when `0 < start < end`.** An unconfigured NVS returns
-zeros, and a band from zero to zero — or to the end of the scale — would paint
-the whole dial red. Motor and ESC are judged separately.
+**Stripes are drawn only when `0 < start < end`.** An unconfigured NVS returns
+zeros, and stripes at zero would mark the whole scale as over the limit, so the
+rule still holds. Motor and ESC are judged separately.
 
 **Thresholds are stripes, and the whole arc takes the zone's colour.** Amber
 stripe at the reduction start, red at the maximum; the value arc is green below
 the first, amber between, red from the second (`gauge_levels.dart`). Leaving a
 level needs 2 °C below its threshold, so a motor on a stripe does not flicker.
-The alert card reads the same levels, so it can never disagree with the dial
-beside it (its list is cached and rebuilt only when the frame or the thermal
-configuration changes identity). The first band drawing — a translucent ramp
-and a solid cut — read as two states at once.
+The alert card shares those thresholds and that hysteresis (its list is cached
+and rebuilt only when the frame or the thermal configuration changes identity),
+but it also reflects the firmware's own `limitCauses`, so it may be amber while
+a dial is still green. That is deliberate: the firmware is the truth about a
+reduction, so do not "fix" the mismatch by ignoring `limitCauses`. The first
+band drawing — a translucent ramp and a solid cut — read as two states at once.
 
-The dial's scale stays **fixed at 140 °C**; only the band is configured. The
+The dial's scale stays **fixed at 140 °C**; only the stripes are configured. The
 needle angle has to mean the same temperature on every aircraft and across a
 configuration change, or the pilot's sense of where it sits when things are
 fine stops transferring.
@@ -374,7 +376,7 @@ A gate the pilot sees before acting beats an `ErrState` arriving after the tap.
 The screen itself also disables saving if the aircraft arms while it is open.
 
 After a successful write the app **re-reads the group** instead of trusting the
-values it just sent, because the band on the dials is drawn from them and
+values it just sent, because the stripes on the dials are drawn from them and
 assumed data is what this codebase refuses everywhere else. A failed re-read is
 still a success — the controller accepted the write; only the confirmation is
 missing.
@@ -1099,7 +1101,8 @@ the only colour on screen is the data: green for a gauge in its normal zone,
 blue for throttle, amber for caution (thermal reduction, battery ≤ 10 %), red
 for danger (thermal cut, battery ≤ 5 %, armed, faults).
 
-Amber was added for the ramp rather than a second opacity of red. Caution and
+Amber was added for caution rather than a second opacity of red: the thermal
+ramp, a battery at 10 % or less, and power being reduced. Caution and
 danger are different states and the instrument convention for them predates
 this app by a long way; two alphas of one hue made the reader work out which
 was which. It is `#D29922`, from the same Primer palette as the green and the
@@ -1208,8 +1211,8 @@ identical from outside — a scan that finds nothing.
 
 It closes the details screen, then the drawer; both are `Stack` children
 rather than routes and therefore have no route for back to pop; unguarded, back
-popped the app. `canPop` stays false with the overlay closed too — leaving mid-flight is
-home or the app switcher, deliberately.
+popped the app. `canPop` stays false with the details screen and the drawer
+closed too — leaving mid-flight is home or the app switcher, deliberately.
 
 ### Signing
 
@@ -1325,9 +1328,9 @@ shipped app.
 Not oversights — this data does not exist on the `$XCTOD` stream, and is
 available only when the binary service is present:
 
-- **Flight clock** (`sessionSec`) — **done**, shown in the status row
+- **Flight clock** (`sessionSec`) — **done**, the TEMPO DE VOO card
 - **Which limiter is acting** (`limitCauses`) — **done**, named by the alert card
-- **The red reduction band** on the thermal dials — **done**, from `CFG_GET`
+- **The thermal stripes** on the dials — **done**, from `CFG_GET`
 - **Buzzer mirroring** — **done**, subsystem 5
 - **Flight-log download** — **done** (2026-10-02): list, export to the share sheet, delete one or all.
 
