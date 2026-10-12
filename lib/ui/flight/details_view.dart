@@ -29,6 +29,7 @@ class DetailsView extends StatelessWidget {
     super.key,
     required this.frame,
     required this.stale,
+    this.reconnecting = false,
     required this.alerts,
     this.thermalConfig,
     this.controllerType = ControllerType.unknown,
@@ -39,11 +40,15 @@ class DetailsView extends StatelessWidget {
     required this.onClose,
     this.onHandleDragUpdate,
     this.onHandleDragEnd,
+    this.onHandleDragCancel,
     this.columns = 1,
   });
 
   final TelemetryFrame? frame;
   final bool stale;
+
+  /// The link is retrying; the strip says the same as the status row.
+  final bool reconnecting;
   final List<FlightAlert> alerts;
   final ThermalConfig? thermalConfig;
   final ControllerType controllerType;
@@ -54,6 +59,7 @@ class DetailsView extends StatelessWidget {
   final VoidCallback onClose;
   final GestureDragUpdateCallback? onHandleDragUpdate;
   final GestureDragEndCallback? onHandleDragEnd;
+  final GestureDragCancelCallback? onHandleDragCancel;
   final int columns;
 
   static String _or(Object? v, String suffix) => v == null ? '–' : '$v$suffix';
@@ -232,7 +238,12 @@ class DetailsView extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
           child: Column(
             children: [
-              _Strip(frame: frame, stale: stale, alerts: alerts),
+              _Strip(
+                frame: frame,
+                stale: stale,
+                reconnecting: reconnecting,
+                alerts: alerts,
+              ),
               const SizedBox(height: 8),
               Expanded(
                 child: SingleChildScrollView(
@@ -262,6 +273,7 @@ class DetailsView extends StatelessWidget {
                 behavior: HitTestBehavior.opaque,
                 onVerticalDragUpdate: onHandleDragUpdate,
                 onVerticalDragEnd: onHandleDragEnd,
+                onVerticalDragCancel: onHandleDragCancel,
                 child: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   child: Center(
@@ -297,18 +309,20 @@ class _Strip extends StatelessWidget {
   const _Strip({
     required this.frame,
     required this.stale,
+    required this.reconnecting,
     required this.alerts,
   });
 
   final TelemetryFrame? frame;
   final bool stale;
+  final bool reconnecting;
   final List<FlightAlert> alerts;
 
   @override
   Widget build(BuildContext context) {
     final s = Theme.of(context).colorScheme;
     final f = frame;
-    final chip = statusChipFor(s, f, stale: stale);
+    final chip = statusChipFor(s, f, stale: stale, reconnecting: reconnecting);
     final top = alerts.isEmpty ? null : alerts.first;
     final style = alertStyle(s, top?.severity);
     final label = top == null ? null : alertLabel(top);
@@ -319,6 +333,17 @@ class _Strip extends StatelessWidget {
         children: [
           Row(
             children: [
+              // The same live dot the status row draws.
+              Container(
+                key: const Key('details-dot'),
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: (f != null && !stale) ? s.primary : s.outline,
+                ),
+              ),
+              const SizedBox(width: 10),
               StatusChip(text: chip.text, color: chip.color),
               const Spacer(),
               Text(

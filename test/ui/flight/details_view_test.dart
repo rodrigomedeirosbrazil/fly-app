@@ -89,6 +89,58 @@ void main() {
         findsOneWidget);
   });
 
+  testWidgets('the strip draws the live dot like the status row', (
+    tester,
+  ) async {
+    Color dot() =>
+        ((tester
+                    .widget<Container>(find.byKey(const Key('details-dot')))
+                    .decoration)
+                as BoxDecoration)
+            .color!;
+    await tester.pumpWidget(
+      wrap(
+        DetailsView(
+          frame: frame(),
+          stale: false,
+          alerts: const [],
+          onClose: () {},
+        ),
+      ),
+    );
+    final s = Theme.of(tester.element(find.byType(DetailsView))).colorScheme;
+    expect(dot(), s.primary);
+    await tester.pumpWidget(
+      wrap(
+        DetailsView(
+          frame: frame(),
+          stale: true,
+          alerts: const [],
+          onClose: () {},
+        ),
+      ),
+    );
+    expect(dot(), s.outline);
+  });
+
+  testWidgets('a retrying link says RECONECTANDO, not SEM SINAL', (
+    tester,
+  ) async {
+    Widget view({required bool reconnecting}) => wrap(
+      DetailsView(
+        frame: null,
+        stale: true,
+        reconnecting: reconnecting,
+        alerts: const [],
+        onClose: () {},
+      ),
+    );
+    await tester.pumpWidget(view(reconnecting: true));
+    expect(find.text('RECONECTANDO'), findsOneWidget);
+    await tester.pumpWidget(view(reconnecting: false));
+    expect(find.text('SEM SINAL'), findsOneWidget);
+  });
+
   testWidgets('an absent reading is a dash', (tester) async {
     await tester.pumpWidget(wrap(DetailsView(
       frame: null,

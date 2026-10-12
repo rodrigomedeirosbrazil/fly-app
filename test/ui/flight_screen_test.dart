@@ -810,6 +810,111 @@ void main() {
       expect(find.byType(FlightScreen), findsOneWidget);
     });
 
+    testWidgets(
+      'a pull just under the threshold springs back, just over opens',
+      (tester) async {
+        await tester.pumpWidget(
+          wrap(FlightScreen(frame: frame(), stale: false)),
+        );
+        await pull(tester, 220);
+        expect(find.byKey(const Key('details-view')), findsNothing);
+        await pull(tester, 280);
+        expect(find.byKey(const Key('details-view')), findsOneWidget);
+      },
+    );
+
+    testWidgets('a short pull up on the bottom handle springs back open', (
+      tester,
+    ) async {
+      await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
+      await pull(tester, 400);
+      await tester.drag(
+        find.byKey(const Key('details-bottom-handle')),
+        const Offset(0, -150),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('details-view')), findsOneWidget);
+      expect(tester.getTopLeft(find.byKey(const Key('details-view'))).dy, 0);
+    });
+
+    testWidgets('a cancelled pull from closed settles closed', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
+      final g = await tester.startGesture(
+        tester.getCenter(find.byKey(const Key('details-handle'))),
+      );
+      await g.moveBy(const Offset(0, 100));
+      await tester.pump();
+      expect(find.byKey(const Key('details-view')), findsOneWidget);
+      await g.cancel();
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('details-view')), findsNothing);
+    });
+
+    testWidgets('a cancelled pull on the status row past 40 % settles open', (
+      tester,
+    ) async {
+      await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
+      final g = await tester.startGesture(
+        tester.getCenter(find.byKey(const Key('details-handle'))),
+      );
+      await g.moveBy(const Offset(0, 400));
+      await tester.pump();
+      await g.cancel();
+      await tester.pumpAndSettle();
+      expect(tester.getTopLeft(find.byKey(const Key('details-view'))).dy, 0);
+    });
+
+    testWidgets('a cancelled pull on the bottom handle settles open', (
+      tester,
+    ) async {
+      await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
+      await pull(tester, 400);
+      final g = await tester.startGesture(
+        tester.getCenter(find.byKey(const Key('details-bottom-handle'))),
+      );
+      await g.moveBy(const Offset(0, -100));
+      await tester.pump();
+      await g.cancel();
+      await tester.pumpAndSettle();
+      expect(tester.getTopLeft(find.byKey(const Key('details-view'))).dy, 0);
+    });
+
+    testWidgets('the handle bar does not take taps from a long chip', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(320, 480);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        wrap(
+          FlightScreen(
+            frame: null,
+            stale: true,
+            linkStatus: LinkStatus.connecting,
+            onDisconnect: () {},
+          ),
+        ),
+      );
+      final chip = tester.getRect(find.byType(StatusChip));
+      final bar = tester.getRect(
+        find.descendant(
+          of: find.byKey(const Key('details-handle')),
+          matching: find.byWidgetPredicate(
+            (w) =>
+                w is Container &&
+                w.constraints?.maxWidth == 40 &&
+                w.constraints?.maxHeight == 5,
+          ),
+        ),
+      );
+      // The geometry this test exists for: the bar lies over the chip.
+      expect(chip.contains(bar.topLeft), isTrue);
+      expect(chip.contains(bar.bottomRight), isTrue);
+      await tester.tapAt(bar.center);
+      await tester.pumpAndSettle();
+      expect(find.text('Sem dados do controlador'), findsOneWidget);
+    });
+
     testWidgets('a tap on the state chip still offers the link dialog',
         (tester) async {
       var disconnects = 0;

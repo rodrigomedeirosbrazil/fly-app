@@ -161,7 +161,13 @@ class _FlightScreenState extends State<FlightScreen>
 
   /// Opening needs 40 % of the height pulled down; closing needs 40 % pulled
   /// back up. Anything less returns to where it started.
-  void _pullEnd(DragEndDetails _) {
+  void _pullEnd(DragEndDetails _) => _settle();
+
+  /// A cancelled drag (the system took the touch) settles by the same rule,
+  /// or details would be left stuck part way down.
+  void _pullCancel() => _settle();
+
+  void _settle() {
     final open = _pullStartedOpen
         ? _details.value > 1 - kDetailsOpenFraction
         : _details.value >= kDetailsOpenFraction;
@@ -301,18 +307,21 @@ class _FlightScreenState extends State<FlightScreen>
   Widget _statusRow(BuildContext context, TelemetryFrame? f) => _StatusRow(
     frame: f,
     stale: widget.stale,
-    // `disconnected` is the wait between two attempts: the link reports it
-    // and then schedules the retry.
-    reconnecting: const {
-      LinkStatus.scanning,
-      LinkStatus.connecting,
-      LinkStatus.disconnected,
-    }.contains(widget.linkStatus),
+    reconnecting: _reconnecting,
     onTap: widget.onDisconnect == null ? null : () => _confirmLink(context),
     onPullStart: _pullStart,
     onPullUpdate: _pullUpdate,
     onPullEnd: _pullEnd,
+    onPullCancel: _pullCancel,
   );
+
+  /// `disconnected` is the wait between two attempts: the link reports it
+  /// and then schedules the retry.
+  bool get _reconnecting => const {
+    LinkStatus.scanning,
+    LinkStatus.connecting,
+    LinkStatus.disconnected,
+  }.contains(widget.linkStatus);
 
   Widget _thermalRow(
     TelemetryFrame? f,
@@ -441,6 +450,7 @@ class _FlightScreenState extends State<FlightScreen>
                               child: DetailsView(
                                 frame: f,
                                 stale: widget.stale,
+                                reconnecting: _reconnecting,
                                 alerts: alerts,
                                 thermalConfig: widget.thermalConfig,
                                 controllerType: widget.controllerType,
@@ -454,6 +464,10 @@ class _FlightScreenState extends State<FlightScreen>
                                   _pullUpdate(d);
                                 },
                                 onHandleDragEnd: _pullEnd,
+                                onHandleDragCancel: () {
+                                  _pullStartedOpen = true;
+                                  _pullCancel();
+                                },
                               ),
                             ),
                           ),
@@ -477,6 +491,7 @@ class _StatusRow extends StatelessWidget {
     this.onPullStart,
     this.onPullUpdate,
     this.onPullEnd,
+    this.onPullCancel,
   });
 
   final TelemetryFrame? frame;
@@ -493,6 +508,7 @@ class _StatusRow extends StatelessWidget {
   final GestureDragStartCallback? onPullStart;
   final GestureDragUpdateCallback? onPullUpdate;
   final GestureDragEndCallback? onPullEnd;
+  final GestureDragCancelCallback? onPullCancel;
 
   @override
   Widget build(BuildContext context) {
@@ -513,6 +529,7 @@ class _StatusRow extends StatelessWidget {
       onVerticalDragStart: onPullStart,
       onVerticalDragUpdate: onPullUpdate,
       onVerticalDragEnd: onPullEnd,
+      onVerticalDragCancel: onPullCancel,
       child: SizedBox(
         height: 30,
         child: Stack(
@@ -542,13 +559,17 @@ class _StatusRow extends StatelessWidget {
               ],
             ),
             // The handle: the only sign the row can be pulled.
-            Center(
-              child: Container(
-                width: 40,
-                height: 5,
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.outline,
-                  borderRadius: BorderRadius.circular(3),
+            // Ignoring pointers: the bar lies over the chip on a narrow phone
+            // and must not take its taps. Drags still reach the row.
+            IgnorePointer(
+              child: Center(
+                child: Container(
+                  width: 40,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.outline,
+                    borderRadius: BorderRadius.circular(3),
+                  ),
                 ),
               ),
             ),
