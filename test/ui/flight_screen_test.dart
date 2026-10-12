@@ -1,11 +1,13 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fly_app/ble/fly_controller_link.dart';
 import 'package:fly_app/protocol/config_groups.dart';
 import 'package:fly_app/protocol/control_info.dart';
 import 'package:fly_app/protocol/telemetry_frame.dart';
+import 'package:fly_app/ui/flight/panel_prefs.dart';
 import 'package:fly_app/ui/flight_screen.dart';
 import 'package:fly_app/ui/widgets/dial.dart';
 import 'package:fly_app/ui/widgets/status_chip.dart';
@@ -552,12 +554,8 @@ void main() {
       Size(852, 393),
       Size(1280, 800),
     ]) {
-      // 852x393 is wider than tall: it takes the landscape branch, which does
-      // not exist yet, and the portrait column has no room at 393 pt. Skipped
-      // until the landscape layout lands, which removes this guard.
-      final awaitingLandscape = size.width > size.height && size.height < 400;
       testWidgets('${size.width.toInt()}x${size.height.toInt()}',
-          skip: awaitingLandscape, (tester) async {
+          (tester) async {
         tester.view.physicalSize = size;
         tester.view.devicePixelRatio = 1.0;
         addTearDown(tester.view.reset);
@@ -587,6 +585,136 @@ void main() {
         expect(tester.takeException(), isNull);
       });
     }
+  });
+
+  group('landscape', () {
+    void landscape(WidgetTester tester) {
+      tester.view.physicalSize = const Size(852, 393);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+    }
+
+    testWidgets('battery on the left, the rest on the right', (tester) async {
+      landscape(tester);
+      await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
+      final battery = tester.getCenter(find.byKey(const Key('gauge-battery')));
+      final motor = tester.getCenter(find.byKey(const Key('gauge-motor')));
+      expect(battery.dx, lessThan(852 * 0.45));
+      expect(motor.dx, greaterThan(852 * 0.45));
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('the drawer leaves the battery uncovered', (tester) async {
+      landscape(tester);
+      await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
+      await tester.tap(find.byKey(const Key('drawer-bar')));
+      await tester.pumpAndSettle();
+      expect(tester.getTopLeft(find.byKey(const Key('drawer'))).dx,
+          greaterThan(852 * 0.35));
+    });
+  });
+
+  group('orientation lock', () {
+    late List<MethodCall> calls;
+
+    setUp(() => calls = []);
+
+    void capture(WidgetTester tester) {
+      final messenger = tester.binding.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        calls.add(call);
+        return null;
+      });
+      addTearDown(() =>
+          messenger.setMockMethodCallHandler(SystemChannels.platform, null));
+    }
+
+    List<Object?> lastOrientations() => calls
+        .lastWhere((c) => c.method == 'SystemChrome.setPreferredOrientations')
+        .arguments as List<Object?>;
+
+    testWidgets('defaults to portrait', (tester) async {
+      capture(tester);
+      await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
+      await tester.pumpAndSettle();
+      expect(lastOrientations(), ['DeviceOrientation.portraitUp']);
+    });
+
+    testWidgets('the drawer choice is applied and remembered', (tester) async {
+      capture(tester);
+      await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('drawer-bar')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Horizontal'));
+      await tester.pumpAndSettle();
+      expect(lastOrientations(), [
+        'DeviceOrientation.landscapeLeft',
+        'DeviceOrientation.landscapeRight',
+      ]);
+      expect((await PanelPrefs.load()).orientation,
+          OrientationChoice.landscape);
+    });
+
+    testWidgets('automatic hands rotation back to the system', (tester) async {
+      capture(tester);
+      SharedPreferences.setMockInitialValues({'orientation': 'auto'});
+      await tester.pumpWidget(wrap(FlightScreen(frame: frame(), stale: false)));
+      await tester.pumpAndSettle();
+      expect(lastOrientations(), isEmpty);
+    });
+  });
+
+  group('the bottom row follows the aircraft', () {
+    testWidgets('XAG without a BMS shows the wide voltage, no RPM',
+        (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(bmsConfigured: false),
+        stale: false,
+        controllerType: ControllerType.xag,
+      )));
+      expect(find.byKey(const Key('voltage-wide')), findsOneWidget);
+      expect(find.byKey(const Key('gauge-rpm')), findsNothing);
+    });
+
+    testWidgets('XAG with a BMS shows power, no RPM', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(bmsConfigured: true),
+        stale: false,
+        controllerType: ControllerType.xag,
+      )));
+      expect(find.byKey(const Key('gauge-power')), findsOneWidget);
+      expect(find.byKey(const Key('gauge-rpm')), findsNothing);
+    });
+
+    testWidgets('Tmotor shows RPM', (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(),
+        stale: false,
+        controllerType: ControllerType.tmotor,
+      )));
+      expect(find.byKey(const Key('gauge-rpm')), findsOneWidget);
+    });
+
+    testWidgets('a reading lost mid-use does not reflow the row',
+        (tester) async {
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(),
+        stale: false,
+        controllerType: ControllerType.tmotor,
+      )));
+      expect(find.byKey(const Key('gauge-power')), findsOneWidget);
+      expect(find.byKey(const Key('gauge-rpm')), findsOneWidget);
+
+      await tester.pumpWidget(wrap(FlightScreen(
+        frame: frame(powerKw: null, rpm: null, hasTelemetry: false),
+        stale: false,
+        controllerType: ControllerType.tmotor,
+      )));
+      expect(find.byKey(const Key('gauge-power')), findsOneWidget);
+      expect(find.byKey(const Key('gauge-rpm')), findsOneWidget);
+      expect(find.text('SEM DADOS'), findsWidgets);
+    });
   });
 
   group('mute control', () {

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../ble/fly_controller_link.dart';
@@ -11,6 +12,7 @@ import '../state/telemetry_source_policy.dart';
 import 'flight/alert_card.dart';
 import 'flight/details_view.dart';
 import 'flight/flight_drawer.dart';
+import 'flight/orientation_lock.dart';
 import 'flight/panel_cards.dart';
 import 'flight/panel_prefs.dart';
 import 'widgets/status_chip.dart';
@@ -130,6 +132,7 @@ class _FlightScreenState extends State<FlightScreen>
 
   bool _perCell = false;
   bool _showCurrent = false;
+  OrientationChoice _orientation = OrientationChoice.portrait;
 
   final ThermalHysteresis _thermal = ThermalHysteresis();
   TelemetryFrame? _alertsFrame;
@@ -144,13 +147,17 @@ class _FlightScreenState extends State<FlightScreen>
       setState(() {
         _perCell = p.perCell;
         _showCurrent = p.showCurrent;
+        _orientation = p.orientation;
       });
+      applyOrientation(p.orientation);
     });
   }
 
   @override
   void dispose() {
     _details.dispose();
+    // The connection screen after a disconnect is not locked.
+    applyOrientation(OrientationChoice.auto);
     super.dispose();
   }
 
@@ -180,6 +187,52 @@ class _FlightScreenState extends State<FlightScreen>
     setState(() => _perCell = !_perCell);
     PanelPrefs.savePerCell(_perCell);
   }
+
+  void _setOrientation(OrientationChoice choice) {
+    setState(() => _orientation = choice);
+    applyOrientation(choice);
+    PanelPrefs.saveOrientation(choice);
+  }
+
+  Widget? get _orientationControl => kIsWeb
+      ? null
+      : Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'ORIENTAÇÃO DA TELA',
+                style: TextStyle(
+                  fontSize: 13,
+                  letterSpacing: 1.5,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 6),
+              SegmentedButton<OrientationChoice>(
+                key: const Key('orientation-choice'),
+                showSelectedIcon: false,
+                segments: const [
+                  ButtonSegment(
+                    value: OrientationChoice.portrait,
+                    label: Text('Vertical'),
+                  ),
+                  ButtonSegment(
+                    value: OrientationChoice.landscape,
+                    label: Text('Horizontal'),
+                  ),
+                  ButtonSegment(
+                    value: OrientationChoice.auto,
+                    label: Text('Automático'),
+                  ),
+                ],
+                selected: {_orientation},
+                onSelectionChanged: (s) => _setOrientation(s.first),
+              ),
+            ],
+          ),
+        );
 
   void _toggleCurrent() {
     setState(() => _showCurrent = !_showCurrent);
@@ -304,6 +357,56 @@ class _FlightScreenState extends State<FlightScreen>
     );
   }
 
+  /// Everything that says how much flying is left on the left; the portrait
+  /// cards in their portrait order on the right, so the pilot's map transfers.
+  Widget _landscape(
+    BuildContext context,
+    TelemetryFrame? f,
+    List<FlightAlert> alerts,
+  ) {
+    const gap = SizedBox(height: 8);
+    return Column(
+      children: [
+        Expanded(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                flex: 2,
+                child: Column(
+                  children: [
+                    _statusRow(context, f),
+                    gap,
+                    Expanded(child: BatteryGaugeCard(frame: f)),
+                    gap,
+                    FlightTimesRow(frame: f),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 3,
+                child: Column(
+                  children: [
+                    Expanded(
+                      child: _thermalRow(f, alerts, widget.thermalConfig),
+                    ),
+                    gap,
+                    Expanded(child: _bottomRow(f)),
+                    gap,
+                    ThrottleCard(frame: f),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        gap,
+        _DrawerBar(onTap: _openDrawer, alerts: alerts, hasFrame: f != null),
+      ],
+    );
+  }
+
   Widget _statusRow(BuildContext context, TelemetryFrame? f) => _StatusRow(
     frame: f,
     stale: widget.stale,
@@ -414,11 +517,14 @@ class _FlightScreenState extends State<FlightScreen>
           child: LayoutBuilder(
             builder: (context, c) {
               _height = c.maxHeight;
+              final wide = c.maxWidth > c.maxHeight;
               return Stack(
                 children: [
                   Padding(
                     padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
-                    child: _portrait(context, f, alerts),
+                    child: wide
+                        ? _landscape(context, f, alerts)
+                        : _portrait(context, f, alerts),
                   ),
                   // In the tree, not a pushed route. A modal route builds once
                   // from the frame captured when it opened and never sees
@@ -433,6 +539,8 @@ class _FlightScreenState extends State<FlightScreen>
                       armed: f?.isArmed ?? false,
                       onOpenSettings: widget.onOpenSettings,
                       onClose: () => setState(() => _drawerOpen = false),
+                      orientationControl: _orientationControl,
+                      leftInset: wide ? c.maxWidth * 0.4 : 0,
                     ),
                   // Details, for the same reason: in the tree, so every frame
                   // reaches it. Slid down from above by the controller the
@@ -454,6 +562,7 @@ class _FlightScreenState extends State<FlightScreen>
                                 alerts: alerts,
                                 thermalConfig: widget.thermalConfig,
                                 controllerType: widget.controllerType,
+                                columns: wide ? 2 : 1,
                                 telemetrySource: widget.telemetrySource,
                                 rejectedFrames: widget.rejectedFrames,
                                 firmwareVersion: widget.firmwareVersion,
