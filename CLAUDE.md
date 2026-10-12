@@ -122,7 +122,7 @@ notifies one ASCII line per second:
 |---|---|
 | Service | `6E400001-B5A3-F393-E0A9-E50E24DCCA9E` |
 | TX characteristic (notify only) | `6E400003-B5A3-F393-E0A9-E50E24DCCA9E` |
-| Sentence | `$XCTOD,<16 comma-separated fields>\r\n` |
+| Sentence | `$XCTOD,<at least 16 comma-separated fields>\r\n` (trailing fields ignored) |
 
 **There is no write characteristic.** This app can listen and nothing else.
 Every command, setting and firmware update is phase 2 or later — see
@@ -1034,7 +1034,7 @@ Android's default ATT MTU is 23, which caps a notification at 20 bytes and
 would truncate every ~90-byte sentence. **Verified on Android 12: 247 granted,
 `status=0`, panel live, zero rejected frames.**
 
-Frames that fail the 16-field count are counted and the total is shown on the
+Frames with fewer than 16 fields are counted and the total is shown on the
 connection screen. Non-zero there with no telemetry is the signature of an MTU
 that never grew — which is why it is surfaced rather than silenced.
 

@@ -121,10 +121,6 @@ void main() {
       expect(XctodParser.parse(r'$XCTOD,87,91,50.400,', receivedAt: t0), isNull);
     });
 
-    test('rejects too many fields', () {
-      expect(XctodParser.parse('$healthy,99', receivedAt: t0), isNull);
-    });
-
     test('rejects a line without the prefix', () {
       final line = healthy.replaceFirst(r'$XCTOD', r'$GPGGA');
       expect(XctodParser.parse(line, receivedAt: t0), isNull);
@@ -152,5 +148,23 @@ void main() {
   test('powerPct below 100 marks the frame as limited', () {
     final line = healthy.replaceFirst(',1234,100,', ',1234,73,');
     expect(XctodParser.parse(line, receivedAt: t0)!.isLimited, isTrue);
+  });
+
+  group('forward compatibility', () {
+    test('accepts and ignores fields appended after the 16th', () {
+      // Firmware appends remaining_min as field 17; later firmware may append
+      // more. The prefix this app knows must still decode.
+      final f = XctodParser.parse('$healthy,23', receivedAt: t0)!;
+      expect(f.socCoulomb, 87);
+      expect(f.cellMaxMv, 3745);
+
+      final g = XctodParser.parse('$healthy,23,,x', receivedAt: t0);
+      expect(g, isNotNull);
+    });
+
+    test('still rejects a line shorter than 16 fields', () {
+      final short = healthy.substring(0, healthy.lastIndexOf(','));
+      expect(XctodParser.parse(short, receivedAt: t0), isNull);
+    });
   });
 }

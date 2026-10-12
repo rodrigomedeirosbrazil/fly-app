@@ -8,14 +8,16 @@ import 'telemetry_frame.dart';
 class XctodParser {
   static const String prefix = r'$XCTOD';
 
-  /// Number of comma-separated fields after the prefix token.
+  /// Number of comma-separated fields after the prefix token that this app
+  /// decodes. Firmware may append more at the end (field 17 is
+  /// `remaining_min`); those are ignored, never a reason to reject the line.
   static const int fieldCount = 16;
 
   /// Returns null when [line] is not a well-formed frame. The caller counts
   /// rejections; nothing partial is ever handed to the UI.
   static TelemetryFrame? parse(String line, {required DateTime receivedAt}) {
     final parts = line.trim().split(',');
-    if (parts.length != fieldCount + 1) return null;
+    if (parts.length < fieldCount + 1) return null;
     if (parts.first != prefix) return null;
 
     final f = parts.sublist(1);
