@@ -357,7 +357,15 @@ class _FlightScreenState extends State<FlightScreen>
         gap,
         ThrottleCard(frame: f),
         gap,
-        Expanded(flex: 3, child: _bottomRow(f)),
+        // As tall as one of its three cards is wide: square cards, whose
+        // numbers are as large as the width allows. The height they no longer
+        // take goes to the battery and the temperatures.
+        LayoutBuilder(
+          builder: (context, c) => SizedBox(
+            height: (c.maxWidth - 2 * 8) / 3, // the row's two gaps
+            child: _bottomRow(f),
+          ),
+        ),
         gap,
         _DrawerBar(onTap: _openDrawer, alerts: alerts, hasFrame: f != null),
       ],
@@ -395,11 +403,14 @@ class _FlightScreenState extends State<FlightScreen>
                 flex: 3,
                 child: Column(
                   children: [
+                    // The bottom row's numbers fill its width, so they stay
+                    // large on a shorter row; the dials need the height.
                     Expanded(
+                      flex: 3,
                       child: _thermalRow(f, alerts, widget.thermalConfig),
                     ),
                     gap,
-                    Expanded(child: _bottomRow(f)),
+                    Expanded(flex: 2, child: _bottomRow(f)),
                     gap,
                     ThrottleCard(frame: f),
                   ],

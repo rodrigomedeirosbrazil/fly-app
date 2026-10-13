@@ -5,6 +5,7 @@ import '../../protocol/telemetry_frame.dart';
 import '../../state/gauge_levels.dart';
 import '../../state/panel_layout_policy.dart';
 import '../reading_text.dart';
+import '../widgets/bar_gauge.dart';
 import '../widgets/dial.dart';
 import 'number_format.dart';
 
@@ -373,17 +374,18 @@ class BottomRowCards extends StatelessWidget {
     };
   }
 
-  Dial _voltageDial(ColorScheme s, bool cell, {Key? key, String? caption}) {
+  BarGauge _voltageGauge(ColorScheme s, bool cell,
+      {Key? key, String? caption}) {
     final f = frame;
     final range = voltageRange(powerConfig, perCell: cell);
     final reading = (cell && f != null) ? perCellVolts(f) : null;
     final value = cell ? reading?.volts : f?.voltage;
-    return Dial(
+    return BarGauge(
       key: key,
       value: value,
       min: range?.min ?? 0,
       max: range?.max ?? 1,
-      showArc: range != null,
+      showBar: range != null,
       unit: 'V',
       caption: caption,
       note: signalNote(f?.batteryVoltageState),
@@ -404,7 +406,7 @@ class BottomRowCards extends StatelessWidget {
   Widget _voltage(ColorScheme s, bool cell, VoidCallback onTap) => PanelCard(
         onTap: onTap,
         child: Stack(children: [
-          _voltageDial(s, cell,
+          _voltageGauge(s, cell,
               key: const Key('gauge-voltage'),
               caption: cell ? 'CÉLULA' : 'TENSÃO'),
           const SwitchMark(),
@@ -415,7 +417,7 @@ class BottomRowCards extends StatelessWidget {
         onTap: onToggleCurrent,
         child: Stack(children: [
           showCurrent
-              ? Dial(
+              ? BarGauge(
                   key: const Key('gauge-current'),
                   value: frame?.currentA,
                   max: kCurrentFullScaleA,
@@ -424,7 +426,7 @@ class BottomRowCards extends StatelessWidget {
                   note: _noData,
                   format: (v) => v.round().toString(),
                 )
-              : Dial(
+              : BarGauge(
                   key: const Key('gauge-power'),
                   value: frame?.powerKw,
                   max: kPowerFullScaleKw,
@@ -438,7 +440,7 @@ class BottomRowCards extends StatelessWidget {
       );
 
   Widget _rpm() => PanelCard(
-        child: Dial(
+        child: BarGauge(
           key: const Key('gauge-rpm'),
           value: frame?.rpm?.toDouble(),
           max: kRpmFullScale,
@@ -458,8 +460,9 @@ class BottomRowCards extends StatelessWidget {
       key: const Key('voltage-wide'),
       child: Row(children: [
         Expanded(
-            child: _voltageDial(s, false,
+            child: _voltageGauge(s, false,
                 key: const Key('gauge-voltage'), caption: 'TENSÃO')),
+        const SizedBox(width: 16),
         Expanded(
           child: _Figure(
             label: 'POR CÉLULA',

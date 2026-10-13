@@ -4,7 +4,7 @@ import 'package:fly_app/protocol/config_groups.dart';
 import 'package:fly_app/protocol/telemetry_frame.dart';
 import 'package:fly_app/state/panel_layout_policy.dart';
 import 'package:fly_app/ui/flight/panel_cards.dart';
-import 'package:fly_app/ui/widgets/dial.dart';
+import 'package:fly_app/ui/widgets/bar_gauge.dart';
 
 TelemetryFrame frame({
   double? voltage = 50.8,
@@ -68,7 +68,8 @@ Widget row(
   ),
 );
 
-Dial dial(WidgetTester t, String key) => t.widget<Dial>(find.byKey(Key(key)));
+BarGauge dial(WidgetTester t, String key) =>
+    t.widget<BarGauge>(find.byKey(Key(key)));
 
 void main() {
   testWidgets('full: voltage, power, rpm, formatted the Brazilian way', (
@@ -96,11 +97,11 @@ void main() {
     },
   );
 
-  testWidgets('no Power group: the voltage keeps its number, loses its arc', (
+  testWidgets('no Power group: the voltage keeps its number, loses its bar', (
     tester,
   ) async {
     await tester.pumpWidget(row(BottomRowLayout.full, config: null));
-    expect(dial(tester, 'gauge-voltage').showArc, isFalse);
+    expect(dial(tester, 'gauge-voltage').showBar, isFalse);
     expect(find.text('50,8'), findsOneWidget);
   });
 

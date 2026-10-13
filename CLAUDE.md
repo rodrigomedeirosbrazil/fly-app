@@ -13,7 +13,7 @@ fly-controller, and only listens.
 **Framework:** Flutter 3.47.3 (stable) · **Dart SDK:** ^3.13.3
 
 ```bash
-flutter test                  # 978 tests, no hardware needed
+flutter test                  # 1000 tests, no hardware needed
 flutter analyze               # must be clean
 flutter build ios --release   # needs Xcode
 flutter build apk --release   # signed APK, ~45 MB (all three ABIs)
@@ -936,7 +936,7 @@ lib/
 ├── net/        release_feed.dart
 ├── ble/        fly_controller_link.dart · android_host.dart · app_host.dart
 └── ui/         app.dart · connection_screen.dart · flight_screen.dart
-                reading_text.dart · widgets/dial.dart
+                reading_text.dart · widgets/dial.dart · widgets/bar_gauge.dart
                 flight/alert_card.dart · alert_text.dart · details_view.dart
                 flight/flight_drawer.dart · number_format.dart
                 flight/orientation_lock.dart · panel_cards.dart
