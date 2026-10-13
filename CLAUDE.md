@@ -21,6 +21,19 @@ flutter build apk --debug     # validates the Android config with no device
 tool/build_web.sh             # web build for GitHub Pages, into build/web
 ```
 
+The user manual lives in the **fly-controller** repo at `docs/manual/`, and its
+app screenshots are drawn from this code:
+
+```bash
+tool/manual_screens.sh ../fly-controller   # renders 20 screens, copies them to docs/manual/img
+```
+
+It is a widget test run with `--update-goldens`, kept in `tool/` so plain
+`flutter test` never runs it. It loads Roboto from the Flutter SDK by hand —
+the test binding otherwise draws every glyph as a box — and the ⇄ fallback
+from macOS. When a screen in the manual changes, rerun it and commit the
+images in fly-controller.
+
 `flutter build apk --debug` is worth knowing: it is the cheapest way to
 exercise the manifest merger and the Kotlin compile, and it needs no phone.
 `flutter analyze` and `flutter test` touch none of that. In the same way
