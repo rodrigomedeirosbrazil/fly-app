@@ -299,4 +299,36 @@ void main() {
       expect(parseSetting('12v'), isNull);
     });
   });
+
+  group('BMS alert thresholds, mirrored from the firmware', () {
+    SettingsError v(int g, int m, int t) => validateBmsAlerts(
+        lowCellDeltaGateMv: g, maxDeltaMv: m, tempLimitC: t);
+
+    test('the bounds are inclusive', () {
+      expect(v(20, 50, 30), SettingsError.none);
+      expect(v(500, 1000, 80), SettingsError.none);
+    });
+
+    test('each field names itself when out of range', () {
+      expect(v(19, 200, 55), SettingsError.bmsDeltaGateRange);
+      expect(v(501, 200, 55), SettingsError.bmsDeltaGateRange);
+      expect(v(100, 49, 55), SettingsError.bmsMaxDeltaRange);
+      expect(v(100, 1001, 55), SettingsError.bmsMaxDeltaRange);
+      expect(v(100, 200, 29), SettingsError.bmsTempLimitRange);
+      expect(v(100, 200, 81), SettingsError.bmsTempLimitRange);
+    });
+
+    test('a gate above the max is accepted on purpose', () {
+      expect(v(400, 100, 55), SettingsError.none);
+    });
+
+    test('the messages name the field and the range', () {
+      expect(messageFor(SettingsError.bmsDeltaGateRange),
+          'Diferença mínima para célula baixa: 20 a 500 mV');
+      expect(messageFor(SettingsError.bmsMaxDeltaRange),
+          'Diferença máxima entre células: 50 a 1000 mV');
+      expect(messageFor(SettingsError.bmsTempLimitRange),
+          'Temperatura máxima do BMS: 30 a 80 °C');
+    });
+  });
 }

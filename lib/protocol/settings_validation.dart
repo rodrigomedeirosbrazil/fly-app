@@ -29,6 +29,9 @@ enum SettingsError {
   motorTempSourceInvalid,
   bmsTypeInvalid,
   bmsMacMissing,
+  bmsDeltaGateRange,
+  bmsMaxDeltaRange,
+  bmsTempLimitRange,
   buzzerVolumeRange,
   throttleSourceInvalid,
 
@@ -128,6 +131,32 @@ SettingsError validateBms({
 }) {
   if (bmsType < 0 || bmsType > 3) return SettingsError.bmsTypeInvalid;
   if (bmsType != 0 && isUnsetMac(bmsMac)) return SettingsError.bmsMacMissing;
+  return SettingsError.none;
+}
+
+/// The three BMS alert thresholds: gate 20..500 mV, max delta 50..1000 mV,
+/// temperature 30..80 °C, all inclusive. From `validateBmsAlerts` in
+/// `src/Settings/SettingsValidation.h`.
+///
+/// The firmware answers a single `BmsAlertRange`; this reports which field,
+/// so the message can name the one to fix. That is a finer report of the same
+/// rule, not a divergence. There is deliberately **no** ordering rule between
+/// the gate and the max delta: a gate above the max is redundant, not
+/// dangerous, because the alerts never touch power.
+SettingsError validateBmsAlerts({
+  required int lowCellDeltaGateMv,
+  required int maxDeltaMv,
+  required int tempLimitC,
+}) {
+  if (lowCellDeltaGateMv < 20 || lowCellDeltaGateMv > 500) {
+    return SettingsError.bmsDeltaGateRange;
+  }
+  if (maxDeltaMv < 50 || maxDeltaMv > 1000) {
+    return SettingsError.bmsMaxDeltaRange;
+  }
+  if (tempLimitC < 30 || tempLimitC > 80) {
+    return SettingsError.bmsTempLimitRange;
+  }
   return SettingsError.none;
 }
 
@@ -256,6 +285,12 @@ String? messageFor(SettingsError error) => switch (error) {
       SettingsError.escTempRange => 'Temperatura do ESC: 0 a 150 °C',
       SettingsError.motorTempSourceInvalid => 'Origem de temperatura inválida',
       SettingsError.bmsTypeInvalid => 'Tipo de BMS inválido',
+      SettingsError.bmsDeltaGateRange =>
+        'Diferença mínima para célula baixa: 20 a 500 mV',
+      SettingsError.bmsMaxDeltaRange =>
+        'Diferença máxima entre células: 50 a 1000 mV',
+      SettingsError.bmsTempLimitRange =>
+        'Temperatura máxima do BMS: 30 a 80 °C',
       SettingsError.bmsMacMissing =>
         'Escolha o endereço do BMS — um tipo sem endereço não conecta',
       SettingsError.buzzerVolumeRange => 'Volume do buzzer: 0 a 100',
