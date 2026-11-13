@@ -37,8 +37,9 @@ BottomRowLayout bottomRowFor({
     };
 
 /// Where the ESC temperature comes from. The telemetry does not say; the
-/// board does — Tmotor and Hobbywing over CAN, XAG from the NTC on `ADS1115_ESC_TEMP_CHANNEL`
-/// (fly-controller `config.h`, XAG only). Another hand-copied fact.
+/// board does — Tmotor and Hobbywing over CAN, XAG from the NTC on
+/// `ADS1115_ESC_TEMP_CHANNEL` (fly-controller `config.h`, XAG only). Another
+/// hand-copied fact.
 String? escTempSourceFor(ControllerType type) => switch (type) {
       ControllerType.tmotor || ControllerType.hobbywing => 'CAN',
       ControllerType.xag => 'NTC',
