@@ -161,13 +161,52 @@ class PowerConfig {
   }
 }
 
-/// `ConfigBms`, 7 bytes: `[type u8][mac 6]`.
+/// The firmware's three BMS alert thresholds, the tail of the 13-byte `Bms`
+/// group. Ranges live in `settings_validation.dart`.
+class BmsAlertThresholds {
+  const BmsAlertThresholds({
+    required this.lowCellDeltaGateMv,
+    required this.maxDeltaMv,
+    required this.tempLimitC,
+  });
+
+  /// Minimum cell-to-cell difference before a low cell is worth reporting.
+  final int lowCellDeltaGateMv;
+
+  /// Largest tolerated difference between the highest and lowest cell.
+  final int maxDeltaMv;
+
+  /// BMS temperature limit, in degrees Celsius.
+  final int tempLimitC;
+
+  @override
+  bool operator ==(Object other) =>
+      other is BmsAlertThresholds &&
+      other.lowCellDeltaGateMv == lowCellDeltaGateMv &&
+      other.maxDeltaMv == maxDeltaMv &&
+      other.tempLimitC == tempLimitC;
+
+  @override
+  int get hashCode => Object.hash(lowCellDeltaGateMv, maxDeltaMv, tempLimitC);
+
+  @override
+  String toString() =>
+      'BmsAlertThresholds($lowCellDeltaGateMv mV, $maxDeltaMv mV, $tempLimitC C)';
+}
+
+/// `ConfigBms`, 7 or 13 bytes: `[type u8][mac 6]` and, on firmware with BMS
+/// alerts, `[gate u16][maxDelta u16][temp i16]`, little-endian.
 ///
-/// Same rules as the other groups: shorter is corruption and decodes to null,
-/// longer decodes its known prefix so firmware that appends a field still
-/// works.
+/// Same rules as the other groups: shorter than 7 is corruption and decodes to
+/// null, longer decodes its known prefix so firmware that appends a field
+/// still works.
+///
+/// **`encode` mirrors what was read.** An older firmware's 7-byte reply has
+/// `alerts == null` and is written back as 7 bytes; sending 13 with defaults
+/// would overwrite the pilot's stored thresholds with numbers nobody chose
+/// (the firmware keeps them on a 7-byte write, `copyKnownPrefix`).
 class BmsConfig {
-  const BmsConfig({required this.bmsType, required this.bmsMac});
+  const BmsConfig({required this.bmsType, required this.bmsMac, this.alerts});
 
   /// 0 none, 1 JBD, 2 Daly, 3 JK. Mirrors the firmware's own numbering; there
   /// is no Dart enum here because the value is written straight back and a
@@ -177,20 +216,44 @@ class BmsConfig {
   /// Six raw bytes. All zero means unset — see `mac_address.dart`.
   final List<int> bmsMac;
 
+  /// Null when the controller sent only the 7-byte layout.
+  final BmsAlertThresholds? alerts;
+
+  /// The minimum, and the whole layout before BMS alerts.
   static const int kLength = 7;
+
+  /// The layout with the alert thresholds.
+  static const int kAlertsLength = 13;
 
   static BmsConfig? decode(List<int> bytes) {
     if (bytes.length < kLength) return null;
+    BmsAlertThresholds? alerts;
+    if (bytes.length >= kAlertsLength) {
+      final d = ByteData.sublistView(Uint8List.fromList(bytes));
+      alerts = BmsAlertThresholds(
+        lowCellDeltaGateMv: d.getUint16(7, Endian.little),
+        maxDeltaMv: d.getUint16(9, Endian.little),
+        tempLimitC: d.getInt16(11, Endian.little),
+      );
+    }
     return BmsConfig(
       bmsType: bytes[0],
       bmsMac: List<int>.unmodifiable(bytes.sublist(1, 7)),
+      alerts: alerts,
     );
   }
 
   Uint8List encode() {
-    final out = Uint8List(kLength);
+    final a = alerts;
+    final out = Uint8List(a == null ? kLength : kAlertsLength);
     out[0] = bmsType;
     out.setRange(1, 7, bmsMac);
+    if (a != null) {
+      final d = ByteData.sublistView(out);
+      d.setUint16(7, a.lowCellDeltaGateMv, Endian.little);
+      d.setUint16(9, a.maxDeltaMv, Endian.little);
+      d.setInt16(11, a.tempLimitC, Endian.little);
+    }
     return out;
   }
 }

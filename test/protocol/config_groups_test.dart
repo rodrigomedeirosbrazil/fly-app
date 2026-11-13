@@ -269,6 +269,55 @@ void main() {
       final c = BmsConfig.decode([2, 1, 2, 3, 4, 5, 6, 99, 99])!;
       expect(c.bmsType, 2);
       expect(c.bmsMac, [1, 2, 3, 4, 5, 6]);
+      expect(c.alerts, isNull);
+    });
+
+    test('decodes the 13-byte layout offset by offset', () {
+      final c = BmsConfig.decode(
+          [1, 1, 2, 3, 4, 5, 6, 0x64, 0x00, 0xC8, 0x00, 0x37, 0x00])!;
+      expect(
+          c.alerts,
+          const BmsAlertThresholds(
+              lowCellDeltaGateMv: 100, maxDeltaMv: 200, tempLimitC: 55));
+    });
+
+    test('a 7-to-12-byte payload has no thresholds', () {
+      expect(BmsConfig.decode([1, 1, 2, 3, 4, 5, 6])!.alerts, isNull);
+      expect(
+          BmsConfig.decode([1, 1, 2, 3, 4, 5, 6, 0x64, 0, 0xC8, 0, 0x37])!
+              .alerts,
+          isNull);
+    });
+
+    test('without thresholds it encodes exactly 7 bytes', () {
+      expect(
+          const BmsConfig(bmsType: 1, bmsMac: [1, 2, 3, 4, 5, 6]).encode(),
+          hasLength(7));
+    });
+
+    test('with thresholds it encodes 13 and round trips', () {
+      const t = BmsAlertThresholds(
+          lowCellDeltaGateMv: 500, maxDeltaMv: 1000, tempLimitC: 80);
+      final bytes =
+          const BmsConfig(bmsType: 3, bmsMac: [1, 2, 3, 4, 5, 6], alerts: t)
+              .encode();
+      expect(bytes, hasLength(13));
+      expect(BmsConfig.decode(bytes)!.alerts, t);
+    });
+
+    test('a negative temperature limit survives the round trip', () {
+      const t = BmsAlertThresholds(
+          lowCellDeltaGateMv: 100, maxDeltaMv: 200, tempLimitC: -5);
+      final c = BmsConfig.decode(
+          const BmsConfig(bmsType: 0, bmsMac: [0, 0, 0, 0, 0, 0], alerts: t)
+              .encode())!;
+      expect(c.alerts, t);
+    });
+
+    test('a 15-byte payload reads the thresholds and ignores the rest', () {
+      final c = BmsConfig.decode(
+          [1, 1, 2, 3, 4, 5, 6, 0x64, 0, 0xC8, 0, 0x37, 0, 9, 9])!;
+      expect(c.alerts!.tempLimitC, 55);
     });
   });
 
