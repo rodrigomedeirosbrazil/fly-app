@@ -51,6 +51,8 @@ void main() {
   test('controller types map, and an unknown one degrades', () {
     expect(ControlInfo.decode(bytes(controllerType: 1))!.controllerType,
         ControllerType.xag);
+    expect(ControlInfo.decode(bytes(controllerType: 2))!.controllerType,
+        ControllerType.hobbywing);
     expect(ControlInfo.decode(bytes(controllerType: 3))!.controllerType,
         ControllerType.tmotor);
     expect(ControlInfo.decode(bytes(controllerType: 9))!.controllerType,

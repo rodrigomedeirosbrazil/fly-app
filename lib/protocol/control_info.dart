@@ -1,8 +1,8 @@
 import 'dart:typed_data';
 
-/// Which controller is on the other end. The firmware sends 1 for XAG and 3
-/// for Tmotor; 2 is not assigned.
-enum ControllerType { xag, tmotor, unknown }
+/// Which controller is on the other end. The firmware sends 1 for XAG, 2 for
+/// Hobbywing and 3 for Tmotor.
+enum ControllerType { xag, tmotor, hobbywing, unknown }
 
 /// The `INFO` characteristic: **at least** 28 bytes, static for the session.
 ///
@@ -120,6 +120,7 @@ class ControlInfo {
       protocolVersion: d.getUint8(0),
       controllerType: switch (d.getUint8(1)) {
         1 => ControllerType.xag,
+        2 => ControllerType.hobbywing,
         3 => ControllerType.tmotor,
         _ => ControllerType.unknown,
       },
