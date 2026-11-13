@@ -14,6 +14,7 @@ String _name(AlertComponent c) => switch (c) {
       AlertComponent.throttle => 'ACELERADOR',
       AlertComponent.power => 'POTÊNCIA',
       AlertComponent.controller => 'CONTROLADOR',
+      AlertComponent.bms => 'BMS',
     };
 
 /// "o motor" / "o ESC", for the middle of a sentence.
@@ -23,6 +24,7 @@ String _noun(AlertComponent c) => switch (c) {
       AlertComponent.throttle => 'acelerador',
       AlertComponent.power => 'controlador',
       AlertComponent.controller => 'controlador',
+      AlertComponent.bms => 'BMS',
       AlertComponent.motor => 'motor',
     };
 
@@ -50,6 +52,9 @@ String _noun(AlertComponent c) => switch (c) {
         AlertProblem.noData => 'SEM DADOS',
         AlertProblem.noBms => 'SEM BMS',
         AlertProblem.nearLimit => 'PERTO DO LIMITE',
+        AlertProblem.bmsLowCell => 'CÉLULA BAIXA',
+        AlertProblem.bmsHighDelta => 'DIFERENÇA ENTRE CÉLULAS',
+        AlertProblem.bmsHighTemp => 'TEMPERATURA ALTA',
       },
     );
 
@@ -99,6 +104,16 @@ String alertSentence(FlightAlert a) {
     AlertProblem.nearLimit =>
       'O $noun está a ${a.marginC ?? 0} °C do ponto em que a potência começa '
           'a ser reduzida.',
+    AlertProblem.bmsLowCell =>
+      'Uma célula chegou à tensão mínima e as células estão desequilibradas. '
+          'Alivie o acelerador e planeje o pouso. O controlador não reduz a '
+          'potência por isso.',
+    AlertProblem.bmsHighDelta =>
+      'A diferença entre a maior e a menor célula passou do limite '
+          'configurado. O controlador não reduz a potência por isso.',
+    AlertProblem.bmsHighTemp =>
+      'A temperatura do BMS passou do limite configurado. Alivie o '
+          'acelerador. O controlador não reduz a potência por isso.',
   };
 }
 

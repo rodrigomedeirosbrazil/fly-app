@@ -121,4 +121,21 @@ void main() {
       }
     }
   });
+
+  test('BMS alerts have their manual labels and say power is not cut', () {
+    expect(alertLabel(a(AlertComponent.bms, AlertProblem.bmsLowCell)),
+        (line1: 'BMS', line2: 'CÉLULA BAIXA'));
+    expect(alertLabel(a(AlertComponent.bms, AlertProblem.bmsHighDelta)),
+        (line1: 'BMS', line2: 'DIFERENÇA ENTRE CÉLULAS'));
+    expect(alertLabel(a(AlertComponent.bms, AlertProblem.bmsHighTemp)),
+        (line1: 'BMS', line2: 'TEMPERATURA ALTA'));
+    for (final p in [
+      AlertProblem.bmsLowCell,
+      AlertProblem.bmsHighDelta,
+      AlertProblem.bmsHighTemp,
+    ]) {
+      expect(alertSentence(a(AlertComponent.bms, p)),
+          contains('não reduz a potência'));
+    }
+  });
 }
