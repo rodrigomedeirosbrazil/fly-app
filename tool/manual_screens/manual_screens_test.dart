@@ -182,6 +182,10 @@ TelemetryFrame cruise({
   Set<LimitCause>? causes,
   SignalState motorState = SignalState.valid,
   double throttle = 58,
+  Set<BmsAlert>? bmsAlerts,
+  int cellMinMv = 3680,
+  int cellDeltaMv = 32,
+  int? bmsCellCount,
 }) =>
     TelemetryFrame(
       socCoulomb: 72,
@@ -199,7 +203,7 @@ TelemetryFrame cruise({
       armState: arm,
       disarmReason: reason,
       bmsMaxTempC: 33,
-      cellMinMv: 3680,
+      cellMinMv: cellMinMv,
       cellMaxMv: 3712,
       receivedAt: DateTime.utc(2026, 10, 12),
       limitCauses: causes,
@@ -207,7 +211,9 @@ TelemetryFrame cruise({
       remainingMin: 18,
       hourMeterSec: const Duration(hours: 41, minutes: 12, seconds: 8),
       uptimeSec: const Duration(minutes: 31, seconds: 5),
-      cellDeltaMv: 32,
+      cellDeltaMv: cellDeltaMv,
+      bmsCellCount: bmsCellCount,
+      bmsAlerts: bmsAlerts,
       motorTempState: motorState,
       escTempState: SignalState.valid,
       batteryVoltageState: SignalState.valid,
@@ -292,6 +298,17 @@ void main() {
         cruise(motor: 91, powerPct: 64, causes: {LimitCause.motorTemp})));
     await tester.pumpAndSettle();
     await shot(tester, '04_potencia_reduzida');
+  });
+
+  testWidgets('21 bms alert', (tester) async {
+    phone(tester);
+    await tester.pumpWidget(flight(cruise(
+        bmsAlerts: {BmsAlert.lowCell},
+        cellMinMv: 3050,
+        cellDeltaMv: 180,
+        bmsCellCount: 14)));
+    await tester.pumpAndSettle();
+    await shot(tester, '21_bms_alerta');
   });
 
   testWidgets('05 fault', (tester) async {
@@ -405,7 +422,7 @@ void main() {
   });
 
   testWidgets('15 bms connected', (tester) async {
-    phone(tester, height: 2000);
+    phone(tester, height: 2400);
     await tester.pumpWidget(app(BmsSettingsScreen(
       editor: b.RecordingEditor(),
       scanController: BmsScanController(b.RecordingEditor()),
