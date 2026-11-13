@@ -7,6 +7,8 @@ void main() {
     for (final (type, bms, expected) in const [
       (ControllerType.tmotor, false, BottomRowLayout.full),
       (ControllerType.tmotor, true, BottomRowLayout.full),
+      (ControllerType.hobbywing, false, BottomRowLayout.full),
+      (ControllerType.hobbywing, true, BottomRowLayout.full),
       (ControllerType.xag, true, BottomRowLayout.noRpm),
       (ControllerType.xag, false, BottomRowLayout.voltageOnly),
       // The sentence path cannot say which board it is. Every card stays and
@@ -22,6 +24,7 @@ void main() {
 
   test('the ESC temperature source follows the board', () {
     expect(escTempSourceFor(ControllerType.tmotor), 'CAN');
+    expect(escTempSourceFor(ControllerType.hobbywing), 'CAN');
     expect(escTempSourceFor(ControllerType.xag), 'NTC');
     expect(escTempSourceFor(ControllerType.unknown), isNull);
   });

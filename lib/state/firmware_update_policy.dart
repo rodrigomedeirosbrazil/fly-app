@@ -77,6 +77,7 @@ final class FirmwareUnknown extends FirmwareAvailability {
 String? firmwareAssetName(ControllerType type, String tag) => switch (type) {
       ControllerType.xag => 'firmware-xag-$tag.bin',
       ControllerType.tmotor => 'firmware-tmotor-$tag.bin',
+      ControllerType.hobbywing => 'firmware-hobbywing-$tag.bin',
       ControllerType.unknown => null,
     };
 
@@ -124,6 +125,7 @@ Uri firmwareDownloadUrl(String tag, String assetName) {
   final built = {
     firmwareAssetName(ControllerType.xag, tag),
     firmwareAssetName(ControllerType.tmotor, tag),
+    firmwareAssetName(ControllerType.hobbywing, tag),
   };
   if (!built.contains(assetName)) {
     throw ArgumentError.value(

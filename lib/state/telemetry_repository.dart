@@ -141,6 +141,7 @@ class TelemetryRepository extends ChangeNotifier {
     final type = switch (i.controllerType) {
       ControllerType.xag => 'XAG',
       ControllerType.tmotor => 'Tmotor',
+      ControllerType.hobbywing => 'Hobbywing',
       ControllerType.unknown => '?',
     };
     // An empty `appVersion` would render as " · Tmotor" — a line that opens

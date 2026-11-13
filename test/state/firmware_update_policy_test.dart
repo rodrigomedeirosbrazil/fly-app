@@ -7,7 +7,11 @@ GitHubRelease release(String tag, {List<String>? names}) => GitHubRelease(
       tag: tag,
       assets: [
         for (final n in names ??
-            ['firmware-tmotor-$tag.bin', 'firmware-xag-$tag.bin'])
+            [
+              'firmware-tmotor-$tag.bin',
+              'firmware-xag-$tag.bin',
+              'firmware-hobbywing-$tag.bin',
+            ])
           ReleaseAsset(name: n, size: n.contains('xag') ? 1594624 : 1605776),
       ],
     );
@@ -44,6 +48,26 @@ void main() {
           size: 1605776,
           installedUnreadable: false,
         ),
+      );
+    });
+
+    test('a Hobbywing controller gets the Hobbywing image', () {
+      expect(
+        eval(type: ControllerType.hobbywing),
+        const FirmwareAvailable(
+          tag: '2026-10-02.2',
+          assetName: 'firmware-hobbywing-2026-10-02.2.bin',
+          size: 1605776,
+          installedUnreadable: false,
+        ),
+      );
+      expect(firmwareAssetName(ControllerType.hobbywing, '2026-11-13.1'),
+          'firmware-hobbywing-2026-11-13.1.bin');
+      expect(
+        firmwareDownloadUrl(
+                '2026-11-13.1', 'firmware-hobbywing-2026-11-13.1.bin')
+            .path,
+        endsWith('/firmware-hobbywing-2026-11-13.1.bin'),
       );
     });
 

@@ -3,8 +3,10 @@ import '../protocol/control_info.dart';
 /// Which cards the bottom row carries.
 ///
 /// From fly-controller's `TelemetryAvailability.cpp`: current exists with a
-/// current sensor (the Tmotor board) and ESC data, **or** BMS data; power
-/// exists exactly when current does; RPM exists only on the Tmotor board.
+/// current sensor and ESC data (Tmotor and Hobbywing — `BoardConfig.cpp`,
+/// `hasCurrentSensor`), **or** BMS data; power exists exactly when current
+/// does; RPM exists with a current sensor and ESC data, so on Tmotor and
+/// Hobbywing.
 /// **A hand-copied fly-controller fact**, like the wire layouts.
 enum BottomRowLayout {
   /// Voltage, power/current, RPM.
@@ -28,14 +30,17 @@ BottomRowLayout bottomRowFor({
     switch (type) {
       ControllerType.xag =>
         bmsConfigured ? BottomRowLayout.noRpm : BottomRowLayout.voltageOnly,
-      _ => BottomRowLayout.full,
+      ControllerType.tmotor ||
+      ControllerType.hobbywing ||
+      ControllerType.unknown =>
+        BottomRowLayout.full,
     };
 
 /// Where the ESC temperature comes from. The telemetry does not say; the
-/// board does — Tmotor over CAN, XAG from the NTC on `ADS1115_ESC_TEMP_CHANNEL`
+/// board does — Tmotor and Hobbywing over CAN, XAG from the NTC on `ADS1115_ESC_TEMP_CHANNEL`
 /// (fly-controller `config.h`, XAG only). Another hand-copied fact.
 String? escTempSourceFor(ControllerType type) => switch (type) {
-      ControllerType.tmotor => 'CAN',
+      ControllerType.tmotor || ControllerType.hobbywing => 'CAN',
       ControllerType.xag => 'NTC',
       ControllerType.unknown => null,
     };

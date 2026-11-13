@@ -493,6 +493,7 @@ class _FirmwareSettingsScreenState extends State<FirmwareSettingsScreen> {
   String _typeLabel(ControllerType type) => switch (type) {
     ControllerType.xag => 'XAG',
     ControllerType.tmotor => 'Tmotor',
+    ControllerType.hobbywing => 'Hobbywing',
     ControllerType.unknown => '?',
   };
 
