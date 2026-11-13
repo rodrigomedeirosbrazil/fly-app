@@ -11,6 +11,14 @@ import 'package:fly_app/ui/settings/bms_settings_screen.dart';
 const bmsConfig = BmsConfig(
   bmsType: 1,
   bmsMac: [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF],
+  alerts: BmsAlertThresholds(
+      lowCellDeltaGateMv: 100, maxDeltaMv: 200, tempLimitC: 55),
+);
+
+/// Firmware from before the BMS alerts: the 7-byte layout, no thresholds.
+const legacyBmsConfig = BmsConfig(
+  bmsType: 1,
+  bmsMac: [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF],
 );
 
 /// A controller with no BMS configured. Scanning is only offered in this
@@ -322,6 +330,92 @@ void main() {
     expect(editor.saves, hasLength(2));
     expect(editor.saves.last.bmsType, 2,
         reason: 'the re-save must carry the fields, not the original config');
+  });
+
+  Finder gateField() => find.byKey(const Key('bms-alert-gate'));
+  Finder maxDeltaField() => find.byKey(const Key('bms-alert-max-delta'));
+  Finder tempField() => find.byKey(const Key('bms-alert-temp'));
+
+  Future<void> typeInto(WidgetTester tester, Finder f, String text) async {
+    await tester.ensureVisible(f);
+    await tester.pumpAndSettle();
+    await tester.enterText(f, text);
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('older firmware: no ALERTAS card, and the save is 7 bytes',
+      (tester) async {
+    await tester.pumpWidget(wrap(screen(config: legacyBmsConfig)));
+    expect(find.text('ALERTAS'), findsNothing);
+
+    await tapSave(tester);
+
+    expect(editor.saves, hasLength(1));
+    expect(editor.saves.single.alerts, isNull);
+    expect(editor.saves.single.encode(), hasLength(7));
+  });
+
+  testWidgets("the card shows the controller's thresholds", (tester) async {
+    await tester.pumpWidget(wrap(screen()));
+    expect(find.text('ALERTAS'), findsOneWidget);
+    expect(tester.widget<TextField>(gateField()).controller!.text, '100');
+    expect(tester.widget<TextField>(maxDeltaField()).controller!.text, '200');
+    expect(tester.widget<TextField>(tempField()).controller!.text, '55');
+  });
+
+  testWidgets('edited thresholds are what gets saved', (tester) async {
+    await tester.pumpWidget(wrap(screen()));
+    await typeInto(tester, gateField(), '150');
+    await typeInto(tester, maxDeltaField(), '300');
+    await typeInto(tester, tempField(), '60');
+    await tapSave(tester);
+
+    expect(
+        editor.saves.single.alerts,
+        const BmsAlertThresholds(
+            lowCellDeltaGateMv: 150, maxDeltaMv: 300, tempLimitC: 60));
+    expect(editor.saves.single.encode(), hasLength(13));
+  });
+
+  testWidgets('a field that is not a whole number disables Salvar',
+      (tester) async {
+    for (final bad in ['abc', '', '55,5']) {
+      await tester.pumpWidget(wrap(screen()));
+      await typeInto(tester, tempField(), bad);
+      // 'abc' is stripped by the input filter to '' -- either way unreadable.
+      await tester.ensureVisible(save());
+      await tester.pumpAndSettle();
+      expect(tester.widget<FilledButton>(save()).onPressed, isNull,
+          reason: 'temperature "$bad"');
+      expect(find.text('Preencha todos os campos com números válidos'),
+          findsOneWidget);
+      expect(editor.saves, isEmpty);
+    }
+  });
+
+  testWidgets('an out-of-range threshold names its field', (tester) async {
+    await tester.pumpWidget(wrap(screen()));
+    await typeInto(tester, tempField(), '81');
+    await tester.ensureVisible(save());
+    await tester.pumpAndSettle();
+    expect(find.text('Temperatura máxima do BMS: 30 a 80 °C'), findsOneWidget);
+    expect(tester.widget<FilledButton>(save()).onPressed, isNull);
+  });
+
+  testWidgets('the PIN retry resends the typed thresholds', (tester) async {
+    editor.queued.add(const SaveNeedsPin());
+    await tester.pumpWidget(wrap(screen()));
+    await typeInto(tester, gateField(), '150');
+    await tapSave(tester);
+
+    await tester.enterText(find.byType(TextField).last, '1234');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+
+    expect(editor.saves, hasLength(2));
+    expect(editor.saves.last.alerts!.lowCellDeltaGateMv, 150);
+    expect(editor.saves.last.alerts!.maxDeltaMv, 200);
   });
 
   /// Runs one scan to completion so [scanController] holds real results.

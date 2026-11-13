@@ -459,6 +459,13 @@ A save that needs the PIN resends **exactly what was asked**, held in
 `_pending`. It used to rebuild from `widget.config`, which threw away a
 calibration and still said "Gravado".
 
+The BMS screen's ALERTAS card exists only when `CFG_GET` returned the 13-byte
+`Bms` group, and a save sends back exactly the shape it read: 7 bytes for older
+firmware, 13 with the typed thresholds otherwise. Sending 13 with defaults to a
+firmware that answered 7 would overwrite thresholds nobody chose. The three
+fields are whole numbers; anything `parseSetting` cannot read, or `55,5`,
+disables Salvar instead of becoming a zero.
+
 ### A number field that cannot be read is not a zero
 
 `TextInputType.number` is iOS's `numberPad`, which carries **no decimal
