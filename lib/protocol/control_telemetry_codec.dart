@@ -37,6 +37,10 @@ class ControlTelemetryCodec {
   /// remaining-time estimate. Shorter is older firmware: absent, not zero.
   static const int _remainingTailLength = 74;
 
+  /// The struct up to and including `bmsAlerts` (offset 78). Shorter is
+  /// older firmware: the alerts are absent, which is not "all clear".
+  static const int _bmsAlertsLength = 79;
+
   // Availability: does this build and configuration produce the reading at
   // all? Sensor *health* is a different question, answered by signalStates.
   static const int _vCurrent = 1 << 0;
@@ -55,6 +59,11 @@ class ControlTelemetryCodec {
   static const int _limitBattery = 1 << 0;
   static const int _limitMotorTemp = 1 << 1;
   static const int _limitEscTemp = 1 << 2;
+
+  // BmsAlertBit, pinned by fly-controller's test_bms_alert_bits_are_pinned.
+  static const int _aLowCell = 1 << 0;
+  static const int _aHighDelta = 1 << 1;
+  static const int _aHighTemp = 1 << 2;
 
   /// Returns null when the packet cannot be trusted. The caller counts
   /// rejections; nothing partial is ever handed to the UI.
@@ -88,6 +97,8 @@ class ControlTelemetryCodec {
     // availability answer; there is no validity bit.
     final remainingQuality =
         bytes.length >= _remainingTailLength ? d.getUint8(71) : 0;
+
+    final alerts = bytes.length >= _bmsAlertsLength ? d.getUint8(78) : null;
 
     return TelemetryFrame(
       socCoulomb: d.getUint8(7),
@@ -146,6 +157,15 @@ class ControlTelemetryCodec {
           ? d.getUint16(69, Endian.little)
           : null,
       remainingByVoltage: remainingQuality == 1,
+      // No validity bit exists for this field; a bit this build does not
+      // know is ignored.
+      bmsAlerts: alerts == null
+          ? null
+          : {
+              if (alerts & _aLowCell != 0) BmsAlert.lowCell,
+              if (alerts & _aHighDelta != 0) BmsAlert.highDelta,
+              if (alerts & _aHighTemp != 0) BmsAlert.highTemp,
+            },
     );
   }
 

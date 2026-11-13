@@ -240,6 +240,19 @@ Telemetry bytes 58–68 carry the pack voltage, current, SoC and cell count
 link state is always known. All five are read only when the packet is at
 least 69 bytes, so older firmware decodes exactly as before.
 
+### The BMS alerts are the firmware's verdict
+
+Telemetry byte 78 is `bmsAlerts`: `0x01` low cell, `0x02` high delta, `0x04`
+high temperature. It is read only when the packet is at least 79 bytes, so
+older firmware gives `null` (absent, not "all clear"); there is no validity
+bit, and a bit this build does not know is ignored. The alerts are warn-only —
+they never limit power or disarm — and the bit values are part of the second
+hand-duplicated header, `control_telemetry_codec.dart`.
+
+**Do not recompute them from `cellMinMv`/`cellDeltaMv`.** The firmware applies
+hysteresis, a 3 s debounce and a cutoff from the BMS-reported cell count that
+the app does not see, so a local copy would disagree with the aircraft.
+
 ### The request channel answers nothing when it fails
 
 `CMD` and `RSP` carry requests and replies, matched by a one-byte sequence.
