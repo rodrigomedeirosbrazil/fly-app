@@ -8,6 +8,7 @@ import '../../protocol/telemetry_frame.dart';
 import '../../state/bms_scan_controller.dart';
 import '../../state/config_editor.dart';
 import '../widgets/status_chip.dart';
+import 'number_input.dart';
 import 'settings_card.dart';
 
 class BmsSettingsScreen extends StatefulWidget {
@@ -55,6 +56,9 @@ class BmsSettingsScreen extends StatefulWidget {
 class _BmsSettingsScreenState extends State<BmsSettingsScreen> {
   late TextEditingController _typeController;
   late TextEditingController _macController;
+  late TextEditingController _gateController;
+  late TextEditingController _maxDeltaController;
+  late TextEditingController _tempController;
   bool _showManualMac = false;
 
   @override
@@ -70,6 +74,21 @@ class _BmsSettingsScreenState extends State<BmsSettingsScreen> {
         text: c != null ? c.bmsType.toString() : '');
     _macController = TextEditingController(
         text: c != null ? (formatMac(c.bmsMac) ?? '') : '');
+    final a = c?.alerts;
+    _gateController =
+        TextEditingController(text: a?.lowCellDeltaGateMv.toString() ?? '');
+    _maxDeltaController =
+        TextEditingController(text: a?.maxDeltaMv.toString() ?? '');
+    _tempController =
+        TextEditingController(text: a?.tempLimitC.toString() ?? '');
+  }
+
+  void _disposeFieldControllers() {
+    _typeController.dispose();
+    _macController.dispose();
+    _gateController.dispose();
+    _maxDeltaController.dispose();
+    _tempController.dispose();
   }
 
   void _onScanChanged() => setState(() {});
@@ -78,8 +97,7 @@ class _BmsSettingsScreenState extends State<BmsSettingsScreen> {
   void didUpdateWidget(BmsSettingsScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.config != widget.config) {
-      _typeController.dispose();
-      _macController.dispose();
+      _disposeFieldControllers();
       _initializeControllers();
     }
   }
@@ -87,8 +105,7 @@ class _BmsSettingsScreenState extends State<BmsSettingsScreen> {
   @override
   void dispose() {
     widget.scanController.removeListener(_onScanChanged);
-    _typeController.dispose();
-    _macController.dispose();
+    _disposeFieldControllers();
     _pinController.dispose();
     super.dispose();
   }
@@ -100,18 +117,53 @@ class _BmsSettingsScreenState extends State<BmsSettingsScreen> {
     final bmsMacStr = _macController.text.trim();
     final bmsMac = parseMac(bmsMacStr) ?? kUnsetMac;
 
-    return validateBms(bmsType: bmsType, bmsMac: bmsMac);
+    final base = validateBms(bmsType: bmsType, bmsMac: bmsMac);
+    if (base != SettingsError.none || !_showsAlerts) return base;
+
+    final a = _parseAlerts();
+    if (a == null) return SettingsError.invalidNumber;
+    return validateBmsAlerts(
+      lowCellDeltaGateMv: a.lowCellDeltaGateMv,
+      maxDeltaMv: a.maxDeltaMv,
+      tempLimitC: a.tempLimitC,
+    );
   }
 
+  /// The ALERTAS card exists only when the controller sent the 13-byte
+  /// layout. Older firmware gets no card and a 7-byte save.
+  bool get _showsAlerts => widget.config?.alerts != null;
+
+  /// A whole number, or null. `abc`, empty and `55,5` are all null: a field
+  /// that cannot be read is not a zero, and a zero here would be written.
+  int? _wholeNumber(TextEditingController c) {
+    final v = parseSetting(c.text);
+    if (v == null || v != v.truncateToDouble()) return null;
+    return v.toInt();
+  }
+
+  BmsAlertThresholds? _parseAlerts() {
+    final gate = _wholeNumber(_gateController);
+    final maxDelta = _wholeNumber(_maxDeltaController);
+    final temp = _wholeNumber(_tempController);
+    if (gate == null || maxDelta == null || temp == null) return null;
+    return BmsAlertThresholds(
+      lowCellDeltaGateMv: gate,
+      maxDeltaMv: maxDelta,
+      tempLimitC: temp,
+    );
+  }
+
+  /// What the fields say right now. Shared by the first save and the PIN
+  /// retry, so the retry resends exactly what was asked.
+  BmsConfig _configFromFields() => BmsConfig(
+        bmsType: int.tryParse(_typeController.text.trim()) ?? 0,
+        bmsMac: parseMac(_macController.text.trim()) ?? kUnsetMac,
+        alerts: _showsAlerts ? _parseAlerts() : null,
+      );
+
   Future<void> _saveBms() async {
-    final bmsType = int.tryParse(_typeController.text.trim()) ?? 0;
-    final bmsMacStr = _macController.text.trim();
-    final bmsMac = parseMac(bmsMacStr) ?? kUnsetMac;
-
-    final config = BmsConfig(bmsType: bmsType, bmsMac: bmsMac);
-
     await _handleSaveOutcome(
-      await widget.editor.saveBms(config),
+      await widget.editor.saveBms(_configFromFields()),
     );
   }
 
@@ -124,6 +176,12 @@ class _BmsSettingsScreenState extends State<BmsSettingsScreen> {
         if (bms != null) {
           _typeController.text = bms.bmsType.toString();
           _macController.text = formatMac(bms.bmsMac) ?? '';
+          final a = bms.alerts;
+          if (a != null) {
+            _gateController.text = a.lowCellDeltaGateMv.toString();
+            _maxDeltaController.text = a.maxDeltaMv.toString();
+            _tempController.text = a.tempLimitC.toString();
+          }
         }
       case SaveNeedsPin(:final sessionLost):
         if (sessionLost) {
@@ -197,10 +255,7 @@ class _BmsSettingsScreenState extends State<BmsSettingsScreen> {
   /// changed something between the first save and entering the PIN.
   Future<void> _saveWithPin(String pin) async {
     final outcome = await widget.editor.saveBms(
-      BmsConfig(
-        bmsType: int.tryParse(_typeController.text.trim()) ?? 0,
-        bmsMac: parseMac(_macController.text.trim()) ?? kUnsetMac,
-      ),
+      _configFromFields(),
       pin: pin,
     );
     await _handleSaveOutcome(outcome);
@@ -435,6 +490,39 @@ class _BmsSettingsScreenState extends State<BmsSettingsScreen> {
                           ),
                       ],
                     ),
+                    if (_showsAlerts)
+                      SettingsCard(
+                        title: 'ALERTAS',
+                        children: [
+                          _alertField(
+                            const Key('bms-alert-gate'),
+                            _gateController,
+                            'Diferença mínima para célula baixa (mV)',
+                          ),
+                          const SizedBox(height: 12),
+                          _alertField(
+                            const Key('bms-alert-max-delta'),
+                            _maxDeltaController,
+                            'Diferença máxima entre células (mV)',
+                          ),
+                          const SizedBox(height: 12),
+                          _alertField(
+                            const Key('bms-alert-temp'),
+                            _tempController,
+                            'Temperatura máxima do BMS (°C)',
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Os alertas do BMS só avisam: não reduzem a potência.',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
                     SettingsCard(
                       title: 'ESTADO',
                       children: [
@@ -506,6 +594,20 @@ class _BmsSettingsScreenState extends State<BmsSettingsScreen> {
     );
 
   }
+
+  Widget _alertField(Key key, TextEditingController c, String label) =>
+      TextField(
+        key: key,
+        controller: c,
+        decoration: InputDecoration(
+          labelText: label,
+          border: const OutlineInputBorder(),
+        ),
+        keyboardType: kSettingsKeyboard,
+        inputFormatters: kSettingsFormatters,
+        enabled: !widget.armed,
+        onChanged: (_) => setState(() {}),
+      );
 
   String _bmsLinkStatus() {
     switch (widget.bmsLinkState) {
