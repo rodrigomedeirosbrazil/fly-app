@@ -5,8 +5,9 @@ import '../protocol/telemetry_frame.dart';
 import 'gauge_levels.dart';
 
 /// What has the problem. Declaration order is the tie order inside a rank, so
-/// the card never alternates between two equal alerts.
-enum AlertComponent { motor, esc, battery, throttle, power, controller }
+/// the card never alternates between two equal alerts. The same holds for
+/// [AlertProblem] when two alerts share a rank and a component.
+enum AlertComponent { motor, esc, battery, throttle, power, controller, bms }
 
 enum AlertProblem {
   disarmed,
@@ -21,6 +22,9 @@ enum AlertProblem {
   noData,
   noBms,
   nearLimit,
+  bmsLowCell,
+  bmsHighTemp,
+  bmsHighDelta,
 }
 
 /// Most severe first. Matches the gauge colours: [danger] is red, [caution]
@@ -195,6 +199,25 @@ List<FlightAlert> flightAlerts(
     ));
   }
 
+  // 6. The firmware's BMS alerts — warn-only, shown armed or disarmed. The
+  // card reflects the bitmask; it is never recomputed from cell readings.
+  // Iterating the enum, not the set, keeps the order the same every frame.
+  final bmsAlerts = f.bmsAlerts ?? const <BmsAlert>{};
+  for (final (alert, problem) in const [
+    (BmsAlert.lowCell, AlertProblem.bmsLowCell),
+    (BmsAlert.highTemp, AlertProblem.bmsHighTemp),
+    (BmsAlert.highDelta, AlertProblem.bmsHighDelta),
+  ]) {
+    if (bmsAlerts.contains(alert)) {
+      out.add(FlightAlert(
+        component: AlertComponent.bms,
+        problem: problem,
+        severity: AlertSeverity.caution,
+        rank: 6,
+      ));
+    }
+  }
+
   // 7. Before arming, a reading that is not valid. Armed, a loss is the
   // firmware's to judge, and it disarms with its own reason.
   if (!f.isArmed) {
@@ -240,8 +263,13 @@ List<FlightAlert> flightAlerts(
     }
   }
 
-  out.sort((a, b) => a.rank != b.rank
-      ? a.rank.compareTo(b.rank)
-      : a.component.index.compareTo(b.component.index));
+  // List.sort is not stable, so every tie needs a total order.
+  out.sort((a, b) {
+    if (a.rank != b.rank) return a.rank.compareTo(b.rank);
+    if (a.component != b.component) {
+      return a.component.index.compareTo(b.component.index);
+    }
+    return a.problem.index.compareTo(b.problem.index);
+  });
   return out;
 }

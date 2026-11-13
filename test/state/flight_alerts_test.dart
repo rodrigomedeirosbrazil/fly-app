@@ -22,6 +22,7 @@ TelemetryFrame f({
   bool? bmsConfigured = false,
   bool? bmsConnected,
   BmsLinkState? bmsLink,
+  Set<BmsAlert>? bmsAlerts,
 }) =>
     TelemetryFrame(
       socCoulomb: soc,
@@ -52,6 +53,7 @@ TelemetryFrame f({
       bmsConfigured: bmsConfigured,
       bmsConnected: bmsConnected,
       bmsLinkState: bmsLink,
+      bmsAlerts: bmsAlerts,
     );
 
 /// The `$XCTOD` shape: every binary-only field null.
@@ -298,6 +300,50 @@ void main() {
     test('battery levels still work', () {
       expect(top(flightAlerts(sentence(soc: 9))),
           (AlertComponent.battery, AlertProblem.low));
+    });
+  });
+
+  group('BMS alerts', () {
+    test('each BMS alert is a caution at rank 6', () {
+      for (final (alert, problem) in [
+        (BmsAlert.lowCell, AlertProblem.bmsLowCell),
+        (BmsAlert.highDelta, AlertProblem.bmsHighDelta),
+        (BmsAlert.highTemp, AlertProblem.bmsHighTemp),
+      ]) {
+        final a = flightAlerts(f(bmsAlerts: {alert})).single;
+        expect((a.component, a.problem, a.severity, a.rank),
+            (AlertComponent.bms, problem, AlertSeverity.caution, 6));
+      }
+    });
+
+    test('three BMS alerts always come out in the same order', () {
+      final frame = f(
+          bmsAlerts: {BmsAlert.highDelta, BmsAlert.highTemp, BmsAlert.lowCell});
+      expect(flightAlerts(frame).map((a) => a.problem), [
+        AlertProblem.bmsLowCell,
+        AlertProblem.bmsHighTemp,
+        AlertProblem.bmsHighDelta,
+      ]);
+    });
+
+    test('battery low still precedes a BMS alert at the same rank', () {
+      final alerts = flightAlerts(f(soc: 9, bmsAlerts: {BmsAlert.lowCell}));
+      expect(alerts.map((a) => a.problem),
+          [AlertProblem.low, AlertProblem.bmsLowCell]);
+    });
+
+    test('an \$XCTOD frame (bmsAlerts null) raises no BMS alert', () {
+      expect(flightAlerts(f(bmsAlerts: null)), isEmpty);
+    });
+
+    test('an empty set raises no BMS alert', () {
+      expect(flightAlerts(f(bmsAlerts: <BmsAlert>{})), isEmpty);
+    });
+
+    test('BMS alerts show while disarmed too', () {
+      final alerts = flightAlerts(
+          f(arm: ArmState.disarmed, bmsAlerts: {BmsAlert.highTemp}));
+      expect(alerts.map((a) => a.problem), [AlertProblem.bmsHighTemp]);
     });
   });
 }
