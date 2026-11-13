@@ -450,4 +450,43 @@ void main() {
       expect(decode(withBmsTail()).remainingMin, isNull);
     });
   });
+
+  group('BMS alerts tail', () {
+    Uint8List withAlerts(int mask, {int validity = 0x0008}) {
+      final tail = ByteData(10)
+        ..setUint16(0, 0, Endian.little) // remainingMin @69
+        ..setUint8(2, 0) // remainingQuality @71
+        ..setUint16(3, 0, Endian.little) // avgCurrentDa @72
+        ..setUint32(5, 0, Endian.little) // bmsDesignCapacityMah @74
+        ..setUint8(9, mask); // bmsAlerts @78
+      return Uint8List.fromList(
+          [...withBmsTail(validity: validity), ...tail.buffer.asUint8List()]);
+    }
+
+    test('each bit maps to its alert', () {
+      expect(decode(withAlerts(0x01)).bmsAlerts, {BmsAlert.lowCell});
+      expect(decode(withAlerts(0x02)).bmsAlerts, {BmsAlert.highDelta});
+      expect(decode(withAlerts(0x04)).bmsAlerts, {BmsAlert.highTemp});
+      expect(decode(withAlerts(0x07)).bmsAlerts,
+          {BmsAlert.lowCell, BmsAlert.highDelta, BmsAlert.highTemp});
+    });
+
+    test('zero is an empty set, not null', () {
+      expect(decode(withAlerts(0)).bmsAlerts, isEmpty);
+    });
+
+    test('a bit this build does not know is ignored', () {
+      expect(decode(withAlerts(0x08 | 0x02)).bmsAlerts, {BmsAlert.highDelta});
+    });
+
+    test('a 78-byte packet from older firmware has no alerts at all', () {
+      final bytes = withAlerts(0x07).sublist(0, 78);
+      expect(decode(bytes).bmsAlerts, isNull);
+    });
+
+    test('the alerts do not follow the BMS validity bit', () {
+      expect(decode(withAlerts(0x01, validity: 0)).bmsAlerts,
+          {BmsAlert.lowCell});
+    });
+  });
 }

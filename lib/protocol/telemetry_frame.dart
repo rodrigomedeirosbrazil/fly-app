@@ -35,6 +35,10 @@ enum DisarmReason {
 /// Which limiter is currently cutting available power.
 enum LimitCause { battery, motorTemp, escTemp }
 
+/// One of the firmware's three BMS alerts (`BmsAlertBit`). Warn-only: none of
+/// them limits power or disarms.
+enum BmsAlert { lowCell, highDelta, highTemp }
+
 /// The controller's BLE link to the BMS, from `BluetoothBms`'s connection
 /// state. [unknown] is this repo's own member, so a value from newer
 /// firmware degrades instead of throwing.
@@ -106,6 +110,7 @@ class TelemetryFrame {
     this.bmsLinkState,
     this.remainingMin,
     this.remainingByVoltage = false,
+    this.bmsAlerts,
   });
 
   /// State of charge from coulomb counting, percent. Both sources always
@@ -191,6 +196,11 @@ class TelemetryFrame {
   /// True when [remainingMin] comes from voltage alone (no current reading),
   /// so it is approximate and does not follow the throttle.
   final bool remainingByVoltage;
+
+  /// The firmware's own verdict on the BMS alerts. Null when this source
+  /// cannot say (a packet shorter than 79 bytes, or `$XCTOD`); an empty set
+  /// means nothing is active. Never recomputed from the cell readings.
+  final Set<BmsAlert>? bmsAlerts;
 
   bool get isArmed => armState == ArmState.armed;
 
