@@ -45,6 +45,7 @@ TelemetryFrame frame({
   bool? bmsConnected,
   bool? bmsConfigured,
   BmsLinkState? bmsLinkState,
+  Set<BmsAlert>? bmsAlerts,
 }) =>
     TelemetryFrame(
       socCoulomb: 87,
@@ -80,6 +81,7 @@ TelemetryFrame frame({
       bmsConnected: bmsConnected,
       bmsConfigured: bmsConfigured,
       bmsLinkState: bmsLinkState,
+      bmsAlerts: bmsAlerts,
     );
 
 /// A wire-shaped Thermal group: motor 80–100 °C, ESC 70–95 °C.
@@ -573,6 +575,25 @@ void main() {
       Size(1280, 800),
       Size(640, 360),
     ]) {
+      // The longest second line the alert card carries. It has to shrink to
+      // one line at every size rather than wrap or overflow.
+      testWidgets(
+          '${size.width.toInt()}x${size.height.toInt()} with the longest alert',
+          (tester) async {
+        tester.view.physicalSize = size;
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+
+        await tester.pumpWidget(wrap(FlightScreen(
+          frame: frame(bmsAlerts: {BmsAlert.highDelta}),
+          stale: false,
+        )));
+        await tester.pumpAndSettle();
+
+        expect(tester.takeException(), isNull);
+        expect(find.text('DIFERENÇA ENTRE CÉLULAS'), findsOneWidget);
+      });
+
       testWidgets('${size.width.toInt()}x${size.height.toInt()}',
           (tester) async {
         tester.view.physicalSize = size;

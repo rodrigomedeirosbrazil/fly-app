@@ -809,9 +809,9 @@ not remove it — a mislabelled release would still pass. The warning says
 **The asset names are the eighth hand-copied fly-controller contract**, from
 its `build-and-release.yml`: `firmware-xag-<tag>.bin`,
 `firmware-tmotor-<tag>.bin`, `firmware-hobbywing-<tag>.bin`.
-`firmware_update_policy.dart` builds the expected
-name and accepts it only on an exact match in the release, so a rename there
-stops the offer rather than fetching the wrong file.
+`firmware_update_policy.dart` builds the expected name and accepts it only on
+an exact match in the release, so a rename there stops the offer rather than
+fetching the wrong file.
 
 **The app downloads only from URLs it built**, from a validated tag and a
 built name. The API's `browser_download_url` is never read — the same rule as
@@ -888,9 +888,8 @@ current needs a current sensor and ESC data (the Tmotor and Hobbywing boards),
 **or** a BMS; power exists exactly when current does; RPM exists with the sensor
 and ESC data, so on Tmotor and Hobbywing (`BoardConfig.cpp`, `hasCurrentSensor`).
 It also copies where the ESC temperature comes from — CAN on Tmotor and
-Hobbywing, the NTC on
-`ADS1115_ESC_TEMP_CHANNEL` on XAG — because the telemetry does not say. A
-firmware change to either is a change here.
+Hobbywing, the NTC on `ADS1115_ESC_TEMP_CHANNEL` on XAG — because the
+telemetry does not say. A firmware change to either is a change here.
 
 ## The app checks GitHub for a newer build
 
