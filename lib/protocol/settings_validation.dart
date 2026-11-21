@@ -116,7 +116,7 @@ SettingsError validateMotorTempSource(int source) =>
         ? SettingsError.motorTempSourceInvalid
         : SettingsError.none;
 
-/// 0 none, 1 JBD, 2 Daly, 3 JK — and **a non-zero type requires an address**.
+/// 0 none, 1 JBD, 2 Daly, 3 JK, 4 ANT — and **a non-zero type requires an address**.
 ///
 /// Both rules are the firmware's, from `BleControl`'s own handler. The second
 /// is what makes a half-configured BMS impossible: a type with no MAC would
@@ -129,7 +129,7 @@ SettingsError validateBms({
   required int bmsType,
   required List<int> bmsMac,
 }) {
-  if (bmsType < 0 || bmsType > 3) return SettingsError.bmsTypeInvalid;
+  if (bmsType < 0 || bmsType > 4) return SettingsError.bmsTypeInvalid;
   if (bmsType != 0 && isUnsetMac(bmsMac)) return SettingsError.bmsMacMissing;
   return SettingsError.none;
 }

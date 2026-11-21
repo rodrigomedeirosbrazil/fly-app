@@ -230,8 +230,13 @@ void main() {
       expect(validateBms(bmsType: 0, bmsMac: kUnsetMac), SettingsError.none);
     });
 
-    test('a type outside 0..3 is refused', () {
+    test('type 4 (ANT / JNFN) is accepted', () {
       expect(validateBms(bmsType: 4, bmsMac: [1, 2, 3, 4, 5, 6]),
+          SettingsError.none);
+    });
+
+    test('a type outside 0..4 is refused', () {
+      expect(validateBms(bmsType: 5, bmsMac: [1, 2, 3, 4, 5, 6]),
           SettingsError.bmsTypeInvalid);
       expect(validateBms(bmsType: -1, bmsMac: [1, 2, 3, 4, 5, 6]),
           SettingsError.bmsTypeInvalid);

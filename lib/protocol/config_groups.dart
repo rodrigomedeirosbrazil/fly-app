@@ -208,7 +208,7 @@ class BmsAlertThresholds {
 class BmsConfig {
   const BmsConfig({required this.bmsType, required this.bmsMac, this.alerts});
 
-  /// 0 none, 1 JBD, 2 Daly, 3 JK. Mirrors the firmware's own numbering; there
+  /// 0 none, 1 JBD, 2 Daly, 3 JK, 4 ANT. Mirrors the firmware's own numbering; there
   /// is no Dart enum here because the value is written straight back and a
   /// type this app does not know must survive the round trip.
   final int bmsType;
