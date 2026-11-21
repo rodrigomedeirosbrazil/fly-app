@@ -9,6 +9,7 @@ import '../protocol/control_info.dart';
 import '../state/ble_permission_policy.dart';
 import '../state/telemetry_source_policy.dart';
 import 'android_host.dart';
+import 'dfu_write_limit.dart';
 
 /// What the UI needs to know about the radio, without knowing about the radio.
 ///
@@ -158,7 +159,9 @@ class FlyControllerLink {
     if (kIsWeb) return webMaxWriteBytes;
     final device = _device;
     if (device == null) return 20; // the 23-byte ATT default, minus overhead
-    return device.mtuNow - 3;
+    // On Android mtuNow is the raw ATT MTU and does not include the plugin's
+    // 512-byte cap, so a 517 MTU gave 514 and every write was refused.
+    return nativeDfuWriteLimit(device.mtuNow);
   }
 
   /// The largest attribute value Web Bluetooth will write, minus ATT overhead.
