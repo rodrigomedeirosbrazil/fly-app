@@ -169,6 +169,12 @@ abstract class DfuTransport {
   /// bare failure.
   Future<bool> authenticate(String pin);
 
+  /// Authenticates with the PIN the app remembers, if the connection is not
+  /// authenticated yet. True when the connection is authenticated afterwards.
+  /// False sends the session down the usual path: `ErrAuth`, then
+  /// [DfuNeedsPin].
+  Future<bool> authenticateRemembered();
+
   /// A `CMD` request, answered on `RSP`. Same shape ConfigEditor uses.
   Future<ControlResult> request({required int op, List<int> payload});
 
@@ -330,6 +336,10 @@ class DfuSession extends ChangeNotifier {
         notifyListeners();
         return;
       }
+    } else {
+      // A refusal here is not reported: DFU_BEGIN answers ErrAuth and the
+      // screen asks for the PIN, the same as with nothing remembered.
+      await _transport.authenticateRemembered();
     }
 
     // Clear anything a previous attempt left open, and ignore the answer.

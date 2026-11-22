@@ -4,9 +4,11 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../ble/app_host.dart';
 import '../net/release_feed.dart';
+import '../state/pin_store.dart';
 import '../state/telemetry_repository.dart';
 import '../state/update_checker.dart';
 import 'connection_screen.dart';
+import 'flight/panel_prefs.dart';
 import 'flight_screen.dart';
 import 'settings/settings_navigation.dart';
 
@@ -18,7 +20,8 @@ class FlyApp extends StatefulWidget {
 }
 
 class _FlyAppState extends State<FlyApp> {
-  final TelemetryRepository _repo = TelemetryRepository();
+  final TelemetryRepository _repo =
+      TelemetryRepository(pinStore: const PrefsPinStore());
   final UpdateChecker _updates = UpdateChecker(
     feed: GitHubReleaseFeed(),
     store: const PrefsTagStore(),
@@ -37,6 +40,16 @@ class _FlyAppState extends State<FlyApp> {
     WakelockPlus.enable();
     // Once per launch, in the background. Nothing on screen waits for it.
     _updates.check();
+    // Only a remembered mute is applied: unmuting runs the audibility check,
+    // which has no business running at launch.
+    PanelPrefs.load().then((p) {
+      if (mounted && p.muted) _repo.setMuted(true);
+    });
+  }
+
+  Future<void> _setMuted(bool value) {
+    PanelPrefs.saveMuted(value);
+    return _repo.setMuted(value);
   }
 
   @override
@@ -163,7 +176,7 @@ class _FlyAppState extends State<FlyApp> {
             rejectedFrames: _repo.rejectedFrames,
             muted: _repo.muted,
               audioError: _repo.audioError,
-            onSetMuted: _repo.setMuted,
+            onSetMuted: _setMuted,
             linkStatus: _repo.status,
             lastFrameAt: _repo.lastFrameAt,
             lastFrameArmed: _repo.lastFrameArmed,

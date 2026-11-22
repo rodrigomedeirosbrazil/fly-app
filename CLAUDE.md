@@ -111,7 +111,7 @@ here — neither has a Bluetooth radio.
 | `flutter_blue_plus` | 2.3.12 | BLE central. **See Licensing below.** |
 | `permission_handler` | 13.0.2 | Android 12+ runtime BLUETOOTH_SCAN / CONNECT |
 | `wakelock_plus` | 1.8.0 | Screen stays on in flight |
-| `shared_preferences` | 2.5.5 | Remembers the pack/per-cell voltage mode |
+| `shared_preferences` | 2.5.5 | Remembers the panel choices, the buzzer mute and the controller PIN |
 | `flutter_svg` | 2.3.0 | Renders the tintable Aerovolt logo |
 | `audioplayers` | 6.8.1 | Mirrors the controller's buzzer. **See below.** |
 | `file_picker` | 12.3.0 | The pilot supplies the firmware `.bin` |
@@ -320,7 +320,7 @@ needle angle has to mean the same temperature on every aircraft and across a
 configuration change, or the pilot's sense of where it sits when things are
 fine stops transferring.
 
-### Writing needs a PIN, and the PIN is never stored
+### Writing needs a PIN, and the app remembers it
 
 `AUTH` (`0x01`) carries the PIN as raw characters. `BleControl::handleAuth`
 requires an **exact length match** before comparing, and **fails closed**: a
@@ -328,10 +328,21 @@ wrong PIN clears whatever authentication the connection had already earned.
 
 The app asks for it on the **first save of a connection**, never on opening the
 settings screen — reads are open, so the screen shows current values without
-prompting, and the flight panel prompts for nothing ever. Nothing is persisted:
-no plaintext PIN on the device, none in a phone backup. The firmware clears
-`authenticated_` in `onCentralDisconnected()`, so per-connection is the shape
-it already expects.
+prompting, and the flight panel prompts for nothing ever. The firmware clears
+`authenticated_` in `onCentralDisconnected()`, so authentication stays
+per connection.
+
+**The last PIN the controller accepted is remembered** (`PinStore`,
+`lib/state/pin_store.dart`, plain `SharedPreferences` key `controllerPin`).
+That is a deliberate choice: the PIN only keeps a pilot from writing to the
+wrong aircraft by mistake, it is not a secret worth a keychain. `ConfigEditor`
+tries the remembered PIN when a write arrives without one; if the controller
+refuses it, it is forgotten and the outcome is `SaveNeedsPin`, not
+`SaveWrongPin`, because the pilot typed nothing. A typed PIN always wins, and
+`PIN_CHANGE` stores the new one. The DFU session tries it through
+`DfuTransport.authenticateRemembered()` before `DFU_BEGIN`. One PIN for every
+controller: a second aircraft with a different PIN costs one refused `AUTH` and
+a prompt.
 
 **`ErrState` must never produce a PIN prompt.** `gateRequest()` reports armed
 *before* auth precisely so a client does not ask for a password to do something

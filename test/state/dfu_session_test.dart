@@ -21,6 +21,15 @@ class FakeDfuTransport implements DfuTransport {
     return authSucceeds;
   }
 
+  /// How many times the remembered PIN was tried.
+  int rememberedAttempts = 0;
+
+  @override
+  Future<bool> authenticateRemembered() async {
+    rememberedAttempts++;
+    return false;
+  }
+
   void queueOk([List<int> payload = const []]) {
     _requestQueue.add(ControlOk(payload));
   }
@@ -539,6 +548,8 @@ void main() {
       expect(session.outcome, isA<DfuNeedsPin>());
       expect(transport.writeDataLog, isEmpty,
           reason: 'not one byte goes out before the controller accepts');
+      expect(transport.rememberedAttempts, 1,
+          reason: 'the remembered PIN is tried before asking the pilot');
     });
 
     test('a PIN authenticates before DFU_BEGIN', () async {
@@ -554,6 +565,8 @@ void main() {
 
       expect(transport.authPins, ['1234']);
       expect(session.outcome, isNot(isA<DfuNeedsPin>()));
+      expect(transport.rememberedAttempts, 0,
+          reason: 'a typed PIN wins over the remembered one');
     });
 
     test('a wrong PIN says so and sends nothing', () async {

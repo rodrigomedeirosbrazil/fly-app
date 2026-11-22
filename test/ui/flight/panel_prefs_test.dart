@@ -9,6 +9,7 @@ void main() {
     expect(p.perCell, isFalse);
     expect(p.showCurrent, isFalse);
     expect(p.orientation, OrientationChoice.portrait);
+    expect(p.muted, isFalse, reason: 'sound is on until the pilot mutes it');
   });
 
   test('the existing voltage key is honoured', () async {
@@ -21,10 +22,12 @@ void main() {
     await PanelPrefs.savePerCell(true);
     await PanelPrefs.saveShowCurrent(true);
     await PanelPrefs.saveOrientation(OrientationChoice.landscape);
+    await PanelPrefs.saveMuted(true);
     final p = await PanelPrefs.load();
     expect(p.perCell, isTrue);
     expect(p.showCurrent, isTrue);
     expect(p.orientation, OrientationChoice.landscape);
+    expect(p.muted, isTrue);
   });
 
   test('an unknown stored orientation falls back to portrait', () async {

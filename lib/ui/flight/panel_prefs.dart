@@ -15,6 +15,7 @@ class PanelPrefs {
     this.perCell = false,
     this.showCurrent = false,
     this.orientation = OrientationChoice.portrait,
+    this.muted = false,
   });
 
   /// Kept from the battery card that introduced it, so a pilot's existing
@@ -22,10 +23,15 @@ class PanelPrefs {
   static const _voltKey = 'voltMode';
   static const _powerKey = 'powerMode';
   static const _orientationKey = 'orientation';
+  static const _mutedKey = 'buzzerMuted';
 
   final bool perCell;
   final bool showCurrent;
   final OrientationChoice orientation;
+
+  /// The phone's mirror of the buzzer, not the buzzer itself: the controller
+  /// keeps its own volume in NVS.
+  final bool muted;
 
   static Future<PanelPrefs> load() async {
     try {
@@ -38,6 +44,7 @@ class PanelPrefs {
                 .where((o) => o.name == name)
                 .firstOrNull ??
             OrientationChoice.portrait,
+        muted: p.getBool(_mutedKey) ?? false,
       );
     } catch (_) {
       return const PanelPrefs();
@@ -51,6 +58,9 @@ class PanelPrefs {
 
   static Future<void> saveOrientation(OrientationChoice v) =>
       _save((p) => p.setString(_orientationKey, v.name));
+
+  static Future<void> saveMuted(bool v) =>
+      _save((p) => p.setBool(_mutedKey, v));
 
   static Future<void> _save(
       Future<bool> Function(SharedPreferences) write) async {

@@ -19,6 +19,7 @@ import 'config_editor.dart';
 import 'control_session.dart';
 import 'dfu_session.dart';
 import 'link_health.dart';
+import 'pin_store.dart';
 import 'telemetry_source_policy.dart';
 
 /// Concrete implementation of [DfuTransport] wired to a link and session.
@@ -36,6 +37,9 @@ class _DfuTransportImpl implements DfuTransport {
   @override
   Future<bool> authenticate(String pin) async =>
       await _editor.authenticate(pin) == null;
+
+  @override
+  Future<bool> authenticateRemembered() => _editor.authenticateRemembered();
 
   @override
   Future<ControlResult> request({required int op, List<int> payload = const []}) =>
@@ -58,7 +62,10 @@ class TelemetryRepository extends ChangeNotifier {
     LinkHealth? health,
     DateTime Function()? clock,
     BuzzerMirror? mirror,
-  })  :
+    PinStore? pinStore,
+  })  : // Same as `_mirror` below: a named parameter cannot be private.
+        // ignore: prefer_initializing_formals
+        _pinStore = pinStore,
         // prefer_initializing_formals suggests `this._mirror`, which does not
         // compile: a named parameter cannot carry a private name. Same
         // situation as ControlSession's `_send`.
@@ -86,6 +93,9 @@ class TelemetryRepository extends ChangeNotifier {
   final LinkHealth _health;
   final DateTime Function() _now;
   BuzzerMirror? _mirror;
+
+  /// Handed to every connection's [ConfigEditor]. Null remembers nothing.
+  final PinStore? _pinStore;
 
   /// What the speaker last refused to do, or null. Shown in the drawer beside
   /// the sound control, because the pilot is the only one who can tell a
@@ -481,7 +491,11 @@ class TelemetryRepository extends ChangeNotifier {
               incoming: _link.responses,
             );
             _eventsSub ??= session.events.listen(_onEvent);
-            _editor ??= ConfigEditor(session, onGroupRead: _applyGroupRead);
+            _editor ??= ConfigEditor(
+              session,
+              onGroupRead: _applyGroupRead,
+              pinStore: _pinStore,
+            );
             _clockSync ??= ClockSync(session, now: _now);
             // DFU transport is available when the characteristic exists
             _dfuTransport ??= _link.canUpdateFirmware

@@ -6,6 +6,7 @@ import '../protocol/control_frame.dart';
 import '../protocol/log_protocol.dart';
 import '../protocol/pin_change.dart';
 import 'control_session.dart';
+import 'pin_store.dart';
 
 const int _opAuth = 0x01;
 const int _opCfgGet = 0x10;
@@ -125,13 +126,22 @@ class SaveFailed extends SaveOutcome {
 /// `BleControl::onCentralDisconnected()` clears `authenticated_`, and this
 /// object is built and discarded alongside the session.
 ///
-/// The PIN is never stored. It arrives as an argument, is sent, and is not
-/// kept — the flight panel never prompts for anything, because telemetry and
-/// `CFG_GET` are unauthenticated.
+/// A PIN the controller accepted is remembered in [PinStore] when one is
+/// given, and tried before asking the pilot on the next connection. A
+/// remembered PIN the controller refuses is forgotten and the pilot is asked,
+/// exactly as if none had been stored. The flight panel never prompts for
+/// anything, because telemetry and `CFG_GET` are unauthenticated.
 class ConfigEditor {
-  ConfigEditor(this._session, {this.onGroupRead});
+  ConfigEditor(this._session, {this.onGroupRead, PinStore? pinStore})
+      // A named parameter cannot carry a private name, so `this._pinStore`
+      // does not compile.
+      // ignore: prefer_initializing_formals
+      : _pinStore = pinStore;
 
   final ControlSession _session;
+
+  /// Null means nothing is remembered: every connection asks.
+  final PinStore? _pinStore;
 
   /// Called with what the controller reported after a successful write.
   ///
@@ -278,6 +288,8 @@ class ConfigEditor {
       payload: encodePinChange(current: current, next: next),
     );
 
+    if (result is ControlOk) await _pinStore?.write(next);
+
     return switch (result) {
       ControlOk() => const SaveOk(),
       ControlRefused(:final status) => switch (status) {
@@ -331,11 +343,8 @@ class ConfigEditor {
     bool retry = true,
     bool notFoundIsOk = false,
   }) async {
-    if (!_authenticated) {
-      if (pin == null) return const SaveNeedsPin();
-      final auth = await _authenticate(pin);
-      if (auth != null) return auth;
-    }
+    final auth = await _ensureAuthenticated(pin);
+    if (auth != null) return auth;
 
     final result = retry
         ? await _retrying(op: op, payload: payload)
@@ -362,12 +371,8 @@ class ConfigEditor {
     Uint8List encoded,
     String? pin,
   ) async {
-    if (!_authenticated) {
-      if (pin == null) return const SaveNeedsPin();
-
-      final auth = await _authenticate(pin);
-      if (auth != null) return auth;
-    }
+    final auth = await _ensureAuthenticated(pin);
+    if (auth != null) return auth;
 
     final write = await _retrying(
       op: _opCfgSet,
@@ -406,6 +411,34 @@ class ConfigEditor {
   /// authenticated to save settings.
   Future<SaveOutcome?> authenticate(String pin) => _authenticate(pin);
 
+  /// Authenticates with the remembered PIN when this connection has not
+  /// authenticated yet. Returns true when the connection is authenticated
+  /// afterwards. For the DFU session, which asks the pilot only when this
+  /// fails.
+  Future<bool> authenticateRemembered() async =>
+      await _ensureAuthenticated(null) == null;
+
+  /// Returns null when the connection is authenticated, or the outcome to
+  /// report.
+  ///
+  /// A typed [pin] wins. Without one the remembered PIN is tried, and a
+  /// refusal of it is not "PIN incorreto" — the pilot typed nothing — so it is
+  /// forgotten and reported as [SaveNeedsPin], which prompts.
+  Future<SaveOutcome?> _ensureAuthenticated(String? pin) async {
+    if (_authenticated) return null;
+    if (pin != null) return _authenticate(pin);
+
+    final remembered = await _pinStore?.read();
+    if (remembered == null) return const SaveNeedsPin();
+
+    final auth = await _authenticate(remembered);
+    if (auth is SaveWrongPin) {
+      await _pinStore?.clear();
+      return const SaveNeedsPin();
+    }
+    return auth;
+  }
+
   /// Returns null when authentication succeeded, or the outcome to report.
   Future<SaveOutcome?> _authenticate(String pin) async {
     // The firmware compares raw characters against Settings' PIN and requires
@@ -417,6 +450,7 @@ class ConfigEditor {
     switch (result) {
       case ControlOk():
         _authenticated = true;
+        await _pinStore?.write(pin);
         return null;
       case ControlRefused(:final status):
         return switch (status) {

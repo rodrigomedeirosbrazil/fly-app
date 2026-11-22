@@ -7,6 +7,7 @@ import 'package:fly_app/protocol/control_frame.dart';
 import 'package:fly_app/protocol/mac_address.dart';
 import 'package:fly_app/state/config_editor.dart';
 import 'package:fly_app/state/control_session.dart';
+import 'package:fly_app/state/pin_store.dart';
 
 import 'fake_session.dart';
 
@@ -27,6 +28,20 @@ const thermalPayload = ThermalConfig(
   escMaxC: 95,
   motorTempSource: 0,
 );
+
+class MemoryPinStore implements PinStore {
+  MemoryPinStore([this.pin]);
+  String? pin;
+
+  @override
+  Future<String?> read() async => pin;
+
+  @override
+  Future<void> write(String pin) async => this.pin = pin;
+
+  @override
+  Future<void> clear() async => pin = null;
+}
 
 void main() {
   late FakeSession session;
@@ -74,6 +89,106 @@ void main() {
 
       expect(await editor.saveThermal(thermalPayload), isA<SaveOk>());
       expect(session.sent.first.op, 0x11, reason: 'straight to CFG_SET');
+    });
+  });
+
+  group('a remembered PIN', () {
+    late MemoryPinStore store;
+
+    ConfigEditor remembering(String? pin) {
+      store = MemoryPinStore(pin);
+      return ConfigEditor(session, pinStore: store);
+    }
+
+    test('an accepted PIN is remembered', () async {
+      final editor = remembering(null);
+      session.queueOk(); // AUTH
+      session.queueOk(); // CFG_SET
+      session.queueOk(thermalBytes());
+
+      await editor.saveThermal(thermalPayload, pin: '1234');
+
+      expect(store.pin, '1234');
+    });
+
+    test('a refused PIN is not remembered', () async {
+      final editor = remembering(null);
+      session.queue(const ControlRefused(ControlStatus.errAuth));
+
+      expect(await editor.saveThermal(thermalPayload, pin: '9999'),
+          isA<SaveWrongPin>());
+      expect(store.pin, isNull);
+    });
+
+    test('a new connection saves without asking', () async {
+      final editor = remembering('1234');
+      session.queueOk(); // AUTH with the remembered PIN
+      session.queueOk(); // CFG_SET
+      session.queueOk(thermalBytes());
+
+      expect(await editor.saveThermal(thermalPayload), isA<SaveOk>());
+      expect(session.sent.first.op, 0x01, reason: 'AUTH');
+      expect(session.sent.first.payload, '1234'.codeUnits);
+    });
+
+    test('a stale remembered PIN is forgotten and the pilot is asked',
+        () async {
+      final editor = remembering('0000');
+      session.queue(const ControlRefused(ControlStatus.errAuth));
+
+      final outcome = await editor.saveThermal(thermalPayload);
+
+      expect(outcome, isA<SaveNeedsPin>(),
+          reason: 'the pilot typed nothing, so "PIN incorreto" would be a lie');
+      expect((outcome as SaveNeedsPin).sessionLost, isFalse);
+      expect(store.pin, isNull);
+      expect(session.sent, hasLength(1), reason: 'AUTH only, nothing written');
+    });
+
+    test('a typed PIN wins over the remembered one', () async {
+      final editor = remembering('0000');
+      session.queueOk();
+      session.queueOk();
+      session.queueOk(thermalBytes());
+
+      await editor.saveThermal(thermalPayload, pin: '1234');
+
+      expect(session.sent.first.payload, '1234'.codeUnits);
+      expect(store.pin, '1234');
+    });
+
+    test('armed with a remembered PIN reports armed, never asks', () async {
+      final editor = remembering('1234');
+      session.queue(const ControlRefused(ControlStatus.errState));
+
+      expect(await editor.saveThermal(thermalPayload), isA<SaveRefusedArmed>());
+      expect(store.pin, '1234', reason: 'armed says nothing about the PIN');
+    });
+
+    test('a PIN change remembers the new PIN', () async {
+      final editor = remembering(null);
+      session.queueOk(); // AUTH with the current PIN
+      session.queueOk(); // PIN_CHANGE
+
+      expect(await editor.changePin(current: '1234', next: '5678'),
+          isA<SaveOk>());
+      expect(store.pin, '5678');
+    });
+
+    test('authenticateRemembered uses the store and reports the result',
+        () async {
+      final editor = remembering('1234');
+      session.queueOk();
+
+      expect(await editor.authenticateRemembered(), isTrue);
+      expect(editor.authenticated, isTrue);
+    });
+
+    test('authenticateRemembered with nothing stored sends nothing', () async {
+      final editor = remembering(null);
+
+      expect(await editor.authenticateRemembered(), isFalse);
+      expect(session.sent, isEmpty);
     });
   });
 

@@ -384,4 +384,7 @@ class _NoOpTransport implements DfuTransport {
 
   @override
   Future<bool> authenticate(String pin) async => false;
+
+  @override
+  Future<bool> authenticateRemembered() async => false;
 }

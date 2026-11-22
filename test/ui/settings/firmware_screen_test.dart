@@ -37,6 +37,9 @@ class SilentTransport implements DfuTransport {
 
   @override
   Future<bool> authenticate(String pin) async => true;
+
+  @override
+  Future<bool> authenticateRemembered() async => false;
 }
 
 /// Answers everything instantly except DFU_BEGIN, which never answers. The
