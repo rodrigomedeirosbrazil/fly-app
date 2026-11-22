@@ -102,4 +102,8 @@ void main() {
       expect(BmsScanDetail.decode(full.sublist(0, 8)), isNull);
     });
   });
+
+  test('kBmsTypeNames names type 4 as ANT / JNFN', () {
+    expect(kBmsTypeNames[4], 'ANT / JNFN');
+  });
 }

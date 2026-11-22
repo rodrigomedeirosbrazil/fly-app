@@ -85,7 +85,7 @@ class BmsScanState {
       };
 }
 
-/// Names for the four BMS types, for a dropdown and for a scan result's tag.
+/// Names for the five BMS types, for a dropdown and for a scan result's tag.
 /// Matching the portal's labels exactly, so a pilot who knows one surface
 /// recognises the other.
 const Map<int, String> kBmsTypeNames = {
@@ -93,6 +93,7 @@ const Map<int, String> kBmsTypeNames = {
   1: 'JBD',
   2: 'Daly (D2 BLE)',
   3: 'JK BMS',
+  4: 'ANT / JNFN',
 };
 
 /// One `BMS_SCAN_RESULT` (`0x2B`) reply:
